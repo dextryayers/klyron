@@ -1,0 +1,29 @@
+[package]
+name = "klyron-engine-python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Python engine for Klyron — PyO3 + WASM + pip integration, Django/FastAPI/Flask support"
+
+[dependencies]
+deno_core = { version = "0.403" }
+deno_error.workspace = true
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+anyhow = "1"
+tracing = "0.1"
+reqwest = { version = "0.12", features = ["blocking"] }
+
+# Native Python embedding via PyO3
+pyo3 = { version = "0.25", features = ["auto-initialize"], optional = true }
+
+# Python-WASM fallback via wasmtime
+wasmtime = { workspace = true, optional = true }
+wasmtime-wasi = { workspace = true, optional = true }
+
+[features]
+default = ["wasm"]
+wasm = ["dep:wasmtime", "dep:wasmtime-wasi"]
+native = ["dep:pyo3"]

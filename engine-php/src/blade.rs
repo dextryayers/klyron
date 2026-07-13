@@ -34,10 +34,8 @@ impl BladeRenderer {
 
     // 2. Execute the Blade rendering PHP code
     let code = format!(
-      r#"<?php
-$__env = app(\Illuminate\View\Factory::class);
-echo $__env->make('{view}', get_defined_vars())->render();
-?>"#,
+      r#"$__env = app(\Illuminate\View\Factory::class);
+echo $__env->make('{view}', get_defined_vars())->render();"#,
       view = view.replace("'", "\\'")
     );
 

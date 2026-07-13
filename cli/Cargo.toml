@@ -22,3 +22,6 @@ deno_core = { version = "0.403" }
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["fs"] }

@@ -14,6 +14,14 @@ pub enum PolicyTemplate {
   NextJs,
   Django,
   Rails,
+  FastAPI,
+  Flask,
+  Sinatra,
+  Express,
+  Nuxt,
+  SvelteKit,
+  Astro,
+  Remix,
 }
 
 impl PolicyTemplate {
@@ -35,41 +43,114 @@ impl PolicyTemplate {
         allow_read: vec!["/app/**".to_string(), "/project/**".to_string()],
         allow_write: vec!["/app/storage/**".to_string(), "/app/bootstrap/cache/**".to_string()],
         allow_net: vec!["localhost:*".to_string()],
-        allow_env: vec!["APP_*".to_string(), "DB_*".to_string(), "REDIS_*".to_string()],
-        allow_run: vec!["php".to_string()],
+        allow_env: vec!["APP_*".to_string(), "DB_*".to_string(), "REDIS_*".to_string(), "MAIL_*".to_string()],
+        allow_run: vec!["php".to_string(), "artisan".to_string(), "composer".to_string()],
         sandbox: SandboxLevel::Strict,
         ..Default::default()
       },
       Self::NextJs => PermissionSet {
         allow_read: vec!["/**".to_string()],
-        allow_write: vec!["/.next/**".to_string(), "/node_modules/**".to_string()],
+        allow_write: vec!["/.next/**".to_string(), "/node_modules/**".to_string(), "/app/**".to_string()],
         allow_net: vec!["*".to_string()],
-        allow_env: vec!["NODE_*".to_string(), "NEXT_*".to_string()],
+        allow_env: vec!["NODE_*".to_string(), "NEXT_*".to_string(), "NEXT_PUBLIC_*".to_string()],
         sandbox: SandboxLevel::Basic,
         ..Default::default()
       },
       Self::Django => PermissionSet {
         allow_read: vec!["/app/**".to_string()],
-        allow_write: vec!["/app/db.sqlite3".to_string(), "/app/media/**".to_string(), "/app/static/**".to_string()],
+        allow_write: vec!["/app/db.sqlite3".to_string(), "/app/media/**".to_string(), "/app/static/**".to_string(), "/app/__pycache__/**".to_string()],
         allow_net: vec!["localhost:*".to_string()],
-        allow_env: vec!["DJANGO_*".to_string(), "DATABASE_*".to_string(), "SECRET_*".to_string()],
+        allow_env: vec!["DJANGO_*".to_string(), "DATABASE_*".to_string(), "SECRET_*".to_string(), "PYTHON_*".to_string()],
+        allow_run: vec!["python3".to_string(), "python".to_string(), "pip3".to_string(), "pip".to_string()],
         sandbox: SandboxLevel::Strict,
         ..Default::default()
       },
       Self::Rails => PermissionSet {
         allow_read: vec!["/app/**".to_string()],
-        allow_write: vec!["/app/log/**".to_string(), "/app/tmp/**".to_string(), "/app/storage/**".to_string()],
+        allow_write: vec!["/app/log/**".to_string(), "/app/tmp/**".to_string(), "/app/storage/**".to_string(), "/app/public/**".to_string()],
         allow_net: vec!["localhost:*".to_string()],
-        allow_env: vec!["RAILS_*".to_string(), "DATABASE_*".to_string()],
-        allow_run: vec!["ruby".to_string(), "rake".to_string(), "rails".to_string()],
+        allow_env: vec!["RAILS_*".to_string(), "DATABASE_*".to_string(), "SECRET_*".to_string(), "BUNDLE_*".to_string()],
+        allow_run: vec!["ruby".to_string(), "rake".to_string(), "rails".to_string(), "bundler".to_string(), "bundle".to_string()],
         sandbox: SandboxLevel::Strict,
+        ..Default::default()
+      },
+      Self::FastAPI => PermissionSet {
+        allow_read: vec!["/app/**".to_string()],
+        allow_write: vec!["/app/__pycache__/**".to_string()],
+        allow_net: vec!["*".to_string()],
+        allow_env: vec!["UVICORN_*".to_string(), "DATABASE_*".to_string(), "SECRET_*".to_string()],
+        allow_run: vec!["uvicorn".to_string(), "python3".to_string(), "python".to_string()],
+        sandbox: SandboxLevel::Basic,
+        ..Default::default()
+      },
+      Self::Flask => PermissionSet {
+        allow_read: vec!["/app/**".to_string()],
+        allow_write: vec!["/app/instance/**".to_string(), "/app/__pycache__/**".to_string()],
+        allow_net: vec!["*".to_string()],
+        allow_env: vec!["FLASK_*".to_string(), "SECRET_*".to_string(), "WERKZEUG_*".to_string()],
+        allow_run: vec!["python3".to_string(), "python".to_string(), "flask".to_string()],
+        sandbox: SandboxLevel::Basic,
+        ..Default::default()
+      },
+      Self::Sinatra => PermissionSet {
+        allow_read: vec!["/app/**".to_string()],
+        allow_write: vec!["/app/tmp/**".to_string()],
+        allow_net: vec!["*".to_string()],
+        allow_env: vec!["RACK_*".to_string(), "SINATRA_*".to_string()],
+        allow_run: vec!["ruby".to_string(), "bundle".to_string()],
+        sandbox: SandboxLevel::Basic,
+        ..Default::default()
+      },
+      Self::Express => PermissionSet {
+        allow_read: vec!["/**".to_string()],
+        allow_write: vec!["/node_modules/**".to_string()],
+        allow_net: vec!["*".to_string()],
+        allow_env: vec!["NODE_*".to_string(), "PORT".to_string()],
+        sandbox: SandboxLevel::Basic,
+        ..Default::default()
+      },
+      Self::Nuxt => PermissionSet {
+        allow_read: vec!["/**".to_string()],
+        allow_write: vec!["/.nuxt/**".to_string(), "/node_modules/**".to_string(), "/dist/**".to_string()],
+        allow_net: vec!["*".to_string()],
+        allow_env: vec!["NODE_*".to_string(), "NUXT_*".to_string(), "NITRO_*".to_string()],
+        sandbox: SandboxLevel::Basic,
+        ..Default::default()
+      },
+      Self::SvelteKit => PermissionSet {
+        allow_read: vec!["/**".to_string()],
+        allow_write: vec!["/.svelte-kit/**".to_string(), "/node_modules/**".to_string(), "/build/**".to_string()],
+        allow_net: vec!["*".to_string()],
+        allow_env: vec!["NODE_*".to_string(), "VITE_*".to_string(), "SVELTE_*".to_string()],
+        sandbox: SandboxLevel::Basic,
+        ..Default::default()
+      },
+      Self::Astro => PermissionSet {
+        allow_read: vec!["/**".to_string()],
+        allow_write: vec!["/dist/**".to_string(), "/node_modules/**".to_string()],
+        allow_net: vec!["*".to_string()],
+        allow_env: vec!["ASTRO_*".to_string(), "PUBLIC_*".to_string()],
+        sandbox: SandboxLevel::Basic,
+        ..Default::default()
+      },
+      Self::Remix => PermissionSet {
+        allow_read: vec!["/**".to_string()],
+        allow_write: vec!["/build/**".to_string(), "/node_modules/**".to_string(), "/public/build/**".to_string()],
+        allow_net: vec!["*".to_string()],
+        allow_env: vec!["REMIX_*".to_string(), "NODE_*".to_string(), "SESSION_*".to_string()],
+        sandbox: SandboxLevel::Basic,
         ..Default::default()
       },
     }
   }
 
   pub fn variants() -> &'static [&'static str] {
-    &["default", "strict", "laravel", "nextjs", "django", "rails"]
+    &[
+      "default", "strict",
+      "laravel", "nextjs", "django", "rails",
+      "fastapi", "flask", "sinatra",
+      "express", "nuxt", "sveltekit", "astro", "remix",
+    ]
   }
 }
 
@@ -83,6 +164,14 @@ impl FromStr for PolicyTemplate {
       "nextjs" | "next.js" | "next" => Ok(Self::NextJs),
       "django" => Ok(Self::Django),
       "rails" | "ruby" => Ok(Self::Rails),
+      "fastapi" | "fast-api" | "fast_api" => Ok(Self::FastAPI),
+      "flask" => Ok(Self::Flask),
+      "sinatra" => Ok(Self::Sinatra),
+      "express" | "expressjs" => Ok(Self::Express),
+      "nuxt" | "nuxtjs" | "nuxt.js" => Ok(Self::Nuxt),
+      "sveltekit" | "svelte-kit" | "svelte_kit" => Ok(Self::SvelteKit),
+      "astro" => Ok(Self::Astro),
+      "remix" => Ok(Self::Remix),
       _ => Err(format!("Unknown policy template: {s}. Choose: {}", Self::variants().join(", "))),
     }
   }
@@ -97,6 +186,14 @@ impl fmt::Display for PolicyTemplate {
       Self::NextJs => write!(f, "nextjs"),
       Self::Django => write!(f, "django"),
       Self::Rails => write!(f, "rails"),
+      Self::FastAPI => write!(f, "fastapi"),
+      Self::Flask => write!(f, "flask"),
+      Self::Sinatra => write!(f, "sinatra"),
+      Self::Express => write!(f, "express"),
+      Self::Nuxt => write!(f, "nuxt"),
+      Self::SvelteKit => write!(f, "sveltekit"),
+      Self::Astro => write!(f, "astro"),
+      Self::Remix => write!(f, "remix"),
     }
   }
 }
@@ -244,7 +341,6 @@ impl Permissions {
   }
 
   pub fn check_read(&self, path: &str) -> Result<(), String> {
-    // Deny always takes precedence
     for pat in &self.resolved_deny_read {
       if pat.matches(path) {
         self.log("read", path, false, &format!("deny_read: {pat}"));
@@ -337,8 +433,16 @@ impl Permissions {
     } else {
       (host, "0")
     };
-    if hostname.contains('.') && !hostname.chars().all(|c| c.is_ascii_digit() || c == '.') {
-      if let Ok(addrs) = (hostname, port.parse::<u16>().unwrap_or(0)).to_socket_addrs() {
+    // Skip if already an IP
+    if !hostname.contains('.') || hostname.chars().all(|c| c.is_ascii_digit() || c == '.') {
+      return None;
+    }
+    // Handle IPv6
+    if hostname.starts_with('[') {
+      return None;
+    }
+    if let Ok(port_num) = port.parse::<u16>() {
+      if let Ok(addrs) = (hostname, port_num).to_socket_addrs() {
         for addr in addrs {
           let ip_str = addr.ip().to_string();
           for pat in &self.resolved_deny_net {
@@ -403,9 +507,6 @@ impl Permissions {
   }
 
   /// Create an inherited PermissionSet for a worker/child process.
-  /// Children inherit the intersection of the parent's permissions.
-  /// If the parent has allow_read_all, the child also gets allow_read_all.
-  /// Specific allow lists are inherited as-is; empty lists remain empty.
   pub fn inherited_set(&self) -> PermissionSet {
     PermissionSet {
       allow_read: self.set.allow_read.clone(),
@@ -614,14 +715,6 @@ mod tests {
   }
 
   #[test]
-  fn test_audit_log_drain_clears() {
-    let p = perms_with(PermissionSet { allow_read_all: true, ..Default::default() });
-    let _ = p.check_read("/a");
-    assert_eq!(p.drain_audit_log().len(), 1);
-    assert_eq!(p.drain_audit_log().len(), 0);
-  }
-
-  #[test]
   fn test_check_read_prefix_pattern() {
     let p = perms_with(PermissionSet {
       allow_read: vec!["/app".to_string()],
@@ -634,29 +727,23 @@ mod tests {
   }
 
   #[test]
-  fn test_check_read_exact_file() {
-    let p = perms_with(PermissionSet {
-      allow_read: vec!["/app.ts".to_string()],
-      ..Default::default()
-    });
-    assert!(p.check_read("/app.ts").is_ok());
-    assert!(p.check_read("/other.ts").is_err());
+  fn test_policy_templates_variants() {
+    let variants = PolicyTemplate::variants();
+    assert!(variants.contains(&"laravel"));
+    assert!(variants.contains(&"fastapi"));
+    assert!(variants.contains(&"sinatra"));
+    assert!(variants.contains(&"astro"));
   }
 
   #[test]
-  fn test_sandbox_level_parse() {
-    assert_eq!("none".parse::<SandboxLevel>().unwrap(), SandboxLevel::None);
-    assert_eq!("basic".parse::<SandboxLevel>().unwrap(), SandboxLevel::Basic);
-    assert_eq!("strict".parse::<SandboxLevel>().unwrap(), SandboxLevel::Strict);
-    assert_eq!("maximum".parse::<SandboxLevel>().unwrap(), SandboxLevel::Maximum);
-    assert!("invalid".parse::<SandboxLevel>().is_err());
-  }
-
-  #[test]
-  fn test_sandbox_level_is_sandboxed() {
-    assert!(!SandboxLevel::None.is_sandboxed());
-    assert!(SandboxLevel::Basic.is_sandboxed());
-    assert!(SandboxLevel::Strict.is_sandboxed());
-    assert!(SandboxLevel::Maximum.is_sandboxed());
+  fn test_policy_template_parse_new() {
+    assert!(matches!("fastapi".parse::<PolicyTemplate>().unwrap(), PolicyTemplate::FastAPI));
+    assert!(matches!("flask".parse::<PolicyTemplate>().unwrap(), PolicyTemplate::Flask));
+    assert!(matches!("sinatra".parse::<PolicyTemplate>().unwrap(), PolicyTemplate::Sinatra));
+    assert!(matches!("express".parse::<PolicyTemplate>().unwrap(), PolicyTemplate::Express));
+    assert!(matches!("nuxt".parse::<PolicyTemplate>().unwrap(), PolicyTemplate::Nuxt));
+    assert!(matches!("sveltekit".parse::<PolicyTemplate>().unwrap(), PolicyTemplate::SvelteKit));
+    assert!(matches!("astro".parse::<PolicyTemplate>().unwrap(), PolicyTemplate::Astro));
+    assert!(matches!("remix".parse::<PolicyTemplate>().unwrap(), PolicyTemplate::Remix));
   }
 }

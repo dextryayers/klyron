@@ -4,6 +4,8 @@ members = [
     "cli",
     "core",
     "engine-php",
+    "engine-python",
+    "engine-ruby",
     "engine-v8",
     "ext/console",
     "ext/timers",

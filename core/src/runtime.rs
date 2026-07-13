@@ -96,7 +96,20 @@ impl Runtime {
 
   pub fn eval(&self, code: &str) -> Result<String> {
     let mut js = self.js_runtime.borrow_mut();
-    let global = js.execute_script("<eval>", FastString::from(code.to_string()))?;
+    let (code, _) = if let Some(ref transpiler) = self.transpiler {
+      match transpiler.transpile_with_sourcemap("<eval>", code) {
+        Ok((c, sm)) => {
+          let final_source = if let Some(ref sm_json) = sm {
+            let sm_b64 = base64::engine::general_purpose::STANDARD.encode(sm_json);
+            format!("{c}\n//# sourceMappingURL=data:application/json;base64,{sm_b64}")
+          } else { c };
+          (final_source, sm)
+        }
+        Err(e) => return Err(anyhow::anyhow!("Transpile error: {e}")),
+      }
+    } else { (code.to_string(), None) };
+
+    let global = js.execute_script("<eval>", FastString::from(code))?;
     deno_core::scope!(scope, &mut *js);
     let local = v8::Local::new(scope, global);
     let value: serde_json::Value = serde_v8::from_v8(scope, local)?;
@@ -105,23 +118,39 @@ impl Runtime {
 
   pub fn execute_script(&self, name: &str, source: &str) -> Result<String> {
     let mut js = self.js_runtime.borrow_mut();
-    let (source_code, source_map) = if let Some(ref transpiler) = self.transpiler {
-      if name.ends_with(".ts") || name.ends_with(".tsx") || name.ends_with(".jsx") {
-        let (code, sm) = transpiler.transpile_with_sourcemap(source).map_err(|e| anyhow::anyhow!("{e}"))?;
-        (code, sm)
+    let (final_source, _sm) = if let Some(ref transpiler) = self.transpiler {
+      if name.ends_with(".ts") || name.ends_with(".tsx") || name.ends_with(".jsx") || name.ends_with(".mts") {
+        let (code, sm) = transpiler.transpile_with_sourcemap(name, source).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let final_source = if let Some(ref sm_json) = sm {
+          let sm_b64 = base64::engine::general_purpose::STANDARD.encode(sm_json);
+          format!("{code}\n//# sourceMappingURL=data:application/json;base64,{sm_b64}")
+        } else { code };
+        (final_source, sm)
       } else { (source.to_string(), None) }
     } else { (source.to_string(), None) };
-
-    let final_source = if let Some(ref sm) = source_map {
-      let sm_b64 = base64::engine::general_purpose::STANDARD.encode(sm);
-      format!("{source_code}\n//# sourceMappingURL=data:application/json;base64,{sm_b64}")
-    } else { source_code };
 
     let global = js.execute_script(name.to_string(), FastString::from(final_source))?;
     deno_core::scope!(scope, &mut *js);
     let local = v8::Local::new(scope, global);
     let value: serde_json::Value = serde_v8::from_v8(scope, local)?;
     Ok(value_to_string(&value))
+  }
+
+  pub fn execute_module(&self, name: &str, source: &str) -> Result<()> {
+    let mut js = self.js_runtime.borrow_mut();
+    let (final_source, _sm) = if let Some(ref transpiler) = self.transpiler {
+      if name.ends_with(".ts") || name.ends_with(".tsx") || name.ends_with(".jsx") || name.ends_with(".mts") {
+        let (code, sm) = transpiler.transpile_with_sourcemap(name, source).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let final_source = if let Some(ref sm_json) = sm {
+          let sm_b64 = base64::engine::general_purpose::STANDARD.encode(sm_json);
+          format!("{code}\n//# sourceMappingURL=data:application/json;base64,{sm_b64}")
+        } else { code };
+        (final_source, sm)
+      } else { (source.to_string(), None) }
+    } else { (source.to_string(), None) };
+
+    js.execute_script(name.to_string(), FastString::from(final_source))?;
+    Ok(())
   }
 
   pub fn permissions(&self) -> Option<&Permissions> {
@@ -258,5 +287,12 @@ mod tests {
     assert_eq!(runtime.eval("let x = 1; x").unwrap(), "1");
     assert_eq!(runtime.eval("x + 2").unwrap(), "3");
     assert_eq!(runtime.eval("x = 10; x").unwrap(), "10");
+  }
+
+  #[test]
+  fn test_eval_with_typescript_enum() {
+    let runtime = Runtime::builder().enable_typescript(true).build().unwrap();
+    let result = runtime.eval("const x = 1; x").unwrap();
+    assert_eq!(result, "1");
   }
 }

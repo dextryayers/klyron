@@ -3,7 +3,7 @@
 //! Bridges PHP (WASM or native) into the Klyron polyglot runtime.
 //! Supports:
 //! - PHP-WASM: portable, sandboxed, default
-//! - phper: native PHP embedding (requires libphp)
+//! - PhpProcessEngine: lightweight subprocess-based PHP execution
 //! - Artisan CLI proxy
 //! - Composer package management
 //! - Blade templating bridge
@@ -13,8 +13,10 @@ mod wasm;
 mod artisan;
 mod composer;
 mod blade;
+mod process;
 
 pub use wasm::PhpWasmEngine;
+pub use process::PhpProcessEngine;
 pub use artisan::ArtisanCli;
 pub use composer::Composer;
 pub use blade::BladeRenderer;
@@ -101,4 +103,83 @@ impl SharedState {
   pub fn drain(&self) -> HashMap<String, serde_json::Value> {
     self.variables.write().map(|mut vars| std::mem::take(&mut *vars)).unwrap_or_default()
   }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers shared by PhpWasmEngine and PhpProcessEngine
+// ---------------------------------------------------------------------------
+
+/// Build a PHP code prefix that extracts all SharedState variables into
+/// the local scope via `extract()`.
+pub(crate) fn build_injection_prefix(state: &SharedState) -> String {
+  let vars = match state.variables.read() {
+    Ok(g) => g,
+    Err(poisoned) => poisoned.into_inner(),
+  };
+  if vars.is_empty() {
+    return String::new();
+  }
+  let json = serde_json::to_string(&*vars).unwrap_or_else(|_| "{}".into());
+  let escaped = json.replace('\'', "\\'");
+  format!(
+    "$__kv = json_decode('{}', true) ?: []; extract($__kv); unset($__kv);\n",
+    escaped
+  )
+}
+
+/// Resolve the PHP binary path from config.
+pub(crate) fn php_bin(config: &PhpConfig) -> &str {
+  config.php_path.as_deref().unwrap_or("php")
+}
+
+/// Apply ini settings from config to a Command.
+pub(crate) fn apply_ini(cmd: &mut std::process::Command, config: &PhpConfig) {
+  for (key, val) in &config.ini_settings {
+    cmd.arg("-d").arg(format!("{}={}", key, val));
+  }
+  if config.memory_limit_mb > 0 {
+    cmd.arg("-d").arg(format!("memory_limit={}M", config.memory_limit_mb));
+  }
+}
+
+/// Run PHP with inline code (`php -r <code>`), return (stdout, stderr, exit_code).
+pub(crate) fn run_php_r(php_bin: &str, code: &str, config: &PhpConfig) -> Result<(String, String, i32), String> {
+  let mut cmd = std::process::Command::new(php_bin);
+  cmd.arg("-r").arg(code);
+  apply_ini(&mut cmd, config);
+  cmd.stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped());
+
+  let output = cmd.output().map_err(|e| format!("PHP subprocess error: {e}"))?;
+
+  Ok((
+    String::from_utf8_lossy(&output.stdout).into(),
+    String::from_utf8_lossy(&output.stderr).into(),
+    output.status.code().unwrap_or(-1),
+  ))
+}
+
+/// Run a PHP file (`php <path> [args...]`), return (stdout, stderr, exit_code).
+pub(crate) fn run_php_file(
+  php_bin: &str,
+  path: &str,
+  args: &[String],
+  config: &PhpConfig,
+) -> Result<(String, String, i32), String> {
+  let mut cmd = std::process::Command::new(php_bin);
+  cmd.arg(path);
+  for a in args {
+    cmd.arg(a);
+  }
+  apply_ini(&mut cmd, config);
+  cmd.stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped());
+
+  let output = cmd.output().map_err(|e| format!("PHP subprocess error: {e}"))?;
+
+  Ok((
+    String::from_utf8_lossy(&output.stdout).into(),
+    String::from_utf8_lossy(&output.stderr).into(),
+    output.status.code().unwrap_or(-1),
+  ))
 }

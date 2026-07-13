@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use klyron_core::{permissions::{PermissionSet, PolicyTemplate, SandboxLevel}, Runtime};
+use klyron_core::{
+  permissions::{PermissionSet, PolicyTemplate, SandboxLevel},
+  Runtime,
+};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -18,6 +21,8 @@ enum Commands {
     code: String,
     #[arg(long)]
     policy: Option<PolicyTemplate>,
+    #[arg(long, short)]
+    module: bool,
   },
   /// Run a JavaScript/TypeScript file
   Run {
@@ -61,6 +66,8 @@ enum Commands {
     #[arg(long)]
     audit: bool,
     #[arg(long)]
+    watch: bool,
+    #[arg(long)]
     max_memory: Option<u64>,
     #[arg(long)]
     max_cpu: Option<u64>,
@@ -69,6 +76,25 @@ enum Commands {
   },
   /// Start an interactive REPL
   Repl,
+  /// Bundle dependencies into a single file
+  Bundle {
+    entry: PathBuf,
+    #[arg(long, default_value = "bundle.js")]
+    output: PathBuf,
+    #[arg(long)]
+    minify: bool,
+  },
+  /// Start a development server
+  Serve {
+    #[arg(long, default_value = "localhost")]
+    host: String,
+    #[arg(long, default_value_t = 3000)]
+    port: u16,
+    #[arg(long)]
+    dir: Option<PathBuf>,
+    #[arg(long)]
+    watch: bool,
+  },
 }
 
 fn all_extensions() -> Vec<deno_core::Extension> {
@@ -97,7 +123,7 @@ fn main() -> anyhow::Result<()> {
   let cli = Cli::parse();
 
   match cli.command {
-    Commands::Eval { code, policy } => {
+    Commands::Eval { code, policy, module: _ } => {
       let perm_set = if let Some(tmpl) = policy { tmpl.apply() } else { PermissionSet::default() };
       let runtime = Runtime::builder()
         .async_(true)
@@ -130,6 +156,7 @@ fn main() -> anyhow::Result<()> {
       deny_env,
       prompt,
       audit,
+      watch,
       max_memory,
       max_cpu,
       max_fds,
@@ -180,6 +207,10 @@ fn main() -> anyhow::Result<()> {
         println!("{}", result);
       }
 
+      if watch {
+        watch_and_reload(&path, &runtime)?;
+      }
+
       if audit {
         if let Some(perms) = runtime.permissions() {
           for entry in perms.drain_audit_log() {
@@ -195,7 +226,81 @@ fn main() -> anyhow::Result<()> {
       println!("Type '.help' for help, '.exit' to quit");
       repl_loop()
     }
+    Commands::Bundle { entry, output, minify: _ } => {
+      let source = std::fs::read_to_string(&entry)
+        .map_err(|e| anyhow::anyhow!("Cannot read {}: {e}", entry.display()))?;
+      let runtime = Runtime::builder()
+        .enable_typescript(true)
+        .extensions(all_extensions())
+        .build()?;
+      let js = runtime.execute_script(entry.to_str().unwrap_or("<entry>"), &source)?;
+      std::fs::write(&output, js)
+        .map_err(|e| anyhow::anyhow!("Cannot write {}: {e}", output.display()))?;
+      println!("Bundled {} -> {}", entry.display(), output.display());
+      Ok(())
+    }
+    Commands::Serve { host, port, dir, watch: _ } => {
+      let serve_dir = dir.unwrap_or_else(|| std::env::current_dir().unwrap());
+      println!("Klyron dev server: http://{host}:{port}");
+      println!("Serving: {}", serve_dir.display());
+      start_dev_server(&host, port, &serve_dir)?;
+      Ok(())
+    }
   }
+}
+
+fn watch_and_reload(path: &PathBuf, runtime: &Runtime) -> anyhow::Result<()> {
+  use std::io::Write;
+  let (tx, rx) = std::sync::mpsc::channel();
+  let path_clone = path.clone();
+  std::thread::spawn(move || {
+    let mut last_modified = std::time::SystemTime::now();
+    loop {
+      std::thread::sleep(std::time::Duration::from_millis(500));
+      if let Ok(metadata) = std::fs::metadata(&path_clone) {
+        if let Ok(modified) = metadata.modified() {
+          if modified > last_modified {
+            last_modified = modified;
+            let _ = tx.send(true);
+          }
+        }
+      }
+    }
+  });
+  loop {
+    if rx.recv().is_ok() {
+      print!("\n\u{1b}[2K\u{1b}[GFile changed. Re-running...\n> ");
+      std::io::stdout().flush()?;
+      if let Ok(source) = std::fs::read_to_string(path) {
+        match runtime.execute_script(path.to_str().unwrap_or("<file>"), &source) {
+          Ok(result) => {
+            if !result.is_empty() && result != "undefined" {
+              println!("{}", result);
+            }
+          }
+          Err(e) => eprintln!("Error: {e}"),
+        }
+      }
+      print!("> ");
+      std::io::stdout().flush()?;
+    }
+  }
+}
+
+fn start_dev_server(host: &str, port: u16, dir: &std::path::Path) -> anyhow::Result<()> {
+  let rt = tokio::runtime::Runtime::new()?;
+  rt.block_on(async {
+    let service = tower_http::services::ServeDir::new(dir)
+      .append_index_html_on_directories(true);
+    let addr = format!("{host}:{port}");
+    let listener = tokio::net::TcpListener::bind(&addr).await
+      .map_err(|e| anyhow::anyhow!("Cannot bind {addr}: {e}"))?;
+    println!("Listening on http://{addr}");
+    axum::serve(listener, axum::routing::any_service(service))
+      .await
+      .map_err(|e| anyhow::anyhow!("Server error: {e}"))?;
+    Ok::<_, anyhow::Error>(())
+  })
 }
 
 fn repl_loop() -> anyhow::Result<()> {
@@ -216,7 +321,16 @@ fn repl_loop() -> anyhow::Result<()> {
     match input {
       ".exit" | ".quit" => break,
       ".help" => {
-        println!("Commands:\n  .exit, .quit  Exit\n  .help         Show this help");
+        println!("Commands:\n  .exit, .quit  Exit\n  .help         Show this help\n  .clear        Clear console\n  .version      Show version");
+        continue;
+      }
+      ".clear" => {
+        print!("\u{1b}[2J\u{1b}[H");
+        std::io::stdout().flush()?;
+        continue;
+      }
+      ".version" => {
+        println!("Klyron v{}", env!("CARGO_PKG_VERSION"));
         continue;
       }
       "" => continue,
