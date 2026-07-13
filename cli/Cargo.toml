@@ -17,6 +17,7 @@ klyron-ext-html = { path = "../ext/html" }
 klyron-ext-node = { path = "../ext/node" }
 klyron-ext-klyron = { path = "../ext/klyron" }
 klyron-ext-ffi = { path = "../ext/ffi" }
+klyron-ext-ws = { path = "../ext/ws" }
 deno_core = { version = "0.403" }
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"

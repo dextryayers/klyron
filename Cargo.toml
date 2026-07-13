@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "cli",
     "core",
+    "engine-php",
     "engine-v8",
     "ext/console",
     "ext/timers",
@@ -17,6 +18,7 @@ members = [
     "ext/ai",
     "ext/observability",
     "ext/ffi",
+    "ext/ws",
     "ext/cron",
     "ext/html",
     "ext/postgres",
@@ -43,3 +45,5 @@ authors = ["Klyron Contributors"]
 
 [workspace.dependencies]
 deno_error = "0.7"
+wasmtime = "28"
+wasmtime-wasi = "28"

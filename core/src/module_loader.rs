@@ -25,6 +25,7 @@ static NODE_BUILTINS: LazyLock<Vec<(&'static str, &'static str)>> = LazyLock::ne
     ("process", "ext:klyron_node/process.js"),
     ("querystring", "ext:klyron_node/querystring.js"),
     ("stream", "ext:klyron_node/stream.js"),
+    ("string_decoder", "ext:klyron_node/string_decoder.js"),
     ("url", "ext:klyron_node/url.js"),
     ("util", "ext:klyron_node/util.js"),
   ]

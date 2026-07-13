@@ -49,25 +49,200 @@ fn apply_resource_limits(max_memory: Option<u64>, max_cpu: Option<u64>, max_fds:
 
 #[cfg(target_os = "linux")]
 fn apply_os_sandbox(level: SandboxLevel) -> Result<(), String> {
+  if level == SandboxLevel::Maximum {
+    apply_chroot()?;
+  }
   apply_namespace_isolation(level)?;
   apply_landlock(level)?;
   apply_seccomp_filter(level)?;
   Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
 fn apply_os_sandbox(level: SandboxLevel) -> Result<(), String> {
   let _ = level;
-  Err("Sandboxing is only supported on Linux".to_string())
+  apply_macos_sandbox(level)
 }
 
-// ─── Namespace Isolation ──────────────────────────────────────────────────
+#[cfg(target_os = "windows")]
+fn apply_os_sandbox(level: SandboxLevel) -> Result<(), String> {
+  let _ = level;
+  apply_windows_sandbox(level)
+}
+
+/// macOS Seatbelt sandbox profile (stub — requires `Sandbox.h` / seatbelt API)
+#[cfg(target_os = "macos")]
+fn apply_macos_sandbox(_level: SandboxLevel) -> Result<(), String> {
+  // macOS sandbox_init / sandbox_init_with_parameters
+  // Example:
+  //   let profile = "(version 1)\n(deny default)\n(allow file-read*)\n...";
+  //   sandbox_init(profile, 0, &error);
+  // For now, returning error since seatbelt requires entitlements
+  Err("macOS sandbox requires com.apple.security.app-sandbox entitlement and is not yet implemented".to_string())
+}
+
+/// Windows Job Object sandbox (stub)
+#[cfg(target_os = "windows")]
+fn apply_windows_sandbox(_level: SandboxLevel) -> Result<(), String> {
+  // Windows Job Objects:
+  //   CreateJobObject -> SetInformationJobObject with JobObjectBasicLimitInformation
+  //   AssignProcessToJobObject
+  // For now, returning error since implementation requires winapi
+  Err("Windows Job Object sandbox is not yet implemented".to_string())
+}
+
+// ─── Filesystem Namespace (chroot) ────────────────────────────────────────
+
+/// Create a minimal root filesystem and chroot into it.
+/// This provides deep filesystem isolation by jailing the process
+/// into a restricted directory tree.
+#[cfg(target_os = "linux")]
+fn apply_chroot() -> Result<(), String> {
+  use std::ffi::CString;
+  use std::fs;
+
+  let tmp_root = std::env::temp_dir().join(format!(".klyron_root_{}", std::process::id()));
+  if tmp_root.exists() {
+    fs::remove_dir_all(&tmp_root).map_err(|e| format!("cleanup old chroot dir: {e}"))?;
+  }
+  fs::create_dir_all(&tmp_root).map_err(|e| format!("create chroot dir: {e}"))?;
+
+  // Create minimal dev nodes
+  let dev = tmp_root.join("dev");
+  fs::create_dir_all(&dev).map_err(|e| format!("create {dev:?}: {e}"))?;
+  makedev(&dev.join("null"), libc::S_IFCHR | 0o666, 1, 3)?;
+  makedev(&dev.join("zero"), libc::S_IFCHR | 0o666, 1, 5)?;
+  makedev(&dev.join("random"), libc::S_IFCHR | 0o444, 1, 8)?;
+  makedev(&dev.join("urandom"), libc::S_IFCHR | 0o444, 1, 9)?;
+
+  // Create minimal /etc
+  let etc = tmp_root.join("etc");
+  fs::create_dir_all(&etc).map_err(|e| format!("create {etc:?}: {e}"))?;
+  fs::write(etc.join("resolv.conf"), "nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
+    .map_err(|e| format!("write resolv.conf: {e}"))?;
+  fs::write(etc.join("hosts"), "127.0.0.1 localhost\n::1 localhost\n")
+    .map_err(|e| format!("write hosts: {e}"))?;
+  fs::write(etc.join("nsswitch.conf"), "hosts: files dns\n")
+    .map_err(|e| format!("write nsswitch.conf: {e}"))?;
+  fs::write(etc.join("passwd"), "root:x:0:0:root:/root:/bin/sh\n")
+    .map_err(|e| format!("write passwd: {e}"))?;
+
+  // Bind-mount required library paths
+  let required_system_dirs = &["/usr/lib", "/lib", "/lib64"];
+  for dir in required_system_dirs {
+    let target = tmp_root.join(dir.trim_start_matches('/'));
+    if std::path::Path::new(dir).exists() {
+      fs::create_dir_all(&target).map_err(|e| format!("create {target:?}: {e}"))?;
+      bind_mount(dir, &target)?;
+    }
+  }
+
+  // Also bind ld.so.cache if it exists
+  let ld_cache = std::path::Path::new("/etc/ld.so.cache");
+  if ld_cache.exists() {
+    let etc_target = tmp_root.join("etc");
+    fs::create_dir_all(&etc_target).map_err(|e| format!("create {etc_target:?}: {e}"))?;
+    bind_mount("/etc/ld.so.cache", &etc_target.join("ld.so.cache"))?;
+  }
+
+  unsafe {
+    let root_cstr = CString::new(tmp_root.to_string_lossy().as_bytes())
+      .map_err(|e| format!("root path cstring: {e}"))?;
+    let ret = libc::chroot(root_cstr.as_ptr());
+    if ret != 0 {
+      let err = std::io::Error::last_os_error();
+      return Err(format!("chroot({:?}) failed: {err}", tmp_root));
+    }
+    // Change to root of the new jail
+    if libc::chdir("/\0".as_ptr() as *const libc::c_char) != 0 {
+      return Err(format!("chdir after chroot: {}", std::io::Error::last_os_error()));
+    }
+  }
+
+  Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn makedev(path: &std::path::Path, mode: libc::mode_t, major: u32, minor: u32) -> Result<(), String> {
+  use std::ffi::CString;
+  let cpath = CString::new(path.to_string_lossy().as_bytes())
+    .map_err(|e| format!("path cstring: {e}"))?;
+  let dev = (major << 8) | (minor & 0xff);
+  unsafe {
+    let ret = libc::mknod(cpath.as_ptr(), mode, dev as libc::dev_t);
+    if ret != 0 {
+      let err = std::io::Error::last_os_error();
+      return Err(format!("mknod({path:?}) failed: {err}"));
+    }
+  }
+  Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn bind_mount(source: &str, target: &std::path::Path) -> Result<(), String> {
+  use std::ffi::CString;
+  let src = CString::new(source).map_err(|e| format!("source cstring: {e}"))?;
+  let dst = CString::new(target.to_string_lossy().as_bytes())
+    .map_err(|e| format!("target cstring: {e}"))?;
+  unsafe {
+      let ret = libc::mount(
+        src.as_ptr() as *const libc::c_char,
+        dst.as_ptr() as *const libc::c_char,
+        std::ptr::null::<u8>() as *const libc::c_char,
+        libc::MS_BIND | libc::MS_REC,
+        std::ptr::null::<u8>() as *const libc::c_void,
+      );
+    if ret != 0 {
+      let err = std::io::Error::last_os_error();
+      return Err(format!("bind mount {source} -> {} failed: {err}", target.display()));
+    }
+  }
+  Ok(())
+}
 
 #[cfg(target_os = "linux")]
 fn apply_namespace_isolation(level: SandboxLevel) -> Result<(), String> {
-  if level == SandboxLevel::Maximum {
-    try_unshare(libc::CLONE_NEWNS).ok();
-    try_unshare(libc::CLONE_NEWIPC).ok();
+  match level {
+    SandboxLevel::Basic => {
+      try_unshare(libc::CLONE_NEWNS).ok();
+    }
+    SandboxLevel::Strict => {
+      try_unshare(libc::CLONE_NEWNS).ok();
+      try_unshare(libc::CLONE_NEWIPC).ok();
+      try_unshare(libc::CLONE_NEWUTS).ok();
+      try_unshare(libc::CLONE_NEWPID).ok();
+    }
+    SandboxLevel::Maximum => {
+      try_unshare(libc::CLONE_NEWNS)?;
+      try_unshare(libc::CLONE_NEWIPC)?;
+      try_unshare(libc::CLONE_NEWUTS)?;
+      try_unshare(libc::CLONE_NEWPID)?;
+      try_unshare(libc::CLONE_NEWNET)?;
+      try_unshare(libc::CLONE_NEWCGROUP).ok();
+      // Make root mount private to prevent mount propagation
+      make_root_mount_private()?;
+    }
+    SandboxLevel::None => {}
+  }
+  Ok(())
+}
+
+/// Make the root mount a private mount to prevent mount events from
+/// propagating to/from the parent namespace.
+#[cfg(target_os = "linux")]
+fn make_root_mount_private() -> Result<(), String> {
+  unsafe {
+    let ret = libc::mount(
+      std::ptr::null::<u8>() as *const libc::c_char,
+      "/\0".as_ptr() as *const libc::c_char,
+      std::ptr::null::<u8>() as *const libc::c_char,
+      libc::MS_REC | libc::MS_PRIVATE,
+      std::ptr::null::<u8>() as *const libc::c_void,
+    );
+    if ret != 0 {
+      let err = std::io::Error::last_os_error();
+      return Err(format!("mount --make-private / failed: {err}"));
+    }
   }
   Ok(())
 }

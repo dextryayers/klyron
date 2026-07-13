@@ -16,6 +16,8 @@ enum Commands {
   /// Evaluate JavaScript/TypeScript code
   Eval {
     code: String,
+    #[arg(long)]
+    policy: Option<PolicyTemplate>,
   },
   /// Run a JavaScript/TypeScript file
   Run {
@@ -82,6 +84,7 @@ fn all_extensions() -> Vec<deno_core::Extension> {
     klyron_ext_klyron::init(),
     klyron_ext_html::init(),
     klyron_ext_ffi::init(),
+    klyron_ext_ws::init(),
   ]
 }
 
@@ -94,10 +97,12 @@ fn main() -> anyhow::Result<()> {
   let cli = Cli::parse();
 
   match cli.command {
-    Commands::Eval { code } => {
+    Commands::Eval { code, policy } => {
+      let perm_set = if let Some(tmpl) = policy { tmpl.apply() } else { PermissionSet::default() };
       let runtime = Runtime::builder()
         .async_(true)
         .enable_typescript(true)
+        .permissions(perm_set)
         .extensions(all_extensions())
         .build()?;
       let result = runtime.eval(&code)?;

@@ -1,7 +1,7 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use oxc::allocator::Allocator;
-use oxc::codegen::Codegen;
+use oxc::codegen::{Codegen, CodegenOptions};
 use oxc::parser::Parser;
 use oxc::span::SourceType;
 use oxc::transformer::{TransformOptions, Transformer};
@@ -38,7 +38,13 @@ impl Transpiler {
       let errors: Vec<String> = transform_result.diagnostics.iter().map(|d| d.to_string()).collect();
       return Err(errors.join("\n"));
     }
-    let output = Codegen::new().build(&program);
-    Ok((output.code, None))
+    let output = Codegen::new()
+      .with_options(CodegenOptions {
+        source_map_path: Some(PathBuf::from(".")),
+        ..Default::default()
+      })
+      .build(&program);
+    let sm = output.map.map(|m| m.to_json_string());
+    Ok((output.code, sm))
   }
 }
