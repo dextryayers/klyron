@@ -1,0 +1,13 @@
+[package]
+name = "klyron-engine-v8"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+deno_core = { version = "0.403", features = ["include_icu_data"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

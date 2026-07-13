@@ -1,0 +1,13 @@
+[package]
+name = "klyron"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+klyron-core = { path = "../core" }
+klyron-ext-console = { path = "../ext/console" }
+klyron-ext-timers = { path = "../ext/timers" }
+clap = { version = "4", features = ["derive", "env"] }
+anyhow = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

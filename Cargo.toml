@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "cli",
+    "core",
+    "engine-v8",
+    "ext/console",
+    "ext/timers",
+    "ext/web",
+    "ext/crypto",
+    "ext/fs",
+    "ext/net",
+    "ext/http",
+    "ext/sqlite",
+    "ext/node",
+    "ext/klyron",
+    "ext/ai",
+    "ext/observability",
+    "ext/ffi",
+    "ext/cron",
+    "ext/html",
+    "ext/postgres",
+    "ext/redis",
+    "ext/s3",
+    "bundler",
+    "pkg-manager",
+    "test-runner",
+    "formatter",
+    "linter",
+    "lsp",
+    "shell",
+    "napi",
+    "wasm",
+    "artifacts",
+    "reactor",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Klyron Contributors"]
