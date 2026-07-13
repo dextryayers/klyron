@@ -205,14 +205,14 @@ final class PhpEngine {
     private function handleArtisan(string $args, string $project): void {
         $artisan = $this->findArtisan($project);
         if (!$artisan) { $this->output('', 'No artisan file found.', 1, ''); return; }
-        $result = $this->runCommand("php " . escapeshellarg($artisan) . " $args 2>&1", $project);
+        $result = $this->runCommand("php " . escapeshellarg($artisan) . " " . escapeshellarg($args) . " 2>&1", $project);
         $this->output($result['stdout'], $result['stderr'], $result['exit_code'], $result['stdout']);
     }
 
     private function handleArtisanServe(string $args, string $project): void {
         $artisan = $this->findArtisan($project);
         if (!$artisan) { $this->output('', 'No artisan file found.', 1, ''); return; }
-        $result = $this->runCommand("php " . escapeshellarg($artisan) . " serve $args", $project);
+        $result = $this->runCommand("php " . escapeshellarg($artisan) . " serve " . escapeshellarg($args), $project);
         $this->output($result['stdout'], $result['stderr'], $result['exit_code'], $result['stdout']);
     }
 
@@ -239,7 +239,7 @@ final class PhpEngine {
     }
 
     private function handleComposer(string $args, string $project): void {
-        $result = $this->runCommand("composer --working-dir=" . escapeshellarg($project) . " $args 2>&1", $project);
+        $result = $this->runCommand("composer --working-dir=" . escapeshellarg($project) . " " . escapeshellarg($args) . " 2>&1", $project);
         $this->output($result['stdout'], $result['stderr'], $result['exit_code'], $result['stdout']);
     }
 

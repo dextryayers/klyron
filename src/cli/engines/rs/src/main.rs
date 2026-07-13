@@ -1,5 +1,5 @@
 use std::io::{self, BufRead, Write};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::path::Path;
 use std::fs;
 
@@ -20,23 +20,46 @@ struct Output {
 }
 
 fn write_output(o: Output) {
-    let json = serde_json::to_string(&o).unwrap();
-    println!("{}", json);
-    io::stdout().flush().ok();
+    if let Ok(json) = serde_json::to_string(&o) {
+        println!("{}", json);
+    }
+    let _ = io::stdout().flush();
+}
+
+struct TempDir { path: String }
+impl TempDir {
+    fn new() -> Self {
+        let path = format!("/tmp/klyron-rs-{}", std::process::id());
+        let _ = fs::create_dir_all(&path);
+        TempDir { path }
+    }
+}
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
 }
 
 fn exec_code(code: &str) {
-    let tmp_dir = format!("/tmp/klyron-rs-{}", std::process::id());
-    let _ = fs::create_dir_all(&tmp_dir);
-    let src_path = Path::new(&tmp_dir).join("main.rs");
-    let bin_path = Path::new(&tmp_dir).join("prog");
+    let tmp = TempDir::new();
+    let src_path = Path::new(&tmp.path).join("main.rs");
+    let bin_path = Path::new(&tmp.path).join("prog");
 
-    fs::write(&src_path, code).unwrap();
+    if fs::write(&src_path, code).is_err() {
+        write_output(Output { stdout: "".into(), stderr: "Failed to write source".into(), exit_code: 1, result: "".into() });
+        return;
+    }
 
-    let compile_output = Command::new("rustc")
+    let compile_output = match Command::new("rustc")
         .args([&src_path.to_string_lossy(), "-o", &bin_path.to_string_lossy(), "-O"])
         .output()
-        .unwrap();
+    {
+        Ok(o) => o,
+        Err(e) => {
+            write_output(Output { stdout: "".into(), stderr: format!("Failed to run rustc: {e}"), exit_code: 1, result: "".into() });
+            return;
+        }
+    };
 
     if !compile_output.status.success() {
         let stderr = String::from_utf8_lossy(&compile_output.stderr);
@@ -46,15 +69,16 @@ fn exec_code(code: &str) {
             exit_code: 1,
             result: "Compilation failed".into(),
         });
-        let _ = fs::remove_dir_all(&tmp_dir);
         return;
     }
 
-    let run_output = Command::new(&bin_path)
-        .output()
-        .unwrap();
-
-    let _ = fs::remove_dir_all(&tmp_dir);
+    let run_output = match Command::new(&bin_path).output() {
+        Ok(o) => o,
+        Err(e) => {
+            write_output(Output { stdout: "".into(), stderr: format!("Failed to run: {e}"), exit_code: 1, result: "".into() });
+            return;
+        }
+    };
 
     write_output(Output {
         stdout: String::from_utf8_lossy(&run_output.stdout).to_string(),

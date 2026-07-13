@@ -38,7 +38,8 @@ public:
   void raw(const char *s) { buf_ += s; }
 
   void key(const char *k) {
-    if (!buf_.empty() && buf_.back() != '{') buf_ += ',';
+    if (buf_.empty()) buf_ += '{';
+    else if (buf_.back() != '{') buf_ += ',';
     buf_ += '"'; buf_ += k; buf_ += "\":";
   }
 
@@ -62,7 +63,7 @@ public:
   void num(int n) { buf_ += std::to_string(n); }
   void num(unsigned long n) { buf_ += std::to_string(n); }
 
-  void flush() { buf_ += '\n'; write(STDOUT_FILENO, buf_.data(), buf_.size()); }
+  void flush() { buf_ += '}'; buf_ += '\n'; write(STDOUT_FILENO, buf_.data(), buf_.size()); buf_.clear(); }
 
   std::string &buf() { return buf_; }
 };
@@ -77,13 +78,12 @@ public:
   void skip_ws() { while (*p_ == ' ' || *p_ == '\t' || *p_ == '\n' || *p_ == '\r') p_++; }
 
   bool maybe_match(const char *key) {
-    const char *saved = p_;
     skip_ws();
-    if (*p_ != '"') { p_ = saved; return false; }
+    const char *saved = p_;
+    if (*p_ != '"') return false;
     p_++; // opening quote
     while (*p_ && *p_ != '"') { if (*p_ == '\\') p_++; p_++; }
-    if (*p_ != '"') { p_ = saved; return false; }
-    // Compare
+    if (*p_ != '"') return false;
     size_t klen = strlen(key);
     if ((size_t)(p_ - saved - 1) != klen || strncmp(saved + 1, key, klen) != 0) { p_ = saved; return false; }
     p_++; // closing quote
@@ -92,7 +92,8 @@ public:
 
   bool match_key(const char *key) {
     const char *saved = p_;
-    if (!maybe_match(key)) return false;
+    skip_ws(); while (*p_ == ',' || *p_ == '{') p_++;
+    if (!maybe_match(key)) { p_ = saved; return false; }
     skip_ws();
     if (*p_ != ':') { p_ = saved; return false; }
     p_++; // colon
@@ -195,8 +196,16 @@ static ProcResult exec_shell(const std::string &cmd, int timeout_sec) {
     if (i != po[0] && i != po[1] && i != pe[0] && i != pe[1])
       fcntl(i, F_SETFD, FD_CLOEXEC);
 
+  // Temporarily disable SA_NOCLDWAIT so waitpid can collect exit status
+  struct sigaction old_sa;
+  memset(&old_sa, 0, sizeof(old_sa));
+  struct sigaction dfl_sa; memset(&dfl_sa, 0, sizeof(dfl_sa)); dfl_sa.sa_handler = SIG_DFL;
+  sigaction(SIGCHLD, &dfl_sa, &old_sa);
+
   pid_t pid = fork();
   if (pid == 0) {
+    struct sigaction dfl; memset(&dfl, 0, sizeof(dfl)); dfl.sa_handler = SIG_DFL;
+    sigaction(SIGPIPE, &dfl, nullptr);
     close(po[0]); close(pe[0]);
     dup2(po[1], STDOUT_FILENO); dup2(pe[1], STDERR_FILENO);
     close(po[1]); close(pe[1]);
@@ -222,7 +231,8 @@ static ProcResult exec_shell(const std::string &cmd, int timeout_sec) {
     FD_ZERO(&rfds);
     FD_SET(po[0], &rfds); FD_SET(pe[0], &rfds);
     int maxfd = std::max(po[0], pe[0]);
-    int ret = select(maxfd + 1, &rfds, nullptr, nullptr, &tv);
+    int ret;
+    do { ret = select(maxfd + 1, &rfds, nullptr, nullptr, &tv); } while (ret < 0 && errno == EINTR);
     if (ret < 0) break;
     active = false;
     if (FD_ISSET(po[0], &rfds)) {
@@ -237,8 +247,14 @@ static ProcResult exec_shell(const std::string &cmd, int timeout_sec) {
 
   close(po[0]); close(pe[0]);
 
-  int status;
-  waitpid(pid, &status, 0);
+  int status = -1;
+  int wret;
+  do { wret = waitpid(pid, &status, 0); } while (wret < 0 && errno == EINTR);
+
+  // Restore SA_NOCLDWAIT
+  sigaction(SIGCHLD, &old_sa, nullptr);
+
+  if (wret < 0) return {-1, out, err};
   int ec = WIFEXITED(status) ? WEXITSTATUS(status) :
            WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1;
   return {ec, out, err};

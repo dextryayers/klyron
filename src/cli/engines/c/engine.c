@@ -12,155 +12,117 @@
 #include <signal.h>
 #include <time.h>
 #include <stdarg.h>
+#include <limits.h>
 
 #define MAX_OUTPUT (1 << 20)
 #define MAX_LINE (1 << 18)
 #define MAX_FILES 256
 
-typedef struct {
-  char *data;
-  size_t len;
-  size_t cap;
-} Buf;
+typedef struct { char *d; size_t len; size_t cap; } Buf;
 
-static void buf_init(Buf *b) { b->data = NULL; b->len = 0; b->cap = 0; }
-static void buf_free(Buf *b) { free(b->data); b->data = NULL; b->len = 0; b->cap = 0; }
-static int buf_append(Buf *b, const char *s, size_t n) {
-  if (b->len + n + 1 > b->cap) {
-    size_t newcap = b->cap ? b->cap * 2 : 4096;
-    while (newcap < b->len + n + 1) newcap *= 2;
-    char *p = realloc(b->data, newcap);
-    if (!p) return -1;
-    b->data = p; b->cap = newcap;
-  }
-  memcpy(b->data + b->len, s, n);
-  b->len += n;
-  b->data[b->len] = '\0';
+static void b_init(Buf *b) { memset(b, 0, sizeof(*b)); }
+static void b_free(Buf *b) { free(b->d); b->d = NULL; b->len = b->cap = 0; }
+static int b_grow(Buf *b, size_t need) {
+  if (b->len + need + 1 <= b->cap) return 0;
+  size_t nc = b->cap ? b->cap : 4096;
+  while (nc < b->len + need + 1) nc *= 2;
+  char *p = realloc(b->d, nc);
+  if (!p) return -1;
+  b->d = p; b->cap = nc; return 0;
+}
+static int b_app(Buf *b, const char *s, size_t n) {
+  if (b_grow(b, n) < 0) return -1;
+  memcpy(b->d + b->len, s, n);
+  b->len += n; b->d[b->len] = '\0';
   return 0;
 }
-static int buf_appendf(Buf *b, const char *fmt, ...) {
+static int b_appf(Buf *b, const char *fmt, ...) {
   va_list ap;
-  va_start(ap, fmt);
-  int n = vsnprintf(NULL, 0, fmt, ap);
-  va_end(ap);
+  va_start(ap, fmt); int n = vsnprintf(NULL, 0, fmt, ap); va_end(ap);
   if (n < 0) return -1;
-  char tmp[8192];
-  if ((size_t)n >= sizeof(tmp)) {
-    char *buf = malloc(n + 1);
-    if (!buf) return -1;
-    va_start(ap, fmt); vsnprintf(buf, n + 1, fmt, ap); va_end(ap);
-    int ret = buf_append(b, buf, n);
-    free(buf);
-    return ret;
-  }
-  va_start(ap, fmt); vsnprintf(tmp, sizeof(tmp), fmt, ap); va_end(ap);
-  return buf_append(b, tmp, n);
+  if (b_grow(b, n) < 0) return -1;
+  va_start(ap, fmt); vsnprintf(b->d + b->len, n + 1, fmt, ap); va_end(ap);
+  b->len += n;
+  return 0;
 }
 
-// JSON output with "diagnostics" support
-static void json_output_ex(const char *stdout_str, const char *stderr_str, int exit_code,
-                           const char *result, const char *diag_json) {
-  Buf b; buf_init(&b);
-  buf_append(&b, "{\"stdout\":", 10);
-  // Escape stdout
-  buf_append(&b, "\"", 1);
-  if (stdout_str) for (const char *s = stdout_str; *s; s++) {
-    switch (*s) {
-      case '"': buf_append(&b, "\\\"", 2); break;
-      case '\\': buf_append(&b, "\\\\", 2); break;
-      case '\n': buf_append(&b, "\\n", 2); break;
-      case '\r': buf_append(&b, "\\r", 2); break;
-      case '\t': buf_append(&b, "\\t", 2); break;
+static void json_esc(Buf *b, const char *s) {
+  if (!s) return;
+  for (const char *p = s; *p; p++) {
+    unsigned char c = *p;
+    switch (c) {
+      case '"': b_app(b, "\\\"", 2); break;
+      case '\\': b_app(b, "\\\\", 2); break;
+      case '\n': b_app(b, "\\n", 2); break;
+      case '\r': b_app(b, "\\r", 2); break;
+      case '\t': b_app(b, "\\t", 2); break;
       default:
-        if ((unsigned char)*s < 0x20) buf_appendf(&b, "\\u%04x", (unsigned char)*s);
-        else buf_append(&b, s, 1);
+        if (c < 0x20) b_appf(b, "\\u%04x", c);
+        else b_app(b, (const char*)&c, 1);
     }
   }
-  buf_append(&b, "\",\"stderr\":\"", 12);
-  if (stderr_str) for (const char *s = stderr_str; *s; s++) {
-    switch (*s) {
-      case '"': buf_append(&b, "\\\"", 2); break;
-      case '\\': buf_append(&b, "\\\\", 2); break;
-      case '\n': buf_append(&b, "\\n", 2); break;
-      case '\r': buf_append(&b, "\\r", 2); break;
-      case '\t': buf_append(&b, "\\t", 2); break;
-      default:
-        if ((unsigned char)*s < 0x20) buf_appendf(&b, "\\u%04x", (unsigned char)*s);
-        else buf_append(&b, s, 1);
-    }
-  }
-  buf_appendf(&b, "\",\"exit_code\":%d,\"result\":\"", exit_code);
-  if (result) for (const char *s = result; *s; s++) {
-    switch (*s) {
-      case '"': buf_append(&b, "\\\"", 2); break;
-      case '\\': buf_append(&b, "\\\\", 2); break;
-      case '\n': buf_append(&b, "\\n", 2); break;
-      case '\r': buf_append(&b, "\\r", 2); break;
-      case '\t': buf_append(&b, "\\t", 2); break;
-      default:
-        if ((unsigned char)*s < 0x20) buf_appendf(&b, "\\u%04x", (unsigned char)*s);
-        else buf_append(&b, s, 1);
-    }
-  }
-  buf_append(&b, "\"", 1);
-  if (diag_json) { buf_append(&b, ",\"diagnostics\":", 16); buf_append(&b, diag_json, strlen(diag_json)); }
-  buf_append(&b, "}\n", 2);
-  write(STDOUT_FILENO, b.data, b.len);
-  buf_free(&b);
 }
 
-static void json_output(const char *stdout_str, const char *stderr_str, int exit_code, const char *result) {
-  json_output_ex(stdout_str, stderr_str, exit_code, result, NULL);
+static void json_out_ex(const char *so, const char *se, int ec, const char *res, const char *dj) {
+  Buf b; b_init(&b);
+  b_app(&b, "{\"stdout\":\"", 11); json_esc(&b, so);
+  b_app(&b, "\",\"stderr\":\"", 12); json_esc(&b, se);
+  b_appf(&b, "\",\"exit_code\":%d,\"result\":\"", ec); json_esc(&b, res);
+  b_app(&b, "\"", 1);
+  if (dj) { b_app(&b, ",\"diagnostics\":", 16); b_app(&b, dj, strlen(dj)); }
+  b_app(&b, "}\n", 2);
+  write(STDOUT_FILENO, b.d, b.len);
+  b_free(&b);
 }
 
-__attribute__((unused)) static void add_diag(Buf *d, const char *file, int line, int col, const char *msg) {
-  if (d->len > 1) buf_append(d, ",", 1);
-  char line_buf[32], col_buf[32];
-  snprintf(line_buf, sizeof(line_buf), "%d", line);
-  snprintf(col_buf, sizeof(col_buf), "%d", col);
-  buf_append(d, "{\"file\":\"", 9);
-  buf_append(d, file, strlen(file));
-  buf_append(d, "\",\"line\":", 9);
-  buf_append(d, line_buf, strlen(line_buf));
-  buf_append(d, ",\"col\":", 7);
-  buf_append(d, col_buf, strlen(col_buf));
-  buf_append(d, ",\"message\":\"", 12);
-  for (const char *s = msg; *s; s++) {
-    if (*s == '"') buf_append(d, "\\\"", 2);
-    else if (*s == '\\') buf_append(d, "\\\\", 2);
-    else buf_append(d, s, 1);
-  }
-  buf_append(d, "\",\"severity\":\"error\"}", 24);
+static void json_out(const char *so, const char *se, int ec, const char *res) {
+  json_out_ex(so, se, ec, res, NULL);
 }
 
-// Dynamic string
-typedef struct {
-  char *s;
-} Str;
+typedef struct { char *s; } Str;
+static void str_free(Str *r) { free(r->s); r->s = NULL; }
 
 static Str str_get(const char *json, const char *key) {
   Str r = {NULL};
-  size_t klen = strlen(key);
-  // find "key":
+  size_t kl = strlen(key);
   const char *p = json;
   while ((p = strstr(p, key))) {
-    if ((p == json || p[-1] == '"') && p[klen] == '"') {
-      p += klen;
-      while (*p && *p != ':') p++;
-      if (*p != ':') { p++; continue; }
+    if ((p == json || p[-1] == '"') && p[kl] == '"') {
+      p += kl; while (*p && *p != ':') p++; if (*p != ':') { p++; continue; }
+      p++; while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+      if (*p != '"') { p++; continue; }
       p++;
-      while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-      if (*p == '"') {
-        p++;
-        Buf b; buf_init(&b);
-        while (*p) {
-          if (*p == '"') { p++; break; }
-          if (*p == '\\') { p++; if (*p) { buf_append(&b, p, 1); p++; } continue; }
-          buf_append(&b, p, 1); p++;
+      Buf b; b_init(&b);
+      while (*p && *p != '"') {
+        if (*p == '\\') {
+          p++;
+          switch (*p) {
+            case '"': b_app(&b, "\"", 1); break;
+            case '\\': b_app(&b, "\\", 1); break;
+            case '/': b_app(&b, "/", 1); break;
+            case 'n': b_app(&b, "\n", 1); break;
+            case 't': b_app(&b, "\t", 1); break;
+            case 'r': b_app(&b, "\r", 1); break;
+            case 'b': b_app(&b, "\b", 1); break;
+            case 'f': b_app(&b, "\f", 1); break;
+            case 'u': {
+              p++; char hex[5] = {p[0], p[1], p[2], p[3], 0};
+              if (strspn(hex, "0123456789abcdefABCDEF") == 4) {
+                unsigned long cp = strtoul(hex, NULL, 16);
+                if (cp < 0x80) { char c2 = cp; b_app(&b, &c2, 1); }
+                else if (cp < 0x800) { char c2 = 0xC0 | (cp >> 6), c3 = 0x80 | (cp & 0x3F); b_app(&b, &c2, 1); b_app(&b, &c3, 1); }
+                else { char c2 = 0xE0 | (cp >> 12), c3 = 0x80 | ((cp >> 6) & 0x3F), c4 = 0x80 | (cp & 0x3F); b_app(&b, &c2, 1); b_app(&b, &c3, 1); b_app(&b, &c4, 1); }
+              }
+              p += 4; break;
+            }
+            default: if (*p) b_app(&b, p, 1); break;
+          }
+          p++;
+          continue;
         }
-        r.s = b.data; // transfer ownership
-        return r;
+        b_app(&b, p, 1); p++;
       }
+      r.s = b.d; return r;
     }
     p++;
   }
@@ -169,112 +131,100 @@ static Str str_get(const char *json, const char *key) {
 
 static Str str_get_raw(const char *json, const char *key) {
   Str r = {NULL};
-  size_t klen = strlen(key);
+  size_t kl = strlen(key);
   const char *p = json;
   while ((p = strstr(p, key))) {
-    if ((p == json || p[-1] == '"') && p[klen] == '"') {
-      p += klen;
-      while (*p && *p != ':') p++;
-      if (*p != ':') { p++; continue; }
-      p++;
-      while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
-      // Capture raw value (string, array, or object)
+    if ((p == json || p[-1] == '"') && p[kl] == '"') {
+      p += kl; while (*p && *p != ':') p++; if (*p != ':') { p++; continue; }
+      p++; while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
       if (*p == '"') {
-        p++;
-        Buf b; buf_init(&b);
-        while (*p) {
-          if (*p == '"') { p++; break; }
-          if (*p == '\\') { buf_append(&b, p, 2); p += 2; continue; }
-          buf_append(&b, p, 1); p++;
-        }
-        r.s = b.data;
-        return r;
+        const char *start = p; p++;
+        while (*p) { if (*p == '"') break; if (*p == '\\') p++; p++; }
+        if (*p == '"') p++;
+        r.s = strndup(start, p - start); return r;
       }
       if (*p == '[' || *p == '{') {
-        int depth = 1;
-        const char *start = p;
-        p++;
+        int depth = 1; const char *start = p; p++;
         while (*p && depth > 0) {
           if (*p == '{' || *p == '[') depth++;
           if (*p == '}' || *p == ']') depth--;
-          p++;
+          if (*p == '"') { p++; while (*p && !(*p == '"' && *(p-1) != '\\')) p++; if (*p) p++; }
+          else p++;
         }
-        r.s = strndup(start, p - start);
-        return r;
+        r.s = strndup(start, p - start); return r;
       }
-      // Number/boolean/null
-      const char *start = p;
-      while (*p && *p != ',' && *p != '}' && *p != ']' && *p != '\n') p++;
-      r.s = strndup(start, p - start);
-      return r;
+      { const char *s = p; while (*p && *p != ',' && *p != '}' && *p != ']' && *p != '\n') p++; r.s = strndup(s, p - s); return r; }
     }
     p++;
   }
   return r;
 }
 
-static void str_free(Str *s) { free(s->s); s->s = NULL; }
-
-static int exec_shell(const char *cmd, Buf *out, Buf *err, int timeout_sec) {
+static int exec_sh(const char *cmd, Buf *out, Buf *err, int tmo) {
   int po[2], pe[2];
   if (pipe(po) < 0 || pipe(pe) < 0) return -1;
   for (int i = 3; i < 256; i++)
     if (i != po[0] && i != po[1] && i != pe[0] && i != pe[1])
       fcntl(i, F_SETFD, FD_CLOEXEC);
 
+  // Temporarily disable SA_NOCLDWAIT so waitpid can collect exit status
+  struct sigaction old_sa;
+  memset(&old_sa, 0, sizeof(old_sa));
+  struct sigaction dfl_sa; memset(&dfl_sa, 0, sizeof(dfl_sa)); dfl_sa.sa_handler = SIG_DFL;
+  sigaction(SIGCHLD, &dfl_sa, &old_sa);
+
   pid_t pid = fork();
   if (pid == 0) {
+    // Child: reset signals to default (already done above, but be explicit)
+    struct sigaction sa; memset(&sa, 0, sizeof(sa)); sa.sa_handler = SIG_DFL;
+    sigaction(SIGPIPE, &sa, NULL);
     close(po[0]); close(pe[0]);
     dup2(po[1], STDOUT_FILENO); dup2(pe[1], STDERR_FILENO);
     close(po[1]); close(pe[1]);
-    if (timeout_sec > 0) alarm(timeout_sec);
-    // Use exec to avoid shell injection — we control the cmd string
+    if (tmo > 0) alarm(tmo);
     execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
     _exit(127);
   }
   close(po[1]); close(pe[1]);
 
-  // Set non-blocking
   int fl_o = fcntl(po[0], F_GETFL, 0);
   int fl_e = fcntl(pe[0], F_GETFL, 0);
   fcntl(po[0], F_SETFL, fl_o | O_NONBLOCK);
   fcntl(pe[0], F_SETFL, fl_e | O_NONBLOCK);
 
   char buf[65536];
-  struct timeval tv = {0, 100000};
   int active = 1;
   while (active) {
-    fd_set rfds;
-    FD_ZERO(&rfds);
+    fd_set rfds; FD_ZERO(&rfds);
     FD_SET(po[0], &rfds); FD_SET(pe[0], &rfds);
-    int maxfd = po[0] > pe[0] ? po[0] : pe[0];
-    int ret = select(maxfd + 1, &rfds, NULL, NULL, &tv);
+    int mf = po[0] > pe[0] ? po[0] : pe[0];
+    struct timeval tv = {0, 100000};
+    int ret;
+    do { ret = select(mf + 1, &rfds, NULL, NULL, &tv); } while (ret < 0 && errno == EINTR);
     if (ret < 0) break;
     active = 0;
-    if (FD_ISSET(po[0], &rfds)) {
-      ssize_t n = read(po[0], buf, sizeof(buf));
-      if (n > 0) { buf_append(out, buf, n); active = 1; }
-    }
-    if (FD_ISSET(pe[0], &rfds)) {
-      ssize_t n = read(pe[0], buf, sizeof(buf));
-      if (n > 0) { buf_append(err, buf, n); active = 1; }
-    }
+    if (FD_ISSET(po[0], &rfds)) { ssize_t n = read(po[0], buf, sizeof(buf)); if (n > 0) { if (out) b_app(out, buf, n); active = 1; } }
+    if (FD_ISSET(pe[0], &rfds)) { ssize_t n = read(pe[0], buf, sizeof(buf)); if (n > 0) { if (err) b_app(err, buf, n); active = 1; } }
   }
 
   close(po[0]); close(pe[0]);
-  int status;
-  waitpid(pid, &status, 0);
+  int status = -1;
+  int wret;
+  do { wret = waitpid(pid, &status, 0); } while (wret < 0 && errno == EINTR);
+
+  // Restore SA_NOCLDWAIT
+  sigaction(SIGCHLD, &old_sa, NULL);
+
+  if (wret < 0) return -1;
   if (WIFEXITED(status)) return WEXITSTATUS(status);
-  if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
-  return -1;
+  return 128 + (WIFSIGNALED(status) ? WTERMSIG(status) : 0);
 }
 
-// Parse files array JSON into dynamic array
 typedef struct { char *name; char *content; } FileEnt;
 
 static FileEnt *parse_files(const char *raw, int *count) {
   *count = 0;
-  if (!raw || raw[0] != '[') return NULL;
+  if (!raw || *raw != '[') return NULL;
   int cap = 16;
   FileEnt *files = malloc(sizeof(FileEnt) * cap);
   if (!files) return NULL;
@@ -283,160 +233,117 @@ static FileEnt *parse_files(const char *raw, int *count) {
   while (*p && *count < MAX_FILES) {
     while (*p && *p != '{') p++;
     if (*p != '{') break;
-    // Find matching }
-    int depth = 1;
-    const char *end = p + 1;
+    int depth = 1; const char *end = p + 1;
     while (*end && depth > 0) { if (*end == '{') depth++; if (*end == '}') depth--; end++; }
     if (depth != 0) break;
 
-    // Extract substring for this entry
-    size_t elen = end - p;
-    char *entry = strndup(p, elen);
+    char *entry = strndup(p, end - p);
     if (!entry) { p = end; continue; }
-
-    Str name_s = str_get(entry, "name");
-    Str content_s = str_get(entry, "content");
+    Str ns = str_get(entry, "name");
+    Str cs = str_get(entry, "content");
     free(entry);
-
-    if (name_s.s && content_s.s) {
-      if (*count >= cap) { cap *= 2; files = realloc(files, sizeof(FileEnt) * cap); }
-      files[*count].name = name_s.s;
-      files[*count].content = content_s.s;
+    if (ns.s && cs.s) {
+      if (*count >= cap) {
+        cap *= 2;
+        FileEnt *nf = realloc(files, sizeof(FileEnt) * cap);
+        if (!nf) { free(ns.s); free(cs.s); break; }
+        files = nf;
+      }
+      files[*count].name = ns.s;
+      files[*count].content = cs.s;
       (*count)++;
-    } else {
-      str_free(&name_s); str_free(&content_s);
-    }
+    } else { str_free(&ns); str_free(&cs); }
     p = end;
   }
   return files;
 }
 
-static void free_files(FileEnt *files, int count) {
-  for (int i = 0; i < count; i++) { free(files[i].name); free(files[i].content); }
-  free(files);
+static void free_files(FileEnt *f, int n) {
+  for (int i = 0; i < n; i++) { free(f[i].name); free(f[i].content); }
+  free(f);
 }
 
-static int do_compile_and_run(const char *code, const char *args, int compile_only,
-                               FileEnt *files, int file_count, const char *filename) {
+static int do_cr(const char *code, const char *args, int co, FileEnt *files, int fc, const char *fn) {
   char tmpdir[] = "/tmp/klyron_c_XXXXXX";
-  if (!mkdtemp(tmpdir)) {
-    json_output(NULL, "Failed to create temp dir", 1, NULL);
-    return 1;
-  }
+  if (!mkdtemp(tmpdir)) { json_out(NULL, "Failed to create temp dir", 1, NULL); return 1; }
 
-  // Write source files
-  if (files && file_count > 0) {
-    for (int i = 0; i < file_count; i++) {
-      char *path;
-      asprintf(&path, "%s/%s", tmpdir, files[i].name);
-      FILE *f = fopen(path, "w");
-      if (!f) { json_output(NULL, "Failed to write source file", 1, NULL); free(path); goto cleanup; }
-      fputs(files[i].content, f);
-      fclose(f);
-      free(path);
+  int wrote = 0;
+  if (files && fc > 0) {
+    for (int i = 0; i < fc; i++) {
+      char *p; if (asprintf(&p, "%s/%s", tmpdir, files[i].name) < 0) continue;
+      FILE *f = fopen(p, "w"); free(p);
+      if (!f) { json_out(NULL, "Failed to write source", 1, NULL); goto cleanup; }
+      fputs(files[i].content, f); fclose(f); wrote = 1;
     }
-  } else if (code && *code) {
-    char *path;
-    asprintf(&path, "%s/%s", tmpdir, filename ? filename : "main.c");
-    FILE *f = fopen(path, "w");
-    if (!f) { json_output(NULL, "Failed to write source file", 1, NULL); free(path); goto cleanup; }
-    fputs(code, f);
-    fclose(f);
-    free(path);
-  } else {
-    json_output(NULL, "No code provided", 1, NULL);
-    goto cleanup;
   }
+  if (!wrote && code && *code) {
+    char *p; asprintf(&p, "%s/%s", tmpdir, fn ? fn : "main.c");
+    FILE *f = fopen(p, "w"); free(p);
+    if (!f) { json_out(NULL, "Failed to write source", 1, NULL); goto cleanup; }
+    fputs(code, f); fclose(f);
+  }
+  if (!wrote && (!code || !*code)) { json_out(NULL, "No code", 1, NULL); goto cleanup; }
 
-  // Find source files
-  char src_buf[8192];
-  int pos = 0;
-  char find_cmd[1024];
-  snprintf(find_cmd, sizeof(find_cmd), "find %s -maxdepth 1 -name '*.c' 2>/dev/null", tmpdir);
-  FILE *fp = popen(find_cmd, "r");
+  // Collect source files via find
+  Buf sb; b_init(&sb);
+  char fc_c[1024]; snprintf(fc_c, sizeof(fc_c), "find %s -maxdepth 1 -name '*.c' 2>/dev/null", tmpdir);
+  FILE *fp = popen(fc_c, "r");
+  int found = 0;
   if (fp) {
-    char line[1024];
-    int first = 1;
-    while (fgets(line, sizeof(line), fp)) {
-      size_t l = strlen(line);
-      while (l > 0 && (line[l-1] == '\n' || line[l-1] == '\r')) line[--l] = '\0';
-      if (l == 0) continue;
-      pos += snprintf(src_buf + pos, sizeof(src_buf) - pos, "%s%s", first ? "" : " ", line);
-      first = 0;
+    char ln[4096];
+    while (fgets(ln, sizeof(ln), fp)) {
+      size_t l = strlen(ln); while (l > 0 && (ln[l-1] == '\n' || ln[l-1] == '\r')) ln[--l] = '\0';
+      if (!l) continue;
+      if (found) b_app(&sb, " ", 1);
+      b_app(&sb, ln, l); found = 1;
     }
     pclose(fp);
-    if (first) pos = snprintf(src_buf, sizeof(src_buf), "%s/main.c", tmpdir);
-  } else {
-    pos = snprintf(src_buf, sizeof(src_buf), "%s/main.c", tmpdir);
   }
+  if (!found) b_app(&sb, tmpdir, strlen(tmpdir)), b_app(&sb, "/main.c", 7);
 
   // Compile
-  char *compile_cmd;
-  asprintf(&compile_cmd,
-           "cc -x c -o %s/prog %s -Wall -Wextra -Werror -O2 -lm -pthread 2>&1", tmpdir, src_buf);
-  Buf co = {0}, ce = {0};
-  int comp_exit = exec_shell(compile_cmd, &co, &ce, 120);
-  free(compile_cmd);
-  if (comp_exit != 0) {
-    json_output(co.data ? co.data : "", ce.data ? ce.data : "", comp_exit, "Compilation failed");
-    buf_free(&co); buf_free(&ce);
-    goto cleanup;
-  }
-  buf_free(&co); buf_free(&ce);
-
-  if (compile_only) {
-    json_output("Compiled successfully", "", 0, "ok");
-    goto cleanup;
-  }
+  char *cc; asprintf(&cc, "cc -x c -o %s/prog %s -Wall -Wextra -Werror -O2 -lm -pthread 2>&1", tmpdir, sb.d);
+  b_free(&sb);
+  Buf co2 = {0}, ce2 = {0};
+  int ce = exec_sh(cc, &co2, &ce2, 120); free(cc);
+  if (ce != 0) { json_out(co2.d ? co2.d : "", ce2.d ? ce2.d : "", ce, "Compilation failed"); b_free(&co2); b_free(&ce2); goto cleanup; }
+  b_free(&co2); b_free(&ce2);
+  if (co) { json_out("Compiled successfully", "", 0, "ok"); goto cleanup; }
 
   // Run
-  char *run_cmd;
-  if (args && *args) asprintf(&run_cmd, "%s/prog %s", tmpdir, args);
-  else asprintf(&run_cmd, "%s/prog", tmpdir);
-  Buf ro = {0}, re = {0};
-  int run_exit = exec_shell(run_cmd, &ro, &re, 30);
-  free(run_cmd);
-  json_output(ro.data ? ro.data : "", re.data ? re.data : "", run_exit,
-              ro.data ? ro.data : "");
-  buf_free(&ro); buf_free(&re);
+  char *rc; if (args && *args) asprintf(&rc, "%s/prog %s", tmpdir, args); else asprintf(&rc, "%s/prog", tmpdir);
+  Buf ro = {0}, re2 = {0};
+  int re = exec_sh(rc, &ro, &re2, 30); free(rc);
+  json_out(ro.d ? ro.d : "", re2.d ? re2.d : "", re, ro.d ? ro.d : "");
+  b_free(&ro); b_free(&re2);
 
 cleanup:
-  // Remove temp dir
-  char rm_cmd[1024]; snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf %s", tmpdir);
-  exec_shell(rm_cmd, NULL, NULL, 5);
+  { char rm[1024]; snprintf(rm, sizeof(rm), "rm -rf %s", tmpdir); exec_sh(rm, NULL, NULL, 5); }
   return 0;
 }
 
 static void handle_action(const char *action, const char *code, const char *args,
                           const char *files_raw, const char *filename) {
-  if (!action || !*action) { json_output(NULL, "No action specified", 1, NULL); return; }
-
+  if (!action || !*action) { json_out(NULL, "No action specified", 1, NULL); return; }
   int fc = 0;
   FileEnt *files = parse_files(files_raw, &fc);
 
   if (strcmp(action, "exec") == 0 || strcmp(action, "run") == 0) {
-    if (!code && fc == 0) { json_output(NULL, "No code provided", 1, NULL); free_files(files, fc); return; }
-    do_compile_and_run(code, args, 0, files, fc, filename);
+    if (!code && fc == 0) { json_out(NULL, "No code provided", 1, NULL); free_files(files, fc); return; }
+    do_cr(code, args, 0, files, fc, filename);
   } else if (strcmp(action, "compile") == 0) {
-    if (!code && fc == 0) { json_output(NULL, "No code provided", 1, NULL); free_files(files, fc); return; }
-    do_compile_and_run(code, args, 1, files, fc, filename);
+    if (!code && fc == 0) { json_out(NULL, "No code provided", 1, NULL); free_files(files, fc); return; }
+    do_cr(code, args, 1, files, fc, filename);
   } else if (strcmp(action, "eval") == 0) {
-    if (!code || !*code) { json_output(NULL, "No expression provided", 1, NULL); free_files(files, fc); return; }
-    char *wrapped;
-    int n = asprintf(&wrapped,
-      "#include <stdio.h>\n#include <stdlib.h>\n#include <math.h>\n"
-      "int main(void) {\n  printf(\"%%d\\n\", (int)(%s));\n  return 0;\n}\n", code);
-    if (n < 0 || n > 65536) { json_output(NULL, "Expression too long", 1, NULL); free_files(files, fc); return; }
-    do_compile_and_run(wrapped, args, 0, NULL, 0, NULL);
-    free(wrapped);
+    if (!code || !*code) { json_out(NULL, "No expression", 1, NULL); free_files(files, fc); return; }
+    char *w; asprintf(&w, "#include <stdio.h>\n#include <stdlib.h>\n#include <math.h>\nint main(void) { printf(\"%%d\\n\", (int)(%s)); return 0; }\n", code);
+    if (!w) { json_out(NULL, "Allocation failed", 1, NULL); free_files(files, fc); return; }
+    do_cr(w, args, 0, NULL, 0, NULL); free(w);
   } else if (strcmp(action, "ping") == 0 || strcmp(action, "") == 0) {
-    json_output("pong", "", 0, "ok");
+    json_out("pong", "", 0, "ok");
   } else {
-    char err[512];
-    snprintf(err, sizeof(err), "Unknown action: %s", action);
-    json_output(NULL, err, 1, NULL);
+    json_out(NULL, "Unknown action", 1, NULL);
   }
-
   free_files(files, fc);
 }
 
@@ -445,34 +352,21 @@ int main() {
   setvbuf(stderr, NULL, _IONBF, 0);
   signal(SIGPIPE, SIG_IGN);
 
-  // Ignore SIGCHLD to avoid zombies
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sa.sa_handler = SIG_IGN;
-  sa.sa_flags = SA_NOCLDWAIT;
+  struct sigaction sa; memset(&sa, 0, sizeof(sa));
+  sa.sa_handler = SIG_IGN; sa.sa_flags = SA_NOCLDWAIT;
   sigaction(SIGCHLD, &sa, NULL);
 
-  char *line = NULL;
-  size_t linecap = 0;
-  ssize_t linelen;
-
-  while ((linelen = getline(&line, &linecap, stdin)) > 0) {
-    while (linelen > 0 && (line[linelen-1] == '\n' || line[linelen-1] == '\r')) line[--linelen] = '\0';
-    if (linelen == 0) continue;
-
-    Str action = str_get(line, "action");
-    Str code = str_get(line, "code");
-    Str args = str_get(line, "args");
-    Str files = str_get_raw(line, "files");
-    Str filename = str_get(line, "filename");
-
-    handle_action(action.s ? action.s : "", code.s ? code.s : "",
-                  args.s ? args.s : "", files.s, filename.s);
-
-    str_free(&action); str_free(&code); str_free(&args);
-    str_free(&files); str_free(&filename);
+  char *line = NULL; size_t linecap = 0;
+  while (getline(&line, &linecap, stdin) > 0) {
+    size_t l = strlen(line);
+    while (l > 0 && (line[l-1] == '\n' || line[l-1] == '\r')) line[--l] = '\0';
+    if (!l) continue;
+    Str a = str_get(line, "action"), c = str_get(line, "code");
+    Str ar = str_get(line, "args"), f = str_get_raw(line, "files");
+    Str fn = str_get(line, "filename");
+    handle_action(a.s ? a.s : "", c.s ? c.s : "", ar.s ? ar.s : "", f.s, fn.s);
+    str_free(&a); str_free(&c); str_free(&ar); str_free(&f); str_free(&fn);
   }
-
   free(line);
   return 0;
 }
