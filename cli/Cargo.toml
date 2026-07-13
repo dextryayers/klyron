@@ -8,6 +8,16 @@ license.workspace = true
 klyron-core = { path = "../core" }
 klyron-ext-console = { path = "../ext/console" }
 klyron-ext-timers = { path = "../ext/timers" }
+klyron-ext-fs = { path = "../ext/fs" }
+klyron-ext-net = { path = "../ext/net" }
+klyron-ext-http = { path = "../ext/http" }
+klyron-ext-crypto = { path = "../ext/crypto" }
+klyron-ext-web = { path = "../ext/web" }
+klyron-ext-html = { path = "../ext/html" }
+klyron-ext-node = { path = "../ext/node" }
+klyron-ext-klyron = { path = "../ext/klyron" }
+klyron-ext-ffi = { path = "../ext/ffi" }
+deno_core = { version = "0.403" }
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

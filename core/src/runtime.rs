@@ -107,7 +107,7 @@ impl Runtime {
     let mut js = self.js_runtime.borrow_mut();
     let (source_code, source_map) = if let Some(ref transpiler) = self.transpiler {
       if name.ends_with(".ts") || name.ends_with(".tsx") || name.ends_with(".jsx") {
-        let (code, sm) = transpiler.transpile_with_sourcemap(source)?;
+        let (code, sm) = transpiler.transpile_with_sourcemap(source).map_err(|e| anyhow::anyhow!("{e}"))?;
         (code, sm)
       } else { (source.to_string(), None) }
     } else { (source.to_string(), None) };
@@ -135,9 +135,7 @@ impl Runtime {
   pub fn run_event_loop(&self) -> Result<()> {
     if let Some(rt) = &self.tokio_runtime {
       let mut js = self.js_runtime.borrow_mut();
-      let _ = rt.block_on(async {
-        let _ = tokio::time::timeout(tokio::time::Duration::from_secs(10), js.run_event_loop(PollEventLoopOptions::default())).await;
-      });
+      rt.block_on(js.run_event_loop(PollEventLoopOptions::default()))?;
     }
     Ok(())
   }

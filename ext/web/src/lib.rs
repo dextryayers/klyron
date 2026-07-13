@@ -1,4 +1,5 @@
-use deno_core::{extension, op2, Extension, JsErrorBox};
+use deno_core::{extension, op2, Extension};
+use deno_error::JsErrorBox;
 
 extension!(
   klyron_web,

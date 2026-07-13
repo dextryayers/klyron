@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use deno_core::{extension, op2, Extension, JsErrorBox, OpState};
+use deno_core::{extension, op2, Extension, OpState};
+use deno_error::JsErrorBox;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -41,7 +42,7 @@ fn op_net_connect(state: &mut OpState, #[string] addr: String) -> Result<Connect
   Ok(ConnectResult { rid, local_addr, peer_addr })
 }
 
-#[op2]
+#[op2(fast)]
 fn op_net_send(state: &mut OpState, rid: i32, #[string] data: String) -> Result<(), JsErrorBox> {
   let store = state.borrow::<ConnStore>();
   let guard = store.lock().unwrap();
@@ -72,7 +73,7 @@ fn op_net_recv(state: &mut OpState, rid: i32) -> Result<String, JsErrorBox> {
   }
 }
 
-#[op2]
+#[op2(fast)]
 fn op_net_close(state: &mut OpState, rid: i32) -> Result<(), JsErrorBox> {
   let store = state.borrow_mut::<ConnStore>();
   let mut guard = store.lock().unwrap();

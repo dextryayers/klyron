@@ -40,3 +40,6 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 authors = ["Klyron Contributors"]
+
+[workspace.dependencies]
+deno_error = "0.7"

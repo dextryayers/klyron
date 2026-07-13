@@ -6,7 +6,7 @@ use oxc::parser::Parser;
 use oxc::span::SourceType;
 use oxc::transformer::{TransformOptions, Transformer};
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Transpiler;
 
 impl Transpiler {
@@ -15,19 +15,7 @@ impl Transpiler {
   }
 
   pub fn transpile(&self, code: &str) -> Result<String, String> {
-    let allocator = Allocator::default();
-    let source_type = SourceType::mjs();
-    let ret = Parser::new(&allocator, code, source_type).parse();
-    if !ret.diagnostics.is_empty() {
-      let msg = format!("Parse errors ({} diagnostics)", ret.diagnostics.len());
-      return Err(msg);
-    }
-    let mut program = ret.program;
-    let scoping = oxc::semantic::Scoping::default();
-    let _ = Transformer::new(&allocator, Path::new("."), &TransformOptions::default())
-      .build_with_scoping(scoping, &mut program);
-    let output = Codegen::new().build(&program);
-    Ok(output.code)
+    self.transpile_with_sourcemap(code).map(|(c, _)| c)
   }
 
   pub fn is_ts(&self, specifier: &str) -> bool {
@@ -39,20 +27,18 @@ impl Transpiler {
     let source_type = SourceType::mjs();
     let ret = Parser::new(&allocator, code, source_type).parse();
     if !ret.diagnostics.is_empty() {
-      let msg = format!("Parse errors ({} diagnostics)", ret.diagnostics.len());
-      return Err(msg);
+      let errors: Vec<String> = ret.diagnostics.iter().map(|d| d.to_string()).collect();
+      return Err(errors.join("\n"));
     }
     let mut program = ret.program;
     let scoping = oxc::semantic::Scoping::default();
-    let _ = Transformer::new(&allocator, Path::new("."), &TransformOptions::default())
+    let transform_result = Transformer::new(&allocator, Path::new("."), &TransformOptions::default())
       .build_with_scoping(scoping, &mut program);
+    if !transform_result.diagnostics.is_empty() {
+      let errors: Vec<String> = transform_result.diagnostics.iter().map(|d| d.to_string()).collect();
+      return Err(errors.join("\n"));
+    }
     let output = Codegen::new().build(&program);
     Ok((output.code, None))
-  }
-}
-
-impl Default for Transpiler {
-  fn default() -> Self {
-    Self::new()
   }
 }

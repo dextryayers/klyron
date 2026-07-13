@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use deno_core::{extension, op2, Extension};
+use deno_error::JsErrorBox;
 
 extension!(
   klyron_node,
@@ -44,7 +45,7 @@ fn op_process_env() -> String {
 }
 
 #[op2(fast)]
-fn op_process_exit(#[number] code: i32) {
+fn op_process_exit(code: i32) {
   std::process::exit(code);
 }
 
@@ -65,8 +66,8 @@ fn op_process_hrtime() -> String {
 
 #[op2]
 #[string]
-fn op_process_spawn(#[string] cmd: String, #[string] args_json: String) -> Result<String, String> {
-  let args: Vec<String> = serde_json::from_str(&args_json).map_err(|e| format!("spawn args: {e}"))?;
+fn op_process_spawn(#[string] cmd: String, #[string] args_json: String) -> Result<String, JsErrorBox> {
+  let args: Vec<String> = serde_json::from_str(&args_json).map_err(|e| JsErrorBox::generic(format!("spawn args: {e}")))?;
   match std::process::Command::new(&cmd).args(&args).output() {
     Ok(output) => Ok(serde_json::json!({
       "pid": 0,
@@ -74,13 +75,13 @@ fn op_process_spawn(#[string] cmd: String, #[string] args_json: String) -> Resul
       "stderr": String::from_utf8_lossy(&output.stderr),
       "code": output.status.code(),
     }).to_string()),
-    Err(e) => Err(format!("spawn {cmd}: {e}")),
+    Err(e) => Err(JsErrorBox::generic(format!("spawn {cmd}: {e}"))),
   }
 }
 
 #[op2]
 #[string]
-fn op_process_exec(#[string] cmd: String) -> Result<String, String> {
+fn op_process_exec(#[string] cmd: String) -> Result<String, JsErrorBox> {
   let shell = if cfg!(windows) { "cmd" } else { "sh" };
   let flag = if cfg!(windows) { "/c" } else { "-c" };
   match std::process::Command::new(shell).arg(flag).arg(&cmd).output() {
@@ -89,6 +90,6 @@ fn op_process_exec(#[string] cmd: String) -> Result<String, String> {
       "stderr": String::from_utf8_lossy(&output.stderr),
       "code": output.status.code(),
     }).to_string()),
-    Err(e) => Err(format!("exec {cmd}: {e}")),
+    Err(e) => Err(JsErrorBox::generic(format!("exec {cmd}: {e}"))),
   }
 }

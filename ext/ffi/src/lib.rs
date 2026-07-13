@@ -1,4 +1,5 @@
 use deno_core::{extension, op2, Extension};
+use deno_error::JsErrorBox;
 
 extension!(
   klyron_ffi,
@@ -13,12 +14,12 @@ pub fn init() -> Extension {
 
 #[op2]
 #[string]
-fn op_ffi_open(#[string] _path: String) -> Result<String, String> {
-  Err("FFI is not yet supported on this platform".to_string())
+fn op_ffi_open(#[string] _path: String) -> Result<String, JsErrorBox> {
+  Err(JsErrorBox::generic("FFI is not yet supported on this platform"))
 }
 
 #[op2]
 #[string]
-fn op_ffi_call(#[number] _lib_id: u32, #[string] _fn_name: String, #[string] _args_json: String) -> Result<String, String> {
-  Err("FFI is not yet supported on this platform".to_string())
+fn op_ffi_call(_lib_id: i32, #[string] _fn_name: String, #[string] _args_json: String) -> Result<String, JsErrorBox> {
+  Err(JsErrorBox::generic("FFI is not yet supported on this platform"))
 }

@@ -4,9 +4,10 @@ use std::{
 };
 
 use deno_core::{
-  JsErrorBox, ModuleLoadOptions, ModuleLoadReferrer, ModuleLoadResponse, ModuleLoader,
+  ModuleLoadOptions, ModuleLoadReferrer, ModuleLoadResponse, ModuleLoader,
   ModuleResolveResponse, ModuleSource, ModuleSourceCode, ModuleSpecifier, ModuleType, ResolutionKind,
 };
+use deno_error::JsErrorBox;
 
 use crate::permissions::Permissions;
 use crate::transpiler::Transpiler;
@@ -38,12 +39,11 @@ pub struct KlyronModuleLoader {
   permissions: Arc<Permissions>,
   transpiler: Option<Transpiler>,
   cache: Arc<Mutex<Vec<(String, CachedModule)>>>,
-  resolved_cache: Arc<Mutex<Vec<(String, ModuleSpecifier)>>>,
 }
 
 impl KlyronModuleLoader {
   pub fn new(permissions: Arc<Permissions>, transpiler: Option<Transpiler>) -> Self {
-    Self { permissions, transpiler, cache: Arc::new(Mutex::new(Vec::new())), resolved_cache: Arc::new(Mutex::new(Vec::new())) }
+    Self { permissions, transpiler, cache: Arc::new(Mutex::new(Vec::new())) }
   }
 
   fn cache_get(&self, url: &str) -> Option<CachedModule> {
@@ -146,10 +146,20 @@ impl ModuleLoader for KlyronModuleLoader {
 
     if let Ok(path) = module_specifier.to_file_path() {
       if path.exists() {
+        // Check read permission before loading
+        let path_str = path.to_string_lossy();
+        if let Err(e) = self.permissions.check_read(&path_str) {
+          return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(e)));
+        }
+
         match std::fs::read_to_string(&path) {
           Ok(content) => {
             let is_ts = path.extension().map(|e| e == "ts" || e == "tsx").unwrap_or(false);
-            let module_type = ModuleType::JavaScript;
+            let module_type = if path.extension().map(|e| e == "json").unwrap_or(false) {
+              ModuleType::Json
+            } else {
+              ModuleType::JavaScript
+            };
             let code = if is_ts {
               if let Some(ref t) = self.transpiler { t.transpile(&content).unwrap_or(content) } else { content }
             } else { content };

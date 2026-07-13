@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use deno_core::{extension, op2, Extension, JsErrorBox};
+use deno_core::{extension, op2, Extension};
+use deno_error::JsErrorBox;
 use serde::Serialize;
 
 extension!(
@@ -20,12 +21,12 @@ fn op_fs_read_file(#[string] path: String) -> Result<String, JsErrorBox> {
   std::fs::read_to_string(&path).map_err(|e| JsErrorBox::generic(format!("read {path}: {e}")))
 }
 
-#[op2]
+#[op2(fast)]
 fn op_fs_write_file(#[string] path: String, #[string] data: String) -> Result<(), JsErrorBox> {
   std::fs::write(&path, &data).map_err(|e| JsErrorBox::generic(format!("write {path}: {e}")))
 }
 
-#[op2]
+#[op2(fast)]
 fn op_fs_mkdir(#[string] path: String) -> Result<(), JsErrorBox> {
   std::fs::create_dir_all(&path).map_err(|e| JsErrorBox::generic(format!("mkdir {path}: {e}")))
 }
@@ -80,7 +81,7 @@ fn op_fs_exists(#[string] path: String) -> bool {
   Path::new(&path).exists()
 }
 
-#[op2]
+#[op2(fast)]
 fn op_fs_remove(#[string] path: String) -> Result<(), JsErrorBox> {
   let p = Path::new(&path);
   if p.is_dir() {
@@ -90,13 +91,13 @@ fn op_fs_remove(#[string] path: String) -> Result<(), JsErrorBox> {
   }
 }
 
-#[op2]
+#[op2(fast)]
 fn op_fs_copy(#[string] src: String, #[string] dest: String) -> Result<(), JsErrorBox> {
   std::fs::copy(&src, &dest).map_err(|e| JsErrorBox::generic(format!("copy {src} -> {dest}: {e}")))?;
   Ok(())
 }
 
-#[op2]
+#[op2(fast)]
 fn op_fs_rename(#[string] src: String, #[string] dest: String) -> Result<(), JsErrorBox> {
   std::fs::rename(&src, &dest).map_err(|e| JsErrorBox::generic(format!("rename {src} -> {dest}: {e}")))
 }
