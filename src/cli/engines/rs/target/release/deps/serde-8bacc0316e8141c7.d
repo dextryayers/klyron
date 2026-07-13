@@ -1,0 +1,14 @@
+/home/aniipid/koding/klyronjs/src/cli/engines/rs/target/release/deps/serde-8bacc0316e8141c7.d: /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/aniipid/koding/klyronjs/src/cli/engines/rs/target/release/build/serde-1ca9ac83093a3fb4/out/private.rs
+
+/home/aniipid/koding/klyronjs/src/cli/engines/rs/target/release/deps/libserde-8bacc0316e8141c7.rlib: /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/aniipid/koding/klyronjs/src/cli/engines/rs/target/release/build/serde-1ca9ac83093a3fb4/out/private.rs
+
+/home/aniipid/koding/klyronjs/src/cli/engines/rs/target/release/deps/libserde-8bacc0316e8141c7.rmeta: /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/aniipid/koding/klyronjs/src/cli/engines/rs/target/release/build/serde-1ca9ac83093a3fb4/out/private.rs
+
+/home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/home/aniipid/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/home/aniipid/koding/klyronjs/src/cli/engines/rs/target/release/build/serde-1ca9ac83093a3fb4/out/private.rs:
+
+# env-dep:OUT_DIR=/home/aniipid/koding/klyronjs/src/cli/engines/rs/target/release/build/serde-1ca9ac83093a3fb4/out

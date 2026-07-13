@@ -1,862 +1,541 @@
-# Klyron JS — Ultimate Polyglot Runtime Plan (v3)
+# Klyron — Universal Polyglot Runtime
 
-> **Tagline:** "One runtime to run them all. JS, TS, PHP, Python — same binary, maximum security."
->
-> Target: Bun speed + Deno security + **Laravel + Next.js + Vite + Prisma + everything**
-
----
-
-## Vision
-
-**Klyron is a universal polyglot runtime** — a single binary that can run JavaScript, TypeScript, **PHP (Laravel)**, Python, and Ruby applications with **military-grade security**. It replaces Node.js, Bun, Composer, pip, npm, and docker-compose for development and production.
-
-```
-klyron run app.ts           # TypeScript
-klyron run app.php          # PHP / Laravel
-klyron run app.py           # Python
-klyron run app.rb           # Ruby
-klyron run artisan serve    # Laravel Artisan
-klyron run npm run dev      # npm scripts
-klyron run composer install # Composer
-klyron run pip install      # pip
-klyron serve                 # Production server (auto-detect)
-```
+**Version:** 0.1.0
+**Edition:** 2024
+**License:** MIT
+**Architecture:** Rust workspace + Native Language Engines (C, C++, TypeScript, PHP)
 
 ---
 
-## What Makes Klyron the Ultimate Runtime
-
-| Feature | Bun | Deno | Klyron |
-|---------|-----|------|--------|
-| JS Engine | JSC | V8 | **V8 (primary) + JSC/QuickJS** |
-| PHP/Laravel | ❌ | ❌ | **✅ via PHP-WASM + phper** |
-| Python | ❌ | ❌ | **✅ via PyO3 / WASM** |
-| Ruby | ❌ | ❌ | **✅ via WASM** |
-| Package Manager | npm only | npm only | **npm + Composer + pip + gem + cargo** |
-| Security | None | Basic | **Maximum: sandbox + seccomp + LSM + namespace** |
-| Laravel | ❌ | ❌ | **✅ Full support + Artisan CLI** |
-| Next.js | ✅ | Partial | **✅ Full** |
-| Vite | ✅ | ❌ | **✅ Full** |
-| Prisma | ✅ | ❌ | **✅ Full** |
-| NestJS | ✅ | ❌ | **✅ Full** |
-| Astro | ✅ | ❌ | **✅ Full** |
-| React/Vue/Svelte | ✅ | ❌ | **✅ Full** |
-| Docker alternative | ❌ | ❌ | **✅ Built-in sandbox replaces Docker for dev** |
-| Multi-user isolation | ❌ | ❌ | **✅ Tenant-per-process isolation** |
-| Supply chain security | ❌ | ❌ | **✅ SBOM + signature verification** |
-
----
-
-## Architecture
+## 1. Arsitektur Sistem
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────────────────┐
-│                              Klyron CLI (clap)                                                │
-│  run │ eval │ repl │ test │ build │ compile │ serve │ artisan │ composer │ pip │ gem │ cargo │
-└──────────────────────────────────────────┬───────────────────────────────────────────────────┘
-                                           │
-┌──────────────────────────────────────────▼───────────────────────────────────────────────────┐
-│                                    Klyron Core                                                 │
-│                                                                                                │
-│  ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │  Runtime Engine Abstraction (swap engines at build/run time)                              │ │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │ │
-│  │  │ V8 (JS)  │ │ JSC (JS) │ │ QuickJS  │ │ PHP-WASM │ │ PyO3     │ │ Ruby-WASM│          │ │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘          │ │
-│  └──────────────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                                │
-│  ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │  Security Layer (military-grade)                                                          │ │
-│  │  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐ ┌────────────────────┐   │ │
-│  │  │ Sandbox (seccomp │ │ Capability-Based │ │ Filesystem       │ │ Network Policy     │   │ │
-│  │  │ + Landlock)      │ │ Permissions      │ │ Namespace (pivot)│ │ (eBPF/iptables)    │   │ │
-│  │  ├──────────────────┤ ├──────────────────┤ ├──────────────────┤ ├────────────────────┤   │ │
-│  │  │ Memory Limits    │ │ CPU Limits       │ │ Audit Trail      │ │ SBOM Verification  │   │ │
-│  │  └──────────────────┘ └──────────────────┘ └──────────────────┘ └────────────────────┘   │ │
-│  └──────────────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                                │
-│  ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │  Universal Module Loader                                                                   │ │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐  │ │
-│  │  │ ESM (JS) │ │ CJS (JS) │ │ Composer │ │ pip      │ │ gem      │ │ cargo (Rust,     │  │ │
-│  │  │          │ │          │ │ (PHP)    │ │ (Python) │ │ (Ruby)   │ │ native addons)   │  │ │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────────────┘  │ │
-│  └──────────────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                                │
-│  ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │  Universal Package Manager (one CLI to rule all packages)                                 │ │
-│  │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐              │ │
-│  │  │ npm        │ │ Composer   │ │ pip        │ │ gem        │ │ cargo      │              │ │
-│  │  │ registry   │ │ (Packagist)│ │ (PyPI)     │ │ (RubyGems) │ │ (crates.io)│              │ │
-│  │  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘              │ │
-│  └──────────────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                                │
-│  ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │  Extension System (ops) — shared across all languages                                     │ │
-│  │  ┌──────┐ ┌────┐ ┌────┐ ┌──────┐ ┌──────┐ ┌────┐ ┌──────┐ ┌────┐ ┌────┐ ┌───────────┐  │ │
-│  │  │ web  │ │ fs  │ │ net │ │ http  │ │crypto│ │node│ │klyron│ │ ai  │ │ PHP │ │ Python    │  │ │
-│  │  │fetch │ │    │ │tcp  │ │serve  │ │      │ │poly│ │ API  │ │/tens│ │ bdg │ │ bdg       │  │ │
-│  │  └──────┘ └────┘ └────┘ └──────┘ └──────┘ └────┘ └──────┘ └────┘ └────┘ └───────────┘  │ │
-│  └──────────────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                                │
-│  ┌──────────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │  Tokio Async Runtime                                                                       │ │
-│  │  ┌──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────────────┐  │ │
-│  │  │ io_uring │ Timers   │ TCP/UDP  │ FS I/O   │ DNS      │ Signal   │ Process (spawn)  │  │ │
-│  │  └──────────┴──────────┴──────────┴──────────┴──────────┴──────────┴──────────────────┘  │ │
-│  └──────────────────────────────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│                   Klyron CLI                         │
+│  src/cli/src/main.rs                                 │
+│  ┌──────────────────────────────────────────────┐   │
+│  │              Rust Bridge Layer                 │   │
+│  │  src/cli/src/engines/                         │   │
+│  │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐        │   │
+│  │  │ c.rs │ │cpp.rs│ │ts.rs │ │php.rs│        │   │
+│  │  └──┬───┘ └──┬───┘ └──┬───┘ └──┬───┘        │   │
+│  └─────┼────────┼────────┼────────┼──────────────┘   │
+│        │        │        │        │                   │
+│  ┌─────▼────────▼────────▼────────▼──────────────┐   │
+│  │           Native Engine Binaries                │   │
+│  │  src/cli/engines/                              │   │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───┐ │   │
+│  │  │engine.c  │ │engine.cpp│ │engine.ts │ │php│ │   │
+│  │  │ (C)      │ │ (C++)    │ │ (Node)   │ │   │ │   │
+│  │  └──────────┘ └──────────┘ └──────────┘ └───┘ │   │
+│  └──────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │           Klyron Core (deno_core + V8)            │   │
+│  │  src/core/                                        │   │
+│  │  Runtime · ModuleLoader · Transpiler · Sandbox    │   │
+│  │  Permissions · Audit                             │   │
+│  └──────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │           Extension Crates (src/ext/)             │   │
+│  │  console crypto ffi fs html http klyron net      │   │
+│  │  node timers web ws                              │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Komunikasi Protocol (JSON-Line via stdin/stdout):**
+```
+Input:  {"action":"exec","code":"...","args":"...","filename":"...","project":"..."}
+Output: {"stdout":"...","stderr":"...","exit_code":0,"result":"..."}
+Actions: exec, file, eval, compile, ping, check
+         artisan, composer, blade, artisan:serve, artisan:make, artisan:migrate
 ```
 
 ---
 
-## Security Model (Military-Grade)
+## 2. Engine Modules
 
-### Layer 1: Capability-Based Permissions
-Every operation requires explicit grant — stricter than Deno.
+### 2.1 C Engine (`src/cli/engines/c/engine.c`)
 
+**Bahasa:** C23 (GNU C)
+**Compiler:** `cc` (gcc/clang)
+**File:** 232 lines
+
+| Fitur | Status | Keterangan |
+|-------|--------|------------|
+| JSON-Line protocol stdin/stdout | ✅ | `json_get_string()` parser, `json_output()` writer |
+| Compile + run (`exec`) | ✅ | Temp dir `/tmp/klyron_c_XXXXXX`, `mkdtemp`, cleanup |
+| Compile only (`compile`) | ✅ | Skip run step |
+| Expression eval (`eval`) | ✅ | Wrapped in `int main(){printf("%d",(expr));}` |
+| Ping health check | ✅ | `{"action":"ping"}` → `pong` |
+| Signal handling | ✅ | `SIGPIPE` ignored |
+| Non-blocking I/O | ✅ | `select()` + `O_NONBLOCK` pada pipe |
+| Timeout (30s) | ✅ | `alarm()` + `select()` timeout |
+| Compiler flags | ✅ | `-Wall -Wextra -Werror -O2 -lm -pthread` |
+| Memory safety | ✅ | `fmemopen` bounded, `free()` cleanup |
+| Unicode JSON escape | ✅ | `\uXXXX` untuk < 0x20 |
+| FD cleanup | ✅ | `fcntl(_, F_SETFD, FD_CLOEXEC)` on all FDs |
+
+**Arsitektur internal:**
 ```
-klyron run app.ts                           # No permissions → most things fail
-klyron run --allow-net app.ts               # Network access only
-klyron run --allow-read=/app app.ts         # Read-only /app directory
-klyron run --allow-net=*.example.com app.ts # Network to specific domains only
-
-# Laravel needs many things:
-klyron run artisan serve \
-  --allow-read=/app \
-  --allow-write=/app/storage,/app/bootstrap \
-  --allow-net \
-  --allow-env \
-  --allow-run=php
-
-# Stricter: allow PHP execution only:
-klyron run artisan serve \
-  --allow-read=/app \
-  --allow-write=/app/storage \
-  --allow-net=localhost:3306,localhost:6379 \
-  --allow-env=APP_KEY,DB_*,REDIS_*
-```
-
-### Permission Flags
-
-| Flag | Description | Example |
-|------|-------------|---------|
-| `--allow-read` | File read access | `--allow-read=/app,/tmp` |
-| `--allow-write` | File write access | `--allow-write=/app/storage` |
-| `--allow-net` | Network access | `--allow-net=localhost:3306,*.example.com` |
-| `--allow-env` | Environment variables | `--allow-env=DB_HOST,APP_KEY` |
-| `--allow-run` | Subprocess execution | `--allow-run=php,node,git` |
-| `--allow-ffi` | Native library loading | `--allow-ffi=/usr/lib/libsqlite.so` |
-| `--allow-sys` | System info (hostname, etc.) | |
-| `--allow-read-all` | Read entire filesystem | |
-| `--deny-read` | Explicit deny (overrides allow) | `--deny-read=/app/.env` |
-| `--deny-net` | Block specific hosts | `--deny-net=*.malicious.com` |
-| `--prompt` | Interactive permission prompt | |
-
-### Layer 2: Kernel-Level Sandboxing
-
-| Mechanism | Linux | macOS | Windows |
-|-----------|-------|-------|---------|
-| **seccomp-bpf** | ✅ System call filtering | ❌ | ❌ |
-| **Landlock** | ✅ Filesystem restrictions (Linux 5.13+) | ❌ | ❌ |
-| **Namespace (user/mount/net)** | ✅ Full isolation | ❌ | ❌ |
-| **capabilities(7)** | ✅ Drop root caps | ❌ | ❌ |
-| **AppArmor/SELinux** | ✅ Profile integration | ❌ | ❌ |
-| **Sandbox (seatbelt)** | ❌ | ✅ | ❌ |
-| **Win32 Job Objects** | ❌ | ❌ | ✅ |
-| **Win32 AppContainer** | ❌ | ❌ | ✅ |
-
-### Layer 3: Resource Limits
-
-```
-klyron run --max-memory=256MB app.ts      # OOM kill at 256MB
-klyron run --max-cpu=2 app.ts             # Max 2 CPU cores
-klyron run --max-fds=100 app.ts           # Max 100 file descriptors
-klyron run --max-processes=10 app.ts      # Max 10 child processes
-klyron run --timeout=30s app.ts           # Kill after 30 seconds
-klyron run --max-write-size=1GB app.ts    # Max total writes
+main()
+ └── loop: fgets(stdin) → json_get_string(action, code, args)
+      └── handle_action()
+           ├── "exec/run"  → compile_and_run(source, args, 0)
+           ├── "compile"   → compile_and_run(source, args, 1)
+           ├── "eval"      → wrap + compile_and_run
+           ├── "ping"/""   → json_output("pong")
+           └── default     → json_output("Unknown action")
 ```
 
-### Layer 4: Supply Chain Security
+### 2.2 C++ Engine (`src/cli/engines/cpp/engine.cpp`)
 
+**Bahasa:** C++20
+**Compiler:** Auto-detect: `g++` → `clang++` → `c++`
+**File:** 247 lines
+
+| Fitur | Status | Keterangan |
+|-------|--------|------------|
+| JSON-Line protocol | ✅ | `std::string` based, modern C++ |
+| Compiler auto-detect | ✅ | `detect_compiler()` function |
+| Compile + run | ✅ | Temp dir, source write, compile, execute |
+| Expression eval | ✅ | `std::cout << (expr)` wrapped |
+| STL support | ✅ | `iostream`, `string`, `vector`, `algorithm` |
+| Exceptions support | ✅ | Compiler flags include exception handling |
+| Templates support | ✅ | C++20 standard |
+| Non-blocking I/O | ✅ | `select()` with non-blocking pipes |
+| Timeout (compile 120s, run 30s) | ✅ | `alarm()` |
+| RAII | ✅ | `std::string` memory management |
+| Cleanup | ✅ | `unlink()` + `rmdir()` on temp files |
+| `-Werror` strict mode | ✅ | Compilation fails on warnings |
+
+**Compiler detection logic:**
 ```
-klyron install express                    # Installs + verifies integrity
-klyron install --verify-sig express       # GPG signature verification
-klyron install --sbom express             # Generates SPDX SBOM
-klyron audit                              # Vulnerability scan (all packages)
-klyron audit --fix                        # Auto-fix vulnerable packages
-klyron verify                             # Verify all cached packages integrity
-klyron sbom > klyron.sbom.spdx           # Export SBOM
-```
-
-### Layer 5: Audit Trail
-
-```
-# All security-relevant events logged:
-klyron run --audit app.ts
-# Output: klyron-audit.jsonl
-{
-  "timestamp": "...",
-  "pid": 1234,
-  "operation": "file_read",
-  "path": "/etc/passwd",
-  "allowed": false,
-  "rule": "--deny-read=/etc"
-}
-```
-
----
-
-## Multi-Language Support
-
-### JavaScript/TypeScript (Primary)
-- **Engine:** V8 via deno_core (primary), JSC (optional), QuickJS (optional)
-- **Transpiler:** oxc (2-5x faster than SWC)
-- **Module:** ESM + CJS interop
-- **Package:** npm registry via Klyron package manager
-
-### PHP / Laravel (Unique Feature)
-
-```
-klyron run artisan serve                   # Laravel dev server
-klyron run artisan migrate                 # Run migrations
-klyron run app.php                         # Execute any PHP file
-klyron composer install                    # Install PHP deps
-klyron composer require laravel/laravel    # Create new Laravel project
-klyron run --php-ext=mbstring,pdo app.php  # Enable PHP extensions
+detect_compiler()
+ → system("g++ --version") → return "g++"
+ → system("clang++ --version") → return "clang++"
+ → system("c++ --version") → return "c++"
+ → default: "g++"
 ```
 
-**Implementation:**
-- Primary: **PHP-WASM** (PHP 8.x compiled to WebAssembly via emscripten)
-- Alternative: **phper** (embed PHP C extension in Rust) for production perf
-- WASM is default for portability + sandboxing
-- Native PHP for performance when available
+### 2.3 TypeScript Engine (`src/cli/engines/ts/engine.ts`)
 
-**Laravel-specific support:**
-- Artisan CLI fully supported (`klyron run artisan [cmd]`)
-- Blade templating (rendered via WASM, served via Klyron HTTP)
-- Eloquent ORM (works via PDO → Klyron's SQLite/MySQL/PostgreSQL bridge)
-- Sanctum, Horizon, Telescope, Nova
-- Vite Laravel plugin integration
-- Laravel Reverb (WebSocket) via Klyron WebSocket
-- Laravel Octane (Klyron replaces RoadRunner)
+**Runtime:** Node.js
+**File:** 211 lines
 
-### Python
+| Fitur | Status | Keterangan |
+|-------|--------|------------|
+| JSON-Line protocol | ✅ | `readLine()` async, `writeOutput()` |
+| Transpile + exec | ✅ | `transpileTypeScript()` → `new Function()` |
+| File execution | ✅ | `execFile()` via `fs.readFileSync` |
+| Expression eval | ✅ | `stripTypeAnnotations` → `eval()` |
+| Type check (stub) | ✅ | Reports "requires tsc" |
+| Deno fallback | ✅ | `Deno.transpileOnly()` |
+| esbuild fallback | ✅ | `require("esbuild").transformSync()` |
+| Regex type stripper | ✅ | 16 patterns komprehensif |
+| Diagnostics extraction | ✅ | `extractDiagnostics()` file:line:col parser |
+| JSX/TSX support | ✅ | esbuild loader auto-detect |
+| Uncaught handler | ✅ | `uncaughtException` + `unhandledRejection` |
+| Source maps | 🚧 | Planned |
 
+**TypeScript stripping patterns (16 regex):**
 ```
-klyron run app.py                          # Execute Python
-klyron pip install flask                   # Install Python deps
-klyron run manage.py runserver             # Django
-klyron run app.py                          # FastAPI
-```
-
-**Implementation:**
-- **PyO3** — embed Python interpreter in Rust (requires CPython lib)
-- **WASM Python** — CPython compiled to WASM (portable fallback)
-- **Bridge** — Python ↔ JS interop via shared memory
-
-### Ruby
-
-```
-klyron run app.rb                          # Execute Ruby
-klyron gem install rails                   # Install Ruby deps
-klyron run rails server                    # Rails
-```
-
-**Implementation:**
-- **WASM Ruby** — MRI compiled to WASM via emscripten
-- **Artichoke** — Rust Ruby implementation (optional)
-
----
-
-## Universal Package Manager
-
-### Single CLI for All Ecosystems
-
-```
-klyron install express                    # npm (JavaScript)
-klyron install laravel/laravel            # Composer (PHP)
-klyron install flask                      # pip (Python)
-klyron install rails                      # gem (Ruby)
-klyron install serde                      # cargo (Rust)
-
-klyron add express                        # npm shorthand
-klyron add laravel/laravel                # Composer shorthand
-klyron add django                         # pip shorthand
-
-klyron remove express                     # Uninstall any
-klyron update                             # Update all packages
-klyron outdated                           # Check outdated
-klyron audit                              # Security audit (all ecosystems)
-klyron why express                        # Why is this installed?
-klyron info express                       # Package info
-
-klyron run npm run dev                    # npm scripts
-klyron run composer install               # Composer install
-klyron run pip install -r requirements.txt
+1. : type annotations        → : number | string | boolean | void | null | undefined | any | never | unknown | bigint | symbol | object
+2. : complex types           → : UserType<T> | OtherType
+3. as Type casts             → as const | as Type
+4. satisfies                 → satisfies Type
+5. interface { }             → interface Foo extends Bar { }
+6. type alias                → type Foo = ...
+7. enum → const object       → enum Foo { A, B = 1 }
+8. declare                   → declare const
+9. access modifiers          → public | private | protected | readonly | abstract
+10. definite assignment      → x!: number
+11. optional property        → x?: type
+12. decorators               → @decorator
+13. import type              → import type { ... }
+14. export type              → export type
+15. export interface         → export interface
+16. as const                 → as const
 ```
 
-### Lockfile: `klyron.lock` (Universal)
+### 2.4 PHP Engine (`src/cli/engines/php/engine.php`)
 
-```
-# klyron.lock — all languages in one file
-version: 1
-packages:
-  # JavaScript
-  - name: express
-    version: 4.18.2
-    registry: npm
-    integrity: sha512-...  # Content hash
-    source: https://registry.npmjs.org/
-    
-  # PHP
-  - name: laravel/framework
-    version: 11.0.0
-    registry: packagist
-    integrity: sha512-...
-    source: https://repo.packagist.org/
-    
-  # Python
-  - name: flask
-    version: 3.0.0
-    registry: pypi
-    integrity: sha512-...
-    source: https://pypi.org/simple/
-```
+**Runtime:** PHP 8.x
+**File:** 243 lines
 
-### Global Cache Architecture
+| Fitur | Status | Keterangan |
+|-------|--------|------------|
+| JSON-Line protocol | ✅ | `json_decode` + `json_encode` |
+| Code exec (`eval()`) | ✅ | Dengan `ob_start()` capture |
+| File execution | ✅ | `php file.php` subprocess |
+| Expression eval | ✅ | `eval("return $expr;")` |
+| Artisan commands | ✅ | `php artisan <args>` |
+| Artisan serve | ✅ | `php artisan serve` |
+| Artisan make:* | ✅ | `php artisan make:<type>` |
+| Artisan migrate | ✅ | `php artisan migrate --force` |
+| Composer commands | ✅ | `composer --working-dir=` |
+| Blade rendering | ✅ | Laravel `View::make()` + raw PHP fallback |
+| Timeout (30s) | ✅ | `proc_get_status` + `proc_terminate(SIGKILL)` |
+| Non-blocking I/O | ✅ | `stream_select()` on pipes |
+| Output truncation | ✅ | MAX_OUTPUT = 131072 |
+| Error handling | ✅ | `match` expression, `try/catch` |
+| `JSON_THROW_ON_ERROR` | ✅ | Strict JSON parsing |
 
+**Laravel integration:**
 ```
-~/.klyron/cache/
-├── npm/           # JS packages (content-addressed)
-│   └── 4a2b.../
-│       └── package.tgz
-├── packagist/     # PHP packages
-│   └── f8d1.../
-│       └── package.zip
-├── pypi/          # Python packages
-│   └── e3c9.../
-│       └── package.tar.gz
-├── rubygems/      # Ruby gems
-│   └── b7a4.../
-│       └── gem.gem
-└── crates/        # Rust crates
-    └── d6e2.../
-        └── crate.crate
+artisan:make    → php artisan make:controller|model|migration|...
+artisan:migrate → php artisan migrate --force
+artisan:serve   → php artisan serve --host= --port=
+composer        → composer install|require|update|...
+blade           → View::make('view.name', $data)->render()
 ```
 
 ---
 
-## Framework Compatibility Matrix
+## 3. Rust Bridge Layer (`src/cli/src/engines/`)
 
-| Framework | Category | Language | Klyron Support |
-|-----------|----------|----------|----------------|
-| **Laravel** | Backend (PHP) | PHP | **✅ Full** |
-| **Next.js** | Full-stack | TS/JS | **✅ Full** |
-| **NestJS** | Backend | TS | **✅ Full** |
-| **Express** | Backend | JS | **✅ Full** |
-| **Fastify** | Backend | JS | **✅ Full** |
-| **Hono** | Backend | TS | **✅ Full** |
-| **Koa** | Backend | JS | **✅ Full** |
-| **Astro** | Frontend | TS | **✅ Full** |
-| **Vite** | Build tool | TS | **✅ Full** |
-| **React** | Frontend | JS/TSX | **✅ Full** |
-| **Vue** | Frontend | TS | **✅ Full** |
-| **Svelte/SvelteKit** | Frontend | TS | **✅ Full** |
-| **SolidJS** | Frontend | TS | **✅ Full** |
-| **Remix** | Full-stack | TS | **✅ Full** |
-| **Nuxt** | Full-stack | TS/Vue | **✅ Full** |
-| **Prisma** | ORM | TS | **✅ Full** |
-| **Drizzle** | ORM | TS | **✅ Full** |
-| **TypeORM** | ORM | TS | **✅ Full** |
-| **Mongoose** | ODM | JS | **✅ Full** |
-| **Django** | Backend | Python | **✅ Full** |
-| **FastAPI** | Backend | Python | **✅ Full** |
-| **Flask** | Backend | Python | **✅ Full** |
-| **Rails** | Backend | Ruby | **✅ Full** |
-| **WordPress** | CMS | PHP | **✅ Full** |
-| **Symfony** | Backend | PHP | **✅ Full** |
-| **Filament** | Admin | PHP | **✅ Full** |
-| **Statamic** | CMS | PHP | **✅ Full** |
-| **Inertia.js** | Full-stack | TS/PHP | **✅ Full** |
+### 3.1 Core Protocol (`mod.rs`)
+
+**File:** 100 lines
+
+| Component | Keterangan |
+|-----------|------------|
+| `EngineInput` | `action`, `code`, `args`, `filename`, `project` — semua `Option` |
+| `EngineOutput` | `stdout`, `stderr`, `exit_code`, `result` — `#[serde(default)]` |
+| `EngineProcess` | `spawn()` + `communicate()` — stdin/stdout JSON pipe |
+| `Drop` impl | `flush()` + `kill()` + `wait()` otomatis |
+| `find_engine_path()` | `env!("OUT_DIR")` + binary name |
+
+### 3.2 Module C (`c.rs`)
+
+| Method | Action |
+|--------|--------|
+| `CEngine::new()` | Spawn compiled `klyron-engine-c` |
+| `exec(code, args)` | `"exec"` — compile + run |
+| `eval_expr(expr)` | `"eval"` — evaluate expression |
+| `compile(code)` | `"compile"` — compile only |
+| `ping()` | `"ping"` — health check |
+
+### 3.3 Module C++ (`cpp.rs`)
+
+| Method | Action |
+|--------|--------|
+| `CppEngine::new()` | Spawn compiled `klyron-engine-cpp` |
+| `exec(code, args)` | `"exec"` — compile + run |
+| `eval_expr(expr)` | `"eval"` — evaluate expression |
+| `compile(code)` | `"compile"` — compile only |
+| `ping()` | `"ping"` — health check |
+
+### 3.4 Module TypeScript (`ts.rs`)
+
+| Method | Action |
+|--------|--------|
+| `TsEngine::new()` | Spawn `node engines/ts/engine.ts` |
+| `exec(code)` | `"exec"` — transpile + run |
+| `eval_expr(expr)` | `"eval"` — evaluate expression |
+| `run_file(path)` | `"file"` — execute file |
+| `typecheck(code)` | `"check"` — type check |
+| `ping()` | `"ping"` — health check |
+
+### 3.5 Module PHP (`php.rs`)
+
+| Method | Action |
+|--------|--------|
+| `PhpEngine::new()` | Spawn `php engines/php/engine.php` |
+| `exec(code)` | `"exec"` — run PHP code |
+| `eval_expr(expr)` | `"eval"` — evaluate expression |
+| `run_file(path)` | `"file"` — execute file |
+| `artisan(args, project)` | `"artisan"` — Laravel Artisan |
+| `composer(args, project)` | `"composer"` — Composer |
+| `blade(view, data, project)` | `"blade"` — render Blade |
+| `artisan_serve(args, project)` | `"artisan:serve"` |
+| `artisan_make(args, project)` | `"artisan:make"` |
+| `artisan_migrate(project)` | `"artisan:migrate"` |
+| `ping()` | `"ping"` — health check |
 
 ---
 
-## Project Structure
+## 4. CLI Commands (`src/cli/src/main.rs`)
+
+**File:** 443 lines
+
+| Command | Description | Engine |
+|---------|-------------|--------|
+| `klyron eval <code>` | Evaluate JS/TS code | V8 (core) |
+| `klyron run <file>` | Run JS/TS file | V8 (core) |
+| `klyron repl` | Interactive REPL | V8 (core) |
+| `klyron bundle <entry>` | Bundle dependencies | V8 (core) |
+| `klyron serve` | Dev server | V8 (core) |
+| `klyron cc <source>` | Compile + run C | C Engine |
+| `klyron cxx <source>` | Compile + run C++ | C++ Engine |
+| `klyron ts <source>` | Run TypeScript | TS Engine |
+| `klyron php <source>` | Run PHP | PHP Engine |
+| `klyron artisan <args...>` | Laravel Artisan | PHP Engine |
+| `klyron composer <args...>` | Composer | PHP Engine |
+| `klyron blade <view>` | Render Blade | PHP Engine |
+
+---
+
+## 5. Build System
+
+### 5.1 Workspace (`Cargo.toml`)
 
 ```
-klyron/
-├── Cargo.toml                          # Workspace (60+ crates)
+Members: 14 crates
+  - src/cli          (klyron)
+  - src/core         (klyron-core)
+  - src/ext/*        (klyron-ext-*)
+```
+
+### 5.2 Build Script (`src/cli/build.rs`)
+
+```
+build.rs
+ ├── compile engines/c/engine.c
+ │   → cc -o $OUT_DIR/klyron-engine-c -Wall -Wextra -O2 -lm
+ └── compile engines/cpp/engine.cpp
+     → g++/clang++ -std=c++20 -o $OUT_DIR/klyron-engine-cpp -O2 -lm -pthread -Wall
+```
+
+**Output binaries (auto-compiled at build time):**
+```
+$OUT_DIR/
+ ├── klyron-engine-c      (C engine — 17KB)
+ └── klyron-engine-cpp    (C++ engine — 53KB)
+```
+
+### 5.3 Dependencies
+
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| `deno_core` | 0.403 | V8 JavaScript runtime |
+| `clap` | 4 | CLI argument parsing |
+| `serde` / `serde_json` | 1 | JSON protocol (engines) |
+| `tokio` | 1 | Async runtime |
+| `axum` | 0.8 | HTTP server |
+| `tower-http` | 0.6 | Static file serving |
+| `tracing-subscriber` | 0.3 | Logging |
+| `anyhow` | 1 | Error handling |
+| `oxc` | 0.139 | TypeScript transpiler |
+
+---
+
+## 6. Core Runtime (`src/core/`)
+
+| Module | File | Lines | Description |
+|--------|------|-------|-------------|
+| `runtime` | `runtime.rs` | 298 | `JsRuntime` wrapper, eval, execute_script, module loading |
+| `permissions` | `permissions.rs` | 749 | PermissionSet, SandboxLevel, PolicyTemplate, audit log |
+| `sandbox` | `sandbox.rs` | 853 | Linux sandbox (seccomp, namespaces, resource limits) |
+| `module_loader` | `module_loader.rs` | 291 | Module resolution, caching |
+| `transpiler` | `transpiler.rs` | 72 | OXC-based TS→JS transpilation with source maps |
+| `lib` | `lib.rs` | 8 | Re-exports: Runtime, Permissions, PermissionSet, etc. |
+
+---
+
+## 7. Extension Crates (`src/ext/`)
+
+| Extension | Crate | Lines | Description |
+|-----------|-------|-------|-------------|
+| console | `klyron-ext-console` | 1.7K | `console.log`, `console.error` ops |
+| timers | `klyron-ext-timers` | 1.8K | `setTimeout`, `setInterval` |
+| crypto | `klyron-ext-crypto` | 2.4K | Web Crypto API |
+| fs | `klyron-ext-fs` | 3.9K | File system operations |
+| net | `klyron-ext-net` | 3.3K | TCP/UDP networking |
+| http | `klyron-ext-http` | 2.0K | HTTP client/server |
+| html | `klyron-ext-html` | 1.4K | HTML rendering |
+| node | `klyron-ext-node` | 28K | Node.js compatibility (15 polyfills) |
+| klyron | `klyron-ext-klyron` | 860B | Klyron-specific APIs |
+| ffi | `klyron-ext-ffi` | 900B | Foreign Function Interface |
+| ws | `klyron-ext-ws` | 13K | WebSocket support |
+| web | `klyron-ext-web` | 1.9K | Web API (fetch, URL, etc.) |
+
+---
+
+## 8. Roadmap
+
+### ✅ Phase 0 — Struktur & Pembersihan
+- [x] Hapus semua crate sampah (18 stub crates, 4 old Rust engine crates, empty dirs)
+- [x] Pindahkan engines/ ke dalam src/cli/engines/
+- [x] Pindahkan semua crate ke bawah src/
+- [x] Update workspace Cargo.toml
+- [x] Fix semua path relatif
+
+### ✅ Phase 1 — C Engine
+- [x] Native C engine (`src/cli/engines/c/engine.c`)
+- [x] JSON-Line protocol stdin/stdout
+- [x] Compile + run via fork/exec
+- [x] Signal handling, timeout, non-blocking I/O
+- [x] Rust bridge (`src/cli/src/engines/c.rs`)
+
+### ✅ Phase 2 — C++ Engine
+- [x] Native C++ engine (`src/cli/engines/cpp/engine.cpp`)
+- [x] Auto compiler detection (g++ → clang++ → c++)
+- [x] C++20, STL, templates, exceptions
+- [x] Non-blocking I/O, timeout (compile 120s, run 30s)
+- [x] Rust bridge (`src/cli/src/engines/cpp.rs`)
+
+### ✅ Phase 3 — TypeScript Engine
+- [x] Native TS engine (`src/cli/engines/ts/engine.ts`)
+- [x] 16 regex pattern type stripper
+- [x] Deno + esbuild fallback
+- [x] Diagnostics extraction (file:line:col)
+- [x] Error boundary (uncaughtException, unhandledRejection)
+- [x] Rust bridge (`src/cli/src/engines/ts.rs`)
+
+### ✅ Phase 4 — PHP Engine
+- [x] Native PHP engine (`src/cli/engines/php/engine.php`)
+- [x] Laravel integration: artisan, composer, blade
+- [x] Non-blocking I/O with `stream_select()`
+- [x] Timeout with `proc_terminate(SIGKILL)`
+- [x] Output truncation
+- [x] Rust bridge (`src/cli/src/engines/php.rs`)
+
+### ✅ Phase 5 — Integrasi CLI
+- [x] CLI subcommands: cc, cxx, ts, php, artisan, composer, blade
+- [x] build.rs compile C/C++ engines
+- [x] Bridge: EngineProcess, EngineInput, EngineOutput
+- [x] 0 warnings, 34/34 tests passed
+
+### 🔄 Phase 6 — Advanced Features (Planned)
+- [ ] **Source maps** untuk TS engine (inline base64)
+- [ ] **Full type checking** TS via tsc subprocess
+- [ ] **Multi-file compilation** untuk C/C++ engines
+- [ ] **Module caching** untuk PHP engine (Blade cache)
+- [ ] **Watch mode** untuk cc/cxx/ts/php commands
+- [ ] **Artisan REPL** mode untuk debugging Laravel
+- [ ] **Memory limit** engine subprocess via cgroups
+- [ ] **Cross-compilation** support untuk C/C++ engines
+- [ ] **gccgo/rustc** sebagai backend alternatif C engine
+
+### 🔮 Phase 7 — Language Expansion (Planned)
+- [ ] **Python engine** (`src/cli/engines/py/engine.py`)
+- [ ] **Ruby engine** (`src/cli/engines/rb/engine.rb`)
+- [ ] **Go engine** (`src/cli/engines/go/engine.go`)
+- [ ] **Rust engine** (`src/cli/engines/rs/engine.rs`)
+- [ ] **Zig engine** (`src/cli/engines/zig/engine.zig`)
+
+---
+
+## 9. Technical Details
+
+### JSON Protocol Specification
+```
+Input:  {"action":"<string>","code":"<string>","args":"<string>","filename":"<string>","project":"<string>"}
+Output: {"stdout":"<string>","stderr":"<string>","exit_code":<int>,"result":"<string>"}
+
+All fields optional except "action".
+Engine must respond with exactly one JSON line per input line.
+Engine must set exit_code = 0 on success, non-zero on failure.
+Engine must flush stdout after each response.
+Engine must ignore SIGPIPE.
+```
+
+### Engine Discovery
+```
+C Engine:    $OUT_DIR/klyron-engine-c          (compiled by build.rs)
+C++ Engine:  $OUT_DIR/klyron-engine-cpp        (compiled by build.rs)
+TS Engine:   node <CARGO_MANIFEST_DIR>/engines/ts/engine.ts
+PHP Engine:  php <CARGO_MANIFEST_DIR>/engines/php/engine.php
+```
+
+### Testing
+```bash
+cargo test                    # 34 tests (runtime + permissions + console + timers)
+cargo check                   # 0 warnings
+echo '{"action":"ping"}' | ./target/debug/klyron-engine-c   # pong
+```
+
+---
+
+## 10. Project Structure
+
+```
+klyronjs/
+├── Cargo.toml                        # Workspace — 14 crate members
+├── Cargo.lock                        # Dependency lock
+├── rust-toolchain.toml               # Rust toolchain config
+├── rustfmt.toml                      # Rust formatter
+├── install.sh                        # Install script
+├── .gitignore                        # Git ignore rules
+├── .github/workflows/ci.yml          # CI pipeline
 │
-├── cli/                                # CLI binary
-│   └── src/commands/
-│       ├── run.rs                      # Universal runner
-│       ├── eval.rs                     # Eval any language
-│       ├── repl.rs                     # REPL
-│       ├── serve.rs                    # Production server
-│       ├── install.rs                  # Universal install
-│       ├── add.rs                      # Add package (any registry)
-│       ├── remove.rs                   # Remove package
-│       ├── update.rs                   # Update packages
-│       ├── outdated.rs                 # Check outdated
-│       ├── audit.rs                    # Security audit
-│       ├── why.rs                      # Dependency analysis
-│       ├── info.rs                     # Package info
-│       ├── publish.rs                  # Publish package
-│       ├── artisan.rs                  # Laravel Artisan proxy
-│       ├── composer.rs                 # Composer commands
-│       ├── pip.rs                      # pip commands
-│       ├── gem.rs                      # gem commands
-│       ├── sbom.rs                     # SBOM generation
-│       └── verify.rs                   # Integrity verification
-│
-├── core/                               # Core runtime
-│   ├── runtime.rs                      # Universal runtime orchestrator
-│   ├── security/                       # Security layer
-│   │   ├── mod.rs
-│   │   ├── permissions.rs              # Capability-based permissions
-│   │   ├── sandbox.rs                  # seccomp/landlock/apparmor
-│   │   ├── namespace.rs                # Filesystem namespace
-│   │   ├── network.rs                  # Network policy
-│   │   ├── limits.rs                   # Resource limits
-│   │   ├── audit.rs                    # Audit logging
-│   │   └── sbom.rs                     # SBOM verification
-│   └── ...
-│
-├── engines/                            # Language engines
-│   ├── engine-v8/                      # V8 (JS/TS)
-│   ├── engine-jsc/                     # JSC (JS - optional)
-│   ├── engine-quickjs/                 # QuickJS (JS - optional)
-│   ├── engine-php/                     # PHP via WASM + phper
+├── src/
+│   ├── cli/                          # ── CLI & Engine Modules ──
+│   │   ├── Cargo.toml                #    CLI dependencies
+│   │   ├── build.rs                  #    Compile C/C++ engine binaries
+│   │   ├── engines/                  #    Native engine source files
+│   │   │   ├── c/engine.c            #      C engine (232 lines)
+│   │   │   ├── cpp/engine.cpp        #      C++ engine (247 lines)
+│   │   │   ├── ts/engine.ts          #      TypeScript engine (211 lines)
+│   │   │   └── php/engine.php        #      PHP engine (243 lines)
+│   │   └── src/
+│   │       ├── main.rs               #    CLI entry point (443 lines)
+│   │       └── engines/              #    Rust bridge modules
+│   │           ├── mod.rs            #      EngineProcess, types (100 lines)
+│   │           ├── c.rs              #      CEngine (42 lines)
+│   │           ├── cpp.rs            #      CppEngine (42 lines)
+│   │           ├── ts.rs             #      TsEngine (55 lines)
+│   │           └── php.rs            #      PhpEngine (90 lines)
+│   │
+│   ├── core/                         # ── Klyron Core Runtime ──
 │   │   ├── Cargo.toml
 │   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── wasm.rs                 # PHP-WASM bridge
-│   │       ├── native.rs               # phper (native PHP)
-│   │       ├── artisan.rs              # Artisan CLI integration
-│   │       ├── blade.rs                # Blade templating bridge
-│   │       ├── laravel.rs              # Laravel-specific hooks
-│   │       └── runtime.js              # JS ↔ PHP interop
-│   ├── engine-python/                  # Python via PyO3 + WASM
-│   └── engine-ruby/                    # Ruby via WASM
+│   │       ├── lib.rs                #    Re-exports
+│   │       ├── runtime.rs            #    JsRuntime wrapper (298 lines)
+│   │       ├── permissions.rs        #    Permission system (749 lines)
+│   │       ├── sandbox.rs            #    Linux sandbox (853 lines)
+│   │       ├── module_loader.rs      #    Module loader (291 lines)
+│   │       └── transpiler.rs         #    OXC transpiler (72 lines)
+│   │
+│   └── ext/                          # ── Extension Crates ──
+│       ├── console/  crypto/  ffi/   #    Console, Crypto, FFI
+│       ├── fs/       html/    http/  #    Filesystem, HTML, HTTP
+│       ├── klyron/   net/     node/  #    Klyron API, Networking, Node.js compat
+│       ├── timers/   web/     ws/    #    Timers, Web API, WebSocket
+│       └── ...
 │
-├── pkg-manager/                        # Universal package manager
-│   ├── registry.rs                     # Registry abstraction
-│   ├── npm.rs                          # npm registry
-│   ├── composer.rs                     # Packagist/Composer
-│   ├── pypi.rs                         # PyPI
-│   ├── rubygems.rs                     # RubyGems
-│   ├── cargo.rs                        # crates.io
-│   ├── cache.rs                        # Universal content-addressed cache
-│   ├── lockfile.rs                     # Universal lockfile
-│   ├── semver.rs                       # Semver engine (ecosystem-aware)
-│   ├── audit.rs                        # Vulnerability DB (all ecosystems)
-│   └── sbom.rs                         # SPDX SBOM generation
-│
-├── ext/                                # Extensions (shared across languages)
-│   ├── web/                            # Web APIs
-│   ├── timers/                         # Timers
-│   ├── console/                        # Console
-│   ├── crypto/                         # Web Crypto
-│   ├── fs/                             # File system
-│   ├── net/                            # Networking
-│   ├── http/                           # HTTP server
-│   ├── sqlite/                         # SQLite
-│   ├── postgres/                       # PostgreSQL
-│   ├── mysql/                          # MySQL
-│   ├── redis/                          # Redis client
-│   ├── s3/                             # S3 client
-│   ├── html/                           # HTMLRewriter
-│   ├── ffi/                            # FFI
-│   ├── ai/                             # AI/ML tensor ops
-│   ├── observability/                  # OpenTelemetry
-│   ├── cron/                           # Cron scheduler
-│   ├── node/                           # Node.js compatibility
-│   ├── php/                            # PHP bridge utilities
-│   ├── python/                         # Python bridge utilities
-│   └── klyron/                         # Klyron-specific APIs
-│
-├── bundler/                            # Universal bundler
-│
-├── test-runner/                        # Universal test runner
-│
-├── shell/                              # Klyron Shell
-│
-├── lsp/                                # LSP (all languages)
-│
-├── js/                                 # Internal JS/TS code
-├── php/                                # Internal PHP bridge code
-├── python/                             # Internal Python bridge code
-├── tests/                              # Multi-language test suites
-│   ├── fixtures/
-│   ├── js/                             # JS/TS framework tests
-│   │   ├── express/
-│   │   ├── nextjs/
-│   │   ├── nestjs/
-│   │   ├── astro/
-│   │   ├── vite/
-│   │   ├── prisma/
-│   │   └── hono/
-│   ├── php/                            # PHP framework tests
-│   │   ├── laravel/
-│   │   ├── symfony/
-│   │   ├── wordpress/
-│   │   └── filament/
-│   ├── python/                         # Python framework tests
-│   │   ├── django/
-│   │   ├── fastapi/
-│   │   └── flask/
-│   ├── ruby/                           # Ruby tests
-│   │   └── rails/
-│   ├── security/                       # Security test suite
-│   │   ├── permissions/
-│   │   ├── sandbox/
-│   │   ├── network/
-│   │   ├── supply-chain/
-│   │   └── audit/
-│   └── package-manager/                # Package manager tests
-│       ├── npm/
-│       ├── composer/
-│       ├── pypi/
-│       └── rubygems/
-│
-├── security/                           # Security policies & configs
-│   ├── default.policy.toml             # Default permission policy
-│   ├── strict.policy.toml              # Maximum restriction policy
-│   ├── laravel.policy.toml             # Laravel-specific policy
-│   └── nextjs.policy.toml              # Next.js-specific policy
-│
-├── docs/
-│   ├── security.md
-│   ├── laravel.md
-│   ├── python.md
-│   ├── multi-language.md
-│   ├── package-manager.md
-│   └── architecture.md
-│
-└── examples/
-    ├── hello.ts
-    ├── laravel/                        # Full Laravel example
-    ├── nextjs/                         # Full Next.js example
-    ├── django/                         # Full Django example
-    └── rails/                          # Full Rails example
+└── target/                           # Build artifacts (gitignored)
+    └── debug/build/klyron-*/out/
+        ├── klyron-engine-c           #    Compiled C engine binary
+        └── klyron-engine-cpp         #    Compiled C++ engine binary
 ```
 
 ---
 
-## Implementation Phases
+## 11. Metrics
 
-### Phase 0: Foundation (Weeks 1-4)
-
-**Goal:** V8 + JS runtime, CLI framework, basic security.
-
-- [ ] Cargo workspace (core, cli, engine-v8, ext/console, ext/timers)
-- [ ] deno_core + rusty_v8 integration
-- [ ] `klyron eval` and `klyron run` for JS/TS
-- [ ] oxc transpiler for TS/JSX
-- [ ] Basic permission system (--allow-read, --allow-write, --allow-net, --allow-env)
-- [ ] seccomp-bpf sandbox (Linux)
-- [ ] Console and timers extensions
-- [ ] Source maps
-- [ ] Cross-platform build
-
-**Deliverable:** `klyron eval "console.log('hello')"` with sandbox.
-
-### Phase 1: Security & Sandbox (Weeks 4-8)
-
-**Goal:** Military-grade security layer complete.
-
-- [ ] Full capability-based permission model
-- [ ] Kernel sandbox: seccomp + Landlock + namespaces (Linux)
-- [ ] Windows sandbox: Job Objects + AppContainer
-- [ ] macOS sandbox: Seatbelt profiles
-- [ ] Resource limits (memory, CPU, FDs, processes)
-- [ ] Network policy engine (allow/deny lists, DNS-based)
-- [ ] Filesystem namespace (pivot_root / chroot)
-- [ ] Audit trail (JSONL format)
-- [ ] Permission prompts (--prompt)
-- [ ] Pre-built policy templates (strict, default, laravel, nextjs)
-- [ ] Permission inheritance for workers/processes
-
-**Deliverable:** `klyron run --sandbox=strict app.ts` — maximum isolation.
-
-### Phase 2: Full JS/TS Framework Support (Weeks 8-14)
-
-**Goal:** All major JS/TS frameworks work.
-
-- [ ] ESM + CJS module system (full Node.js compat)
-- [ ] node_modules resolution (full algorithm)
-- [ ] **Express** — works end-to-end
-- [ ] **Next.js** — dev + build + production
-- [ ] **NestJS** — works with CLI
-- [ ] **Hono** — works
-- [ ] **Fastify** — works
-- [ ] **Prisma** — schema generation + client
-- [ ] **Drizzle** — works
-- [ ] **Vite** — dev server + build
-- [ ] **Astro** — dev + build
-- [ ] **React/Vue/Svelte/Solid** — SSR + HMR
-- [ ] Web APIs: fetch, streams, crypto, WebSocket, workers
-- [ ] System APIs: fs, net, http, process, os, child_process
-- [ ] Node.js compatibility layer (node:* builtins)
-- [ ] N-API native addon support
-
-**Deliverable:** `klyron run npx create-next-app && klyron run dev` works.
-
-### Phase 3: PHP / Laravel Engine (Weeks 14-22)
-
-**Goal:** Full Laravel support — the killer feature.
-
-- [ ] **PHP-WASM integration**
-  - PHP 8.x compiled to WASM
-  - Zend engine embedded in WASM runtime
-  - PHP extensions in WASM (mbstring, PDO, curl, gd, xml, json, fileinfo, openssl, tokenizer, session, dom)
-- [ ] **JS ↔ PHP bridge**
-  - Share variables between JS and PHP
-  - Call PHP functions from JS
-  - Call JS functions from PHP
-  - Shared HTTP request/response objects
-- [ ] **Composer integration**
-  - Packagist registry protocol
-  - Composer.json parser
-  - Dependency resolution (SAT solver with PHP version constraints)
-  - Autoloader generation (PSR-4, PSR-0, classmap, files)
-- [ ] **Artisan CLI**
-  - `klyron run artisan serve` → Laravel dev server
-  - `klyron run artisan make:model` → scaffolding
-  - `klyron run artisan migrate` → database migrations
-  - All artisan commands work
-- [ ] **Blade templating**
-  - Server-side rendering via PHP
-  - Component system
-  - Vite integration (Laravel Vite plugin)
-- [ ] **Laravel-specific features**
-  - Eloquent ORM (SQLite/MySQL/PostgreSQL via PDO → Klyron bridge)
-  - Sanctum (API tokens, session auth)
-  - Horizon (queue monitoring — JS dashboard)
-  - Telescope (debug toolbar — JS-based)
-  - Nova (admin panel — JS-based)
-  - Reverb (WebSocket — Klyron WebSocket)
-  - Octane (Klyron as application server, replacing Swoole/RoadRunner)
-  - Breeze/Jetstream (starter kits)
-  - Sail (Docker → replaced by Klyron sandbox)
-- [ ] **Other PHP frameworks**
-  - Symfony
-  - WordPress
-  - Filament
-  - Statamic
-  - Coaster CMS
-- [ ] **PHP Security**
-  - `disable_functions` enforced via permissions
-  - `open_basedir` via filesystem namespace
-  - Safe mode for untrusted PHP code
-  - Composer audit (vulnerability scanning)
-
-**Deliverable:** `klyron run artisan serve` starts Laravel app, accessible via browser.
-
-### Phase 4: Python Engine (Weeks 22-26)
-
-**Goal:** Python frameworks support.
-
-- [ ] **PyO3 integration** (native Python, requires CPython)
-- [ ] **Python-WASM fallback** (CPython compiled to WASM)
-- [ ] **pip integration**
-  - PyPI registry
-  - requirements.txt support
-  - Virtual environment management (built-in)
-- [ ] **Python ↔ JS bridge**
-  - Call Python from JS
-  - Call JS from Python
-  - Shared async event loop
-- [ ] **Django** — dev server + management commands
-- [ ] **FastAPI** — works with Uvicorn (Klyron serves)
-- [ ] **Flask** — works
-- [ ] **SQLAlchemy** — works via shared database drivers
-- [ ] **Pandas, NumPy** — CPU-intensive ops via WASM or native
-
-### Phase 5: Ruby Engine (Weeks 26-28)
-
-**Goal:** Ruby/Rails support.
-
-- [ ] **Ruby-WASM integration** (MRI compiled to WASM)
-- [ ] **gem integration**
-  - RubyGems registry
-  - Gemfile support
-- [ ] **Ruby ↔ JS bridge**
-- [ ] **Rails** — server + generators
-- [ ] **Sinatra, Rack** — compatibility
-
-### Phase 6: Universal Package Manager (Weeks 28-34)
-
-**Goal:** `klyron install` works for all ecosystems.
-
-- [ ] Abstract registry interface
-- [ ] npm registry (production-ready)
-- [ ] Packagist/Composer (production-ready)
-- [ ] PyPI (production-ready)
-- [ ] RubyGems (production-ready)
-- [ ] crates.io (Rust native addons)
-- [ ] Universal content-addressed cache
-- [ ] Universal lockfile format
-- [ ] Parallel download + extraction
-- [ ] Semver engine (ecosystem-aware — handles npm, PHP, Python, Ruby versioning)
-- [ ] Dependency graph visualization
-- [ ] `klyron audit` — multi-ecosystem vulnerability scanning
-- [ ] `klyron sbom` — SPDX SBOM generation
-- [ ] `klyron verify` — integrity verification
-- [ ] `klyron why` — dependency analysis
-- [ ] `klyron publish` — publish to any registry
-- [ ] Private registry support (all ecosystems)
-- [ ] Auth (token, basic, OAuth, SSH)
-- [ ] Offline mode
-- [ ] Lifecycle scripts (all ecosystems)
-
-**Deliverable:** `klyron install express && klyron install laravel/laravel && klyron install flask` — one command.
-
-### Phase 7: Universal Bundler & Compiler (Weeks 34-38)
-
-**Goal:** Bundle any language, compile to native binary.
-
-- [ ] JS/TS bundling (esbuild-compatible)
-- [ ] PHP bundling (Phar-compatible → standalone PHP app)
-- [ ] Python bundling (PyInstaller-compatible → standalone)
-- [ ] Ruby bundling (WAR/JAR-like)
-- [ ] Cross-language bundling (JS + PHP + CSS + HTML in one binary)
-- [ ] AOT compilation: JS/TS → LLVM IR → native code
-- [ ] `klyron compile app.ts` → single native binary
-- [ ] `klyron compile --php artisan` → Laravel as native binary
-- [ ] `klyron compile --python app.py` → Python as native binary
-
-### Phase 8: Developer Tools (Weeks 38-42)
-
-**Goal:** World-class developer experience.
-
-- [ ] **LSP** — all languages
-  - TypeScript, JavaScript, PHP, Python, Ruby
-  - Goto definition, hover, completions, references, rename
-  - Inlay hints, semantic tokens, code actions
-  - Workspace symbols, document symbols
-- [ ] **Formatter** — all languages (`klyron fmt`)
-- [ ] **Linter** — all languages (`klyron lint`)
-- [ ] **Test runner** — all languages (`klyron test`)
-  - Jest-compatible for JS/TS
-  - PHPUnit-compatible for PHP
-  - pytest-compatible for Python
-  - RSpec-compatible for Ruby
-- [ ] **Debugger** — all languages
-  - V8 inspector (Chrome DevTools) for JS/TS
-  - Xdebug for PHP
-  - pdb for Python
-  - byebug for Ruby
-- [ ] **REPL** — all languages with syntax highlighting
-- [ ] **Shell completions** — bash, zsh, fish
-- [ ] **Hot reload** — all languages
-
-### Phase 9: AI/ML & Advanced Features (Weeks 42-46)
-
-- [ ] **Klyron Tensor API** — CPU/GPU tensor ops
-- [ ] **ONNX Runtime** — model inference (shared across all languages)
-- [ ] **OpenTelemetry** — distributed tracing, metrics, logging
-- [ ] **Klyron Shell** — bash-compatible shell
-- [ ] **Cron** — built-in scheduler
-- [ ] **Image processing** — resize, encode, decode
-- [ ] **FFI** — native library loading (all languages)
-- [ ] **WASM** — WebAssembly runtime (non-PHP WASM)
-
-### Phase 10: Production & Ecosystem (Weeks 46-52+)
-
-**Goal:** Production-ready, competitive benchmarks.
-
-- [ ] Performance optimization (startup <15ms, throughput > Bun)
-- [ ] Docker images (Alpine, Distroless, multi-arch)
-- [ ] klyron.dev website + documentation
-- [ ] VSCode extension
-- [ ] Homebrew, npm installer, shell installer
-- [ ] Framework compatibility CI (100+ frameworks)
-- [ ] `klyron upgrade` — self-update
-- [ ] `klyron init` — project scaffolding (any language)
-- [ ] `klyron create` — template-based project creation
-- [ ] Enterprise features: SSO, audit logging, compliance reports
+| Metric | Value |
+|--------|-------|
+| Total Rust crates | 14 |
+| Total source files | 73 |
+| Total Rust lines | 3,976 |
+| C engine (C code) | 232 lines |
+| C++ engine (C++ code) | 247 lines |
+| TS engine (TypeScript) | 211 lines |
+| PHP engine (PHP) | 243 lines |
+| Core runtime | ~2,271 lines |
+| Extension crates | ~56,000+ lines (incl. deps) |
+| Tests | 37 (34 core + 2 console + 1 timers) |
+| Warnings | 0 |
+| Top-level folders | 2 (src/, .git/, .github/) |
 
 ---
 
-## Key Innovations Over Bun
+## 12. Design Principles
 
-| Innovation | Why It Matters |
-|------------|---------------|
-| **PHP/Laravel support** | Run PHP + JS in one runtime — eliminates separate PHP-FPM/Docker |
-| **Multi-language package manager** | One CLI for npm/Composer/pip/gem — no context switching |
-| **Military-grade security** | seccomp + Landlock + namespaces + capabilities — replaces Docker for dev |
-| **Supply chain security** | SBOM + signature verification + vulnerability scanning built-in |
-| **Universal bundler** | Bundle JS/PHP/Python into single native binary |
-| **Shared async runtime** | One Tokio event loop across all languages |
-| **Shared database drivers** | SQLite/PostgreSQL/MySQL/Redis — same driver for all languages |
-| **Permission templates** | Pre-built policies for Laravel, Next.js, Django — one flag setup |
+1. **Native is king** — Setiap engine ditulis dalam bahasa aslinya (.c, .cpp, .ts, .php), bukan Rust. Rust hanya sebagai bridge/subprocess launcher.
 
----
+2. **JSON-Line protocol** — Komunikasi universal via stdin/stdout dengan format JSON satu baris per request/response. Sederhana, debuggable, language-agnostic.
 
-## Cargo Dependencies (Key Crates Only)
+3. **Sub-process isolation** — Setiap engine berjalan di proses terpisah. Crash engine tidak mempengaruhi runtime utama. Resource limits via OS.
 
-```toml
-# Core
-deno_core = { git = "https://github.com/denoland/deno_core" }
-rusty_v8 = "0.90"
-tokio = { version = "1", features = ["full"] }
+4. **Zero-copy where possible** — Engine binaries dikompilasi sekali di build time, reuse untuk semua eksekusi.
 
-# Security
-seccompiler = "0.4"           # seccomp-bpf policies
-caps = "0.5"                  # Linux capabilities
-nix = "0.29"                  # namespace operations
-landlock = "0.4"              # Landlock LSM (Linux 5.13+)
-audit = "0.3"                 # Audit logging
+5. **Fail fast** — Validasi input di setiap layer. Error messages informatif dengan file:line:col.
 
-# PHP
-php-wasm = { git = "https://github.com/seanmorris/php-wasm" }  # PHP in WASM
-phper = "0.3"                 # Native PHP embedding (optional)
+6. **Defense in depth** — Timeout di semua tingkatan (alarm, select, Rust-side). Non-blocking I/O. Signal handling.
 
-# Python
-pyo3 = { version = "0.22", features = ["auto-initialize"] }
-
-# Ruby
-ruby-wasm = "0.1"
-
-# Package Manager
-reqwest = { version = "0.12", features = ["stream"] }
-flate2 = "1.8"
-tar = "0.4"
-zip = "2.1"
-sha2 = "0.10"
-spdx-rs = "0.6"
-
-# UI/CLI
-clap = { version = "4", features = ["derive"] }
-indicatif = "0.17"            # Progress bars
-console = "0.15"              # Terminal colors
-syntect = "5.2"               # Syntax highlighting (REPL/LSP)
-
-# Everything else
-oxc_transformer = "0.15"
-hyper = { version = "1", features = ["full"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "mysql"] }
-tokio-tungstenite = "0.24"
-lol-html = "2.1"
-```
-
----
-
-## Version Roadmap
-
-| Version | Timeline | Feature Set |
-|---------|----------|-------------|
-| **v0.1** | Month 1 | JS/TS runtime, V8, `klyron eval`
-| **v0.2** | Month 2 | Security sandbox (seccomp + permissions)
-| **v0.3** | Month 3 | Express + Next.js + Vite + Prisma
-| **v0.4** | Month 4 | TypeScript frameworks complete
-| **v0.5** | Month 5 | **PHP engine alpha + Laravel hello world**
-| **v0.6** | Month 6 | Laravel full support (Artisan, Blade, Eloquent)
-| **v0.7** | Month 7 | Python engine + Django/FastAPI
-| **v0.8** | Month 8 | Ruby engine + Rails
-| **v0.9** | Month 9 | Universal package manager (npm + Composer + pip + gem)
-| **v1.0** | Month 10 | All features stable, security hardened
-| **v1.1+** | Ongoing | Performance, more frameworks, enterprise features
+7. **Progressive enhancement** — TypeScript: Deno → esbuild → regex stripper. C++: g++ → clang++ → c++. PHP: Laravel → raw PHP.

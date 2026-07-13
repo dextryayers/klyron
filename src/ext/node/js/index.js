@@ -1,0 +1,13 @@
+export * as path from "./path.js";
+export * as fs from "./fs.js";
+export * as os from "./os.js";
+export * as process from "./process.js";
+export * as buffer from "./buffer.js";
+export * as events from "./events.js";
+export * as stream from "./stream.js";
+export * as util from "./util.js";
+export * as url from "./url.js";
+export * as querystring from "./querystring.js";
+export * as crypto from "./crypto.js";
+export * as child_process from "./child_process.js";
+export * as assert from "./assert.js";

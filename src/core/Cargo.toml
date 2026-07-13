@@ -1,0 +1,18 @@
+[package]
+name = "klyron-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+deno_core = { version = "0.403", features = ["include_icu_data"] }
+deno_error.workspace = true
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+oxc = { version = "0.139", default-features = false, features = ["codegen", "transformer", "semantic"] }
+libc = "0.2"
+glob = "0.3"
+base64 = "0.22"
+urlencoding = "2"

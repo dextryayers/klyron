@@ -1,0 +1,11 @@
+[package]
+name = "klyron-ext-timers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+deno_core = { version = "0.403" }
+
+[dev-dependencies]
+klyron-core = { path = "../../core" }
