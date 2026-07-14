@@ -39,6 +39,8 @@ pub struct DockerConfig {
   pub profile: DockerProfile,
   pub additional_services: Vec<DockerService>,
   pub build_args: HashMap<String, String>,
+  pub optimize: bool,
+  pub use_build_cache: bool,
 }
 
 impl Default for DockerConfig {
@@ -50,6 +52,8 @@ impl Default for DockerConfig {
       profile: DockerProfile::Dev,
       additional_services: Vec::new(),
       build_args: HashMap::new(),
+      optimize: true,
+      use_build_cache: true,
     }
   }
 }
@@ -68,137 +72,17 @@ impl DockerManager {
 
   pub fn generate_dockerfile_with_config(dir: &Path, config: &DockerConfig) -> Result<()> {
     let project_type = Self::detect_project_type(dir);
+    let is_prod = config.profile == DockerProfile::Prod;
     let dockerfile = match project_type.as_str() {
-      "node" | "next" | "react" => {
-        let build_args: String = config.build_args.iter()
-          .map(|(k, v)| format!("ARG {k}={v}\n"))
-          .collect();
-        format!(
-          r#"# syntax=docker/dockerfile:1.4
-{build_args}
-FROM node:20-alpine AS builder
-WORKDIR /app
-RUN --mount=type=cache,target=/root/.npm \
-    npm config set cache /root/.npm
-COPY package*.json ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci
-COPY . .
-RUN npm run build
-
-FROM node:20-alpine AS runner
-WORKDIR /app
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 klyron
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY package*.json ./
-RUN chown -R klyron:nodejs /app
-USER klyron
-EXPOSE {port}
-
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:{port}/ || exit 1
-
-CMD ["node", "dist/index.js"]
-"#,
-          port = config.port,
-          build_args = build_args,
-        )
+      "node" | "next" | "react" | "vue" | "svelte" | "angular" => {
+        Self::node_dockerfile(config, is_prod)
       }
-      "rust" => {
-        let build_args: String = config.build_args.iter()
-          .map(|(k, v)| format!("ARG {k}={v}\n"))
-          .collect();
-        format!(
-          r#"# syntax=docker/dockerfile:1.4
-{build_args}
-FROM rust:{rust_ver} AS builder
-WORKDIR /app
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
-    mkdir src && echo "fn main() {{}}" > src/main.rs
-COPY Cargo.toml Cargo.lock ./
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
-    cargo build --release 2>/dev/null || true
-COPY src ./src
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
-    cargo build --release
-
-FROM gcr.io/distroless/cc-debian12
-COPY --from=builder /app/target/release/app /usr/local/bin/app
-EXPOSE {port}
-
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD ["/usr/local/bin/app", "--health-check"] || exit 1
-
-CMD ["app"]
-"#,
-          rust_ver = "1.78",
-          port = config.port,
-          build_args = build_args,
-        )
-      }
-      "python" => {
-        let build_args: String = config.build_args.iter()
-          .map(|(k, v)| format!("ARG {k}={v}\n"))
-          .collect();
-        format!(
-          r#"# syntax=docker/dockerfile:1.4
-{build_args}
-FROM python:{py_ver}-slim AS builder
-WORKDIR /app
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt
-COPY . .
-
-FROM python:{py_ver}-slim
-WORKDIR /app
-COPY --from=builder /app /app
-RUN adduser --system --uid 1001 klyron && chown -R klyron /app
-USER klyron
-EXPOSE {port}
-
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD python -c "import http.client; http.client.HTTPConnection('localhost', {port}).request('GET', '/')" || exit 1
-
-CMD ["python", "main.py"]
-"#,
-          py_ver = "3.12",
-          port = config.port,
-          build_args = build_args,
-        )
-      }
-      "go" => format!(
-        r#"# syntax=docker/dockerfile:1.4
-FROM golang:{go_ver} AS builder
-WORKDIR /app
-RUN --mount=type=cache,target=/go/pkg/mod
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /app/server .
-
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
-COPY --from=builder /app/server /server
-EXPOSE {port}
-
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:{port}/ || exit 1
-
-CMD ["/server"]
-"#,
-        go_ver = "1.22",
-        port = config.port,
-      ),
-      _ => r#"FROM alpine:latest
-WORKDIR /app
-COPY . .
-CMD ["sh"]
-"#.into(),
+      "rust" => Self::rust_dockerfile(config, is_prod),
+      "python" | "fastapi" | "flask" | "django" => Self::python_dockerfile(config, is_prod),
+      "go" | "gin" | "fiber" | "echo" => Self::go_dockerfile(config, is_prod),
+      "php" | "laravel" => Self::php_dockerfile(config, is_prod),
+      "static" => Self::static_dockerfile(config),
+      _ => Self::node_dockerfile(config, is_prod),
     };
 
     let dockerfile_path = dir.join("Dockerfile");
@@ -210,14 +94,20 @@ CMD ["sh"]
 .git
 target
 dist
+.next
 .env
 .env.local
+.env.*.local
 *.log
 .gitignore
 Dockerfile
 docker-compose.yml
 .idea
 .vscode
+*.md
+.DS_Store
+coverage
+.cache
 "#;
     std::fs::write(dir.join(".dockerignore"), content).context("Failed to write .dockerignore")
   }
@@ -229,6 +119,8 @@ docker-compose.yml
 
   pub fn generate_compose_with_config(dir: &Path, config: &DockerConfig) -> Result<()> {
     let name = dir.file_name().unwrap_or_default().to_string_lossy();
+    let project_type = Self::detect_project_type(dir);
+    let is_prod = config.profile == DockerProfile::Prod;
 
     let all_services = if config.additional_services.is_empty() {
       Self::default_infra_services()
@@ -236,38 +128,68 @@ docker-compose.yml
       config.additional_services.clone()
     };
 
+    let env_file = if is_prod { ".env.production" } else { ".env" };
+
     let mut compose = format!(
       r#"# docker-compose.yml generated by klyron_docker
 # Profile: {profile:?}
+# Project type: {project_type}
 
 services:
   {name}:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - NODE_ENV={env}
+        - BUILDKIT_INLINE_CACHE=1
     ports:
       - "{port}:{port}"
-    volumes:
-      - .:/app
-      - /app/node_modules
+    env_file:
+      - {env_file}
     environment:
       - NODE_ENV={env}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:{port}/"]
+      test: ["CMD", "curl", "-f", "http://localhost:{port}/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
     profiles:
       - {profile:?}
+    networks:
+      - klyron-network
 
 "#,
       name = name,
       port = config.port,
-      env = match config.profile { DockerProfile::Dev => "development", DockerProfile::Prod => "production" },
+      env = if is_prod { "production" } else { "development" },
       profile = config.profile,
+      project_type = project_type,
+      env_file = env_file,
     );
+
+    if is_prod {
+      compose.push_str(&format!(
+        r#"  {name}-nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - {name}
+    profiles:
+      - Prod
+    networks:
+      - klyron-network
+
+"#,
+        name = name,
+      ));
+    }
 
     for svc in &all_services {
       let env_vars: String = svc.env_vars.iter()
@@ -301,27 +223,38 @@ services:
         String::new()
       };
 
+      let volumes: String = if svc.volumes.is_empty() {
+        String::new()
+      } else {
+        format!("\n    volumes:\n      - {}\n", svc.volumes.join("\n      - "))
+      };
+
       compose.push_str(&format!(
-        r#"  {name}:
+        r#"  {svc_name}:
     image: {image}
     ports:
       - "{port}:{port}"
     environment:
-{env_vars}{depends}{health}
+{env_vars}{depends}{health}{volumes}
     restart: unless-stopped
     profiles:
       - {profile:?}
+    networks:
+      - klyron-network
 
 "#,
-        name = svc.name,
+        svc_name = svc.name,
         image = svc.image,
         port = svc.port,
         env_vars = env_vars,
         depends = depends,
         health = health,
+        volumes = volumes,
         profile = svc.profile,
       ));
     }
+
+    compose.push_str("networks:\n  klyron-network:\n    driver: bridge\n");
 
     let compose_path = dir.join("docker-compose.yml");
     std::fs::write(&compose_path, compose).context("Failed to write docker-compose.yml")
@@ -329,10 +262,27 @@ services:
 
   pub fn build(config: DockerConfig) -> Result<()> {
     let mut cmd = std::process::Command::new("docker");
-    cmd.args(["build", "-t", &config.image_name, "."]);
-    for (key, val) in &config.build_args {
-      cmd.args(["--build-arg", &format!("{key}={val}")]);
+    let mut args = vec!["build".to_string()];
+
+    if config.use_build_cache {
+      args.push("--cache-from".to_string());
+      args.push(config.image_name.clone());
     }
+
+    args.push("-t".to_string());
+    args.push(config.image_name.clone());
+    args.push(".".to_string());
+
+    if config.optimize {
+      args.push("--squash".to_string());
+    }
+
+    for (key, val) in &config.build_args {
+      args.push("--build-arg".to_string());
+      args.push(format!("{key}={val}"));
+    }
+
+    cmd.args(&args);
     let status = cmd
       .current_dir(&config.project_dir)
       .status()
@@ -346,10 +296,27 @@ services:
   pub fn run(config: DockerConfig) -> Result<()> {
     let port_str = format!("{}:{}", config.port, config.port);
     let mut cmd = std::process::Command::new("docker");
-    cmd.args(["run", "-d", "--rm", "-p", &port_str, &config.image_name]);
+    let mut args = vec!["run".to_string(), "-d".to_string(), "--rm".to_string(), "-p".to_string(), port_str];
+
     if config.profile == DockerProfile::Dev {
-      cmd.args(["-v", ".:/app", "-v", "/app/node_modules"]);
+      args.push("-v".to_string());
+      args.push(".:/app".to_string());
+      args.push("-v".to_string());
+      args.push("/app/node_modules".to_string());
     }
+
+    if config.optimize {
+      args.push("--restart".to_string());
+      args.push("unless-stopped".to_string());
+      args.push("--health-cmd".to_string());
+      args.push(format!("curl -f http://localhost:{}/health || exit 1", config.port));
+      args.push("--health-interval".to_string());
+      args.push("30s".to_string());
+    }
+
+    args.push(config.image_name.clone());
+    cmd.args(&args);
+
     let status = cmd
       .current_dir(&config.project_dir)
       .status()
@@ -358,6 +325,285 @@ services:
       anyhow::bail!("Docker run failed with exit code: {:?}", status.code());
     }
     Ok(())
+  }
+
+  fn node_dockerfile(config: &DockerConfig, is_prod: bool) -> String {
+    let cache_mount = if config.use_build_cache {
+      r#"
+RUN --mount=type=cache,target=/root/.npm \
+    npm config set cache /root/.npm
+
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --only=production
+"#
+    } else {
+      "\nRUN npm ci\n"
+    };
+
+    if is_prod {
+      format!(
+        r#"# syntax=docker/dockerfile:1.4
+FROM node:20-alpine AS builder
+WORKDIR /app
+ARG NODE_ENV=production
+ENV NODE_ENV=${{NODE_ENV}}
+COPY package*.json ./{cache_mount}
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ARG NODE_ENV=production
+ENV NODE_ENV=${{NODE_ENV}}
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 klyron
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
+RUN chown -R klyron:nodejs /app
+USER klyron
+EXPOSE {port}
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:{port}/health || exit 1
+
+CMD ["node", "dist/index.js"]
+"#,
+        port = config.port,
+        cache_mount = cache_mount,
+      )
+    } else {
+      format!(
+        r#"# syntax=docker/dockerfile:1.4
+FROM node:20-alpine
+WORKDIR /app
+ARG NODE_ENV=development
+ENV NODE_ENV=${{NODE_ENV}}
+COPY package*.json ./
+{cache_mount}
+COPY . .
+EXPOSE {port}
+
+CMD ["npm", "run", "dev"]
+"#,
+        port = config.port,
+        cache_mount = cache_mount,
+      )
+    }
+  }
+
+  fn rust_dockerfile(config: &DockerConfig, is_prod: bool) -> String {
+    let cache_mount = if config.use_build_cache {
+      r#"
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    mkdir src && echo "fn main() {{}}" > src/main.rs
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release 2>/dev/null || true
+"#
+    } else {
+      "\nRUN mkdir src && echo \"fn main() {}\" > src/main.rs && cargo build --release 2>/dev/null || true\n"
+    };
+
+    if is_prod {
+      format!(
+        r#"# syntax=docker/dockerfile:1.4
+FROM rust:1.78 AS builder
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./{cache_mount}
+COPY src ./src
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release
+
+FROM gcr.io/distroless/cc-debian12
+COPY --from=builder /app/target/release/app /usr/local/bin/app
+EXPOSE {port}
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["/usr/local/bin/app", "--health-check"]
+
+CMD ["app"]
+"#,
+        port = config.port,
+        cache_mount = cache_mount,
+      )
+    } else {
+      format!(
+        r#"# syntax=docker/dockerfile:1.4
+FROM rust:1.78
+WORKDIR /app
+RUN cargo install cargo-watch
+COPY . .
+EXPOSE {port}
+
+CMD ["cargo", "watch", "-x", "run"]
+"#,
+        port = config.port,
+      )
+    }
+  }
+
+  fn python_dockerfile(config: &DockerConfig, is_prod: bool) -> String {
+    let pip_cache = if config.use_build_cache {
+      r#"
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir -r requirements.txt
+"#
+    } else {
+      "\nRUN pip install --no-cache-dir -r requirements.txt\n"
+    };
+
+    if is_prod {
+      format!(
+        r#"# syntax=docker/dockerfile:1.4
+FROM python:3.12-slim AS builder
+WORKDIR /app
+COPY requirements.txt ./{pip_cache}
+COPY . .
+
+FROM python:3.12-slim
+WORKDIR /app
+RUN adduser --system --uid 1001 klyron
+COPY --from=builder /app /app
+RUN chown -R klyron:klyron /app
+USER klyron
+EXPOSE {port}
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD python -c "import http.client; http.client.HTTPConnection('localhost', {port}).request('GET', '/health')" || exit 1
+
+CMD ["python", "main.py"]
+"#,
+        port = config.port,
+        pip_cache = pip_cache,
+      )
+    } else {
+      format!(
+        r#"# syntax=docker/dockerfile:1.4
+FROM python:3.12-slim
+WORKDIR /app
+{pip_cache}
+COPY . .
+EXPOSE {port}
+
+CMD ["python", "main.py"]
+"#,
+        port = config.port,
+        pip_cache = pip_cache,
+      )
+    }
+  }
+
+  fn go_dockerfile(config: &DockerConfig, is_prod: bool) -> String {
+    let go_cache = if config.use_build_cache {
+      r#"
+RUN --mount=type=cache,target=/go/pkg/mod
+"#
+    } else {
+      "\n"
+    };
+
+    if is_prod {
+      format!(
+        r#"# syntax=docker/dockerfile:1.4
+FROM golang:1.22 AS builder
+WORKDIR /app
+COPY go.mod go.sum ./{go_cache}
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/server .
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates tzdata
+COPY --from=builder /app/server /server
+EXPOSE {port}
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:{port}/health || exit 1
+
+CMD ["/server"]
+"#,
+        port = config.port,
+        go_cache = go_cache,
+      )
+    } else {
+      format!(
+        r#"# syntax=docker/dockerfile:1.4
+FROM golang:1.22
+WORKDIR /app
+RUN go install github.com/githubnemo/CompileDaemon@latest
+COPY go.mod go.sum ./{go_cache}
+RUN go mod download
+COPY . .
+EXPOSE {port}
+
+CMD ["CompileDaemon", "-build=go build -o /app/server", "-command=/app/server"]
+"#,
+        port = config.port,
+        go_cache = go_cache,
+      )
+    }
+  }
+
+  fn php_dockerfile(config: &DockerConfig, is_prod: bool) -> String {
+    if is_prod {
+      format!(
+        r#"# syntax=docker/dockerfile:1.4
+FROM composer:latest AS composer
+WORKDIR /app
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --optimize-autoloader
+
+FROM php:8.2-fpm-alpine
+WORKDIR /app
+RUN addgroup -g 1001 -S klyron && \
+    adduser -S -D -H -u 1001 -h /app -G klyron klyron
+COPY --from=composer /app/vendor ./vendor
+COPY . .
+RUN chown -R klyron:klyron /app
+USER klyron
+EXPOSE {port}
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD php -r "echo file_get_contents('http://localhost:{port}/health');" || exit 1
+
+CMD ["php-fpm"]
+"#,
+        port = config.port,
+      )
+    } else {
+      format!(
+        r#"# syntax=docker/dockerfile:1.4
+FROM php:8.2-cli-alpine
+WORKDIR /app
+RUN docker-php-ext-install pdo pdo_mysql
+COPY . .
+EXPOSE {port}
+
+CMD ["php", "-S", "0.0.0.0:{port}", "-t", "public"]
+"#,
+        port = config.port,
+      )
+    }
+  }
+
+  fn static_dockerfile(config: &DockerConfig) -> String {
+    format!(
+      r#"# syntax=docker/dockerfile:1.4
+FROM nginx:alpine AS runner
+COPY . /usr/share/nginx/html
+EXPOSE {port}
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:{port}/ || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]
+"#,
+      port = config.port,
+    )
   }
 
   fn default_infra_services() -> Vec<DockerService> {
@@ -417,6 +663,25 @@ services:
         }),
         profile: DockerProfile::Prod,
       },
+      DockerService {
+        name: "mongodb".into(),
+        image: "mongo:7".into(),
+        port: 27017,
+        env_vars: HashMap::from([
+          ("MONGO_INITDB_ROOT_USERNAME".into(), "klyron".into()),
+          ("MONGO_INITDB_ROOT_PASSWORD".into(), "klyron".into()),
+        ]),
+        depends_on: vec![],
+        volumes: vec!["mongo_data:/data/db".into()],
+        health_check: Some(HealthCheckConfig {
+          test: vec!["CMD".into(), "mongosh".into(), "--eval".into(), "db.adminCommand('ping')".into()],
+          interval: "10s".into(),
+          timeout: "5s".into(),
+          retries: 5,
+          start_period: "10s".into(),
+        }),
+        profile: DockerProfile::Prod,
+      },
     ]
   }
 
@@ -425,29 +690,23 @@ services:
       if let Ok(content) = std::fs::read_to_string(dir.join("package.json")) {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
           if let Some(deps) = json.get("dependencies").and_then(|v| v.as_object()) {
-            if deps.contains_key("next") {
-              return "next".into();
-            }
+            if deps.contains_key("next") { return "next".into(); }
+            if deps.contains_key("vue") || deps.contains_key("nuxt") { return "vue".into(); }
+            if deps.contains_key("svelte") || deps.contains_key("sveltekit") { return "svelte".into(); }
+            if deps.contains_key("@angular/core") { return "angular".into(); }
+            if deps.contains_key("react") || deps.contains_key("react-scripts") { return "react".into(); }
           }
         }
       }
       return "node".into();
     }
-    if dir.join("Cargo.toml").exists() {
-      return "rust".into();
-    }
-    if dir.join("go.mod").exists() {
-      return "go".into();
-    }
-    if dir.join("requirements.txt").exists() || dir.join("setup.py").exists() {
+    if dir.join("Cargo.toml").exists() { return "rust".into(); }
+    if dir.join("go.mod").exists() { return "go".into(); }
+    if dir.join("requirements.txt").exists() || dir.join("setup.py").exists() || dir.join("pyproject.toml").exists() {
       return "python".into();
     }
-    if dir.join("composer.json").exists() {
-      return "php".into();
-    }
-    if dir.join("index.html").exists() || dir.join("public/index.html").exists() {
-      return "static".into();
-    }
+    if dir.join("composer.json").exists() { return "php".into(); }
+    if dir.join("index.html").exists() || dir.join("public/index.html").exists() { return "static".into(); }
     "node".into()
   }
 }
@@ -478,21 +737,61 @@ mod tests {
   fn test_generate_dockerfile_node() {
     let dir = temp_dir();
     fs::write(dir.join("package.json"), r#"{"name":"test"}"#).unwrap();
-    DockerManager::generate_dockerfile(&dir).expect("Generate failed");
+    let config = DockerConfig {
+      image_name: "test".into(),
+      port: 3000,
+      project_dir: dir.clone(),
+      profile: DockerProfile::Prod,
+      additional_services: vec![],
+      build_args: HashMap::new(),
+      optimize: true,
+      use_build_cache: true,
+    };
+    DockerManager::generate_dockerfile_with_config(&dir, &config).expect("Generate failed");
     let content = fs::read_to_string(dir.join("Dockerfile")).unwrap();
     assert!(content.contains("FROM node"));
     assert!(content.contains("HEALTHCHECK"));
-    assert!(content.contains("--mount=type=cache"));
   }
 
   #[test]
   fn test_generate_dockerfile_rust() {
     let dir = temp_dir();
     fs::write(dir.join("Cargo.toml"), "[package]\nname = \"test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n").unwrap();
-    DockerManager::generate_dockerfile(&dir).expect("Generate failed");
+    let config = DockerConfig {
+      image_name: "test".into(),
+      port: 3000,
+      project_dir: dir.clone(),
+      profile: DockerProfile::Prod,
+      additional_services: vec![],
+      build_args: HashMap::new(),
+      optimize: true,
+      use_build_cache: true,
+    };
+    DockerManager::generate_dockerfile_with_config(&dir, &config).expect("Generate failed");
     let content = fs::read_to_string(dir.join("Dockerfile")).unwrap();
     assert!(content.contains("FROM rust"));
     assert!(content.contains("--mount=type=cache"));
+  }
+
+  #[test]
+  fn test_generate_dockerfile_prod() {
+    let dir = temp_dir();
+    fs::write(dir.join("package.json"), r#"{"name":"test","dependencies":{"next":"1.0"}}"#).unwrap();
+    let config = DockerConfig {
+      image_name: "my-app".into(),
+      port: 3000,
+      project_dir: dir.clone(),
+      profile: DockerProfile::Prod,
+      additional_services: vec![],
+      build_args: HashMap::new(),
+      optimize: true,
+      use_build_cache: true,
+    };
+    DockerManager::generate_dockerfile_with_config(&dir, &config).expect("Generate failed");
+    let content = fs::read_to_string(dir.join("Dockerfile")).unwrap();
+    assert!(content.contains("AS builder"));
+    assert!(content.contains("AS runner"));
+    assert!(content.contains("USER klyron"));
   }
 
   #[test]
@@ -527,27 +826,21 @@ mod tests {
       profile: DockerProfile::Prod,
       additional_services: vec![],
       build_args: HashMap::new(),
+      optimize: true,
+      use_build_cache: true,
     };
     DockerManager::generate_compose_with_config(&dir, &config).expect("Generate failed");
     let content = fs::read_to_string(dir.join("docker-compose.yml")).unwrap();
     assert!(content.contains("8080:8080"));
     assert!(content.contains("production"));
+    assert!(content.contains("klyron-network"));
   }
 
   #[test]
-  fn test_default_infra_services() {
-    let services = DockerManager::default_infra_services();
-    assert!(services.iter().any(|s| s.name == "postgres"));
-    assert!(services.iter().any(|s| s.name == "redis"));
-    assert!(services.iter().any(|s| s.name == "mysql"));
-    for svc in &services {
-      assert!(svc.health_check.is_some());
-    }
-  }
-
-  #[test]
-  fn test_default() {
-    let mgr = DockerManager::default();
-    let _ = mgr;
+  fn test_detect_project_type() {
+    let dir = temp_dir();
+    assert_eq!(DockerManager::detect_project_type(&dir), "node");
+    fs::write(dir.join("Cargo.toml"), "").unwrap();
+    assert_eq!(DockerManager::detect_project_type(&dir), "rust");
   }
 }

@@ -1,5 +1,13 @@
 #include "errors.hpp"
+#include <string>
 
 namespace klyron {
-// Klyron::Postgres exception implementations
+
+std::string klyron_postgres_error_string(int code) {
+    switch (code) {
+        case 0: return "ok";
+        default: return "unknown error";
+    }
+}
+
 }

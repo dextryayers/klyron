@@ -1,5 +1,6 @@
-use std::ffi::CString;
 use std::fmt;
+
+use klyron_engine_common::error::{CommonError, CommonErrorKind};
 
 #[derive(Debug)]
 pub enum QuickJSError {
@@ -16,12 +17,27 @@ pub enum QuickJSError {
 }
 
 impl QuickJSError {
-    pub unsafe fn catch_error(_ctx: *mut std::ffi::c_void) -> Option<Self> {
+    pub fn catch_error() -> Option<Self> {
         None
     }
 
-    pub unsafe fn format_stack_trace(_ctx: *mut std::ffi::c_void) -> String {
-        "No stack trace (QuickJS native not linked)".to_string()
+    pub fn format_stack_trace() -> String {
+        "No stack trace available (QuickJS native)".to_string()
+    }
+
+    pub fn to_common_kind(&self) -> CommonErrorKind {
+        match self {
+            Self::NotInitialized => CommonErrorKind::NotInitialized,
+            Self::InitFailed(msg) => CommonErrorKind::InitFailed(msg.clone()),
+            Self::ExecutionFailed(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
+            Self::CompileError(msg) => CommonErrorKind::CompileError(msg.clone()),
+            Self::SyntaxError(msg) => CommonErrorKind::SyntaxError(msg.clone()),
+            Self::TypeError(msg) => CommonErrorKind::TypeError(msg.clone()),
+            Self::RangeError(msg) => CommonErrorKind::RangeError(msg.clone()),
+            Self::ReferenceError(msg) => CommonErrorKind::ReferenceError(msg.clone()),
+            Self::Timeout => CommonErrorKind::Timeout,
+            Self::OutOfMemory => CommonErrorKind::OutOfMemory,
+        }
     }
 }
 
@@ -44,14 +60,18 @@ impl fmt::Display for QuickJSError {
 
 impl std::error::Error for QuickJSError {}
 
-impl From<anyhow::Error> for QuickJSError {
-    fn from(e: anyhow::Error) -> Self {
-        Self::ExecutionFailed(e.to_string())
+impl CommonError for QuickJSError {
+    fn kind(&self) -> CommonErrorKind {
+        self.to_common_kind()
+    }
+
+    fn format_stack_trace(&self) -> Option<String> {
+        Some(Self::format_stack_trace())
     }
 }
 
-impl From<CString> for QuickJSError {
-    fn from(_e: CString) -> Self {
-        Self::ExecutionFailed("Nul error in string".into())
+impl From<anyhow::Error> for QuickJSError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::ExecutionFailed(e.to_string())
     }
 }

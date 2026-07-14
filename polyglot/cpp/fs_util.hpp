@@ -20,9 +20,21 @@ inline Opt<String> read_file(const String &path) {
     return content;
 }
 
+inline String read_file_string(const String &path) {
+    auto content = read_file(path);
+    return content.value_or("");
+}
+
 inline bool write_file(const String &path, const String &data) {
     fsys::create_directories(fsys::path(path).parent_path());
     std::ofstream f(path, std::ios::binary);
+    if (!f) return false;
+    f.write(data.data(), data.size());
+    return true;
+}
+
+inline bool append_file(const String &path, const String &data) {
+    std::ofstream f(path, std::ios::binary | std::ios::app);
     if (!f) return false;
     f.write(data.data(), data.size());
     return true;
@@ -47,12 +59,19 @@ inline bool copy(const String &src, const String &dst) {
     } catch (...) { return false; }
 }
 
+inline bool rename(const String &old_path, const String &new_path) {
+    try {
+        fsys::rename(old_path, new_path);
+        return true;
+    } catch (...) { return false; }
+}
+
 inline Opt<FileInfo> stat(const String &path) {
     try {
         auto s = fsys::status(path);
         FileInfo info;
         info.path = path;
-        info.size = fsys::file_size(path);
+        info.size = fsys::is_regular_file(s) ? fsys::file_size(path) : 0;
         info.is_dir = fsys::is_directory(s);
         info.is_file = fsys::is_regular_file(s);
         info.modified = fsys::last_write_time(path).time_since_epoch().count();
@@ -62,11 +81,58 @@ inline Opt<FileInfo> stat(const String &path) {
 
 inline Vec<FileInfo> read_dir(const String &path) {
     Vec<FileInfo> entries;
+    if (!fsys::exists(path) || !fsys::is_directory(path)) return entries;
     for (const auto &e : fsys::directory_iterator(path)) {
         auto info = stat(e.path().string());
         if (info) entries.push_back(*info);
     }
     return entries;
+}
+
+inline Vec<FileInfo> read_dir_recursive(const String &path) {
+    Vec<FileInfo> entries;
+    if (!fsys::exists(path)) return entries;
+    for (const auto &e : fsys::recursive_directory_iterator(path)) {
+        auto info = stat(e.path().string());
+        if (info) entries.push_back(*info);
+    }
+    return entries;
+}
+
+inline Vec<String> list_files(const String &path) {
+    Vec<String> files;
+    if (!fsys::exists(path) || !fsys::is_directory(path)) return files;
+    for (const auto &e : fsys::directory_iterator(path)) {
+        files.push_back(e.path().filename().string());
+    }
+    return files;
+}
+
+inline int64_t file_size(const String &path) {
+    try {
+        if (fsys::is_regular_file(path))
+            return static_cast<int64_t>(fsys::file_size(path));
+    } catch (...) {}
+    return -1;
+}
+
+inline bool is_dir(const String &path) {
+    return fsys::is_directory(path);
+}
+
+inline bool is_file(const String &path) {
+    return fsys::is_regular_file(path);
+}
+
+inline String cwd() {
+    return fsys::current_path().string();
+}
+
+inline bool chdir(const String &path) {
+    try {
+        fsys::current_path(path);
+        return true;
+    } catch (...) { return false; }
 }
 
 }} // namespace klyron::fs

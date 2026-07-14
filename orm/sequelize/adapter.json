@@ -1,0 +1,15 @@
+{
+  "name": "sequelize",
+  "version": "1.0.0",
+  "description": "Sequelize ORM adapter for Klyron",
+  "orm": {
+    "name": "Sequelize",
+    "detection_file": "package.json,.sequelizerc",
+    "detection_key": "sequelize",
+    "supported_versions": ["6.37"],
+    "default_version": "6.37",
+    "kind": "ORM",
+    "language": "TypeScript/JavaScript",
+    "database_support": ["PostgreSQL", "MySQL", "SQLite", "SQL Server"]
+  }
+}

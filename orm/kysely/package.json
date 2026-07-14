@@ -1,0 +1,11 @@
+{
+  "name": "@klyron/orm-kysely",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kysely SQL query builder adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module",
+  "dependencies": {
+    "kysely": "^0.27.0"
+  }
+}

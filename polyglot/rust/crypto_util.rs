@@ -1,19 +1,9 @@
-//! Cryptographic utilities using only the standard library.
-//!
-//! Provides SHA-256 hashing, cryptographically-secure random
-//! byte generation (via `/dev/urandom`), and UUID v4 generation.
-
 use crate::types::{KlyronError, Result};
 use std::fmt::Write;
 
-/// Compute the SHA-256 hash of `data` and return it as a lowercase hex string.
 pub fn hash(data: &[u8]) -> String {
     sha256(data)
 }
-
-// ---------------------------------------------------------------------------
-// SHA-256 implementation (FIPS 180-4)
-// ---------------------------------------------------------------------------
 
 const K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
@@ -104,28 +94,14 @@ fn sha256(data: &[u8]) -> String {
 fn pad_message(data: &[u8]) -> Vec<u8> {
     let bit_len = (data.len() as u64) * 8;
     let mut padded = data.to_vec();
-
-    // Append 0x80
     padded.push(0x80);
-
-    // Pad with zeros until (len % 64) == 56
     while (padded.len() % 64) != 56 {
         padded.push(0);
     }
-
-    // Append the bit length as a 64-bit big-endian integer
     padded.extend_from_slice(&bit_len.to_be_bytes());
     padded
 }
 
-// ---------------------------------------------------------------------------
-// Random bytes & UUID
-// ---------------------------------------------------------------------------
-
-/// Fill a buffer with cryptographically-secure random bytes
-/// read from `/dev/urandom`.
-///
-/// On non-Unix platforms this returns an error.
 pub fn random_bytes(len: usize) -> Result<Vec<u8>> {
     let mut f = std::fs::File::open("/dev/urandom")
         .map_err(|e| KlyronError::Crypto(format!("cannot open /dev/urandom: {}", e)))?;
@@ -136,10 +112,6 @@ pub fn random_bytes(len: usize) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Generate a random UUID v4 string.
-///
-/// Format: `xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx`
-/// where `x` is random and `y` encodes the variant (10xx).
 pub fn uuid() -> Result<String> {
     let bytes = random_bytes(16)?;
     let mut out = String::with_capacity(36);
@@ -148,15 +120,86 @@ pub fn uuid() -> Result<String> {
             out.push('-');
         }
         let b = if i == 6 {
-            // version 4
             (bytes[i] & 0x0f) | 0x40
         } else if i == 8 {
-            // variant 10xx
             (bytes[i] & 0x3f) | 0x80
         } else {
             bytes[i]
         };
         write!(out, "{:02x}", b).unwrap();
+    }
+    Ok(out)
+}
+
+pub fn hex_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity(data.len() * 2);
+    for byte in data {
+        write!(out, "{:02x}", byte).unwrap();
+    }
+    out
+}
+
+pub fn hex_decode(hex: &str) -> Result<Vec<u8>> {
+    if hex.len() % 2 != 0 {
+        return Err(KlyronError::Crypto("hex string length must be even".into()));
+    }
+    let mut out = Vec::with_capacity(hex.len() / 2);
+    for i in (0..hex.len()).step_by(2) {
+        let byte = u8::from_str_radix(&hex[i..i+2], 16)
+            .map_err(|_| KlyronError::Crypto("invalid hex character".into()))?;
+        out.push(byte);
+    }
+    Ok(out)
+}
+
+pub fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(4 * ((data.len() + 2) / 3));
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let val = (b0 << 16) | (b1 << 8) | b2;
+        out.push(CHARS[((val >> 18) & 0x3f) as usize] as char);
+        out.push(CHARS[((val >> 12) & 0x3f) as usize] as char);
+        out.push(if chunk.len() > 1 { CHARS[((val >> 6) & 0x3f) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { CHARS[(val & 0x3f) as usize] as char } else { '=' });
+    }
+    out
+}
+
+pub fn base64_decode(encoded: &str) -> Result<Vec<u8>> {
+    fn idx(c: u8) -> Option<u8> {
+        match c {
+            b'A'..=b'Z' => Some(c - b'A'),
+            b'a'..=b'z' => Some(c - b'a' + 26),
+            b'0'..=b'9' => Some(c - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let bytes: Vec<u8> = encoded.bytes().filter(|&c| c != b'=').collect();
+    if bytes.len() % 4 == 1 {
+        return Err(KlyronError::Crypto("invalid base64 length".into()));
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    for chunk in bytes.chunks(4) {
+        if chunk.len() < 2 { break; }
+        let a = idx(chunk[0]).ok_or(KlyronError::Crypto("invalid base64 char".into()))?;
+        let b = idx(chunk[1]).ok_or(KlyronError::Crypto("invalid base64 char".into()))?;
+        let val = ((a as u32) << 18) | ((b as u32) << 12);
+        out.push((val >> 16) as u8);
+        if let Some(&c) = chunk.get(2) {
+            let c = idx(c).ok_or(KlyronError::Crypto("invalid base64 char".into()))?;
+            let val = val | ((c as u32) << 6);
+            out.push((val >> 8) as u8);
+            if let Some(&d) = chunk.get(3) {
+                let d = idx(d).ok_or(KlyronError::Crypto("invalid base64 char".into()))?;
+                let val = val | d as u32;
+                out.push(val as u8);
+            }
+        }
     }
     Ok(out)
 }

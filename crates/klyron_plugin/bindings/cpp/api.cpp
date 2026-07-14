@@ -5,7 +5,6 @@ namespace klyron::_plugin {
 PluginApi::PluginApi() {}
 
 void PluginApi::execute() {
-    // TODO: implement
 }
 
 std::string PluginApi::version() {

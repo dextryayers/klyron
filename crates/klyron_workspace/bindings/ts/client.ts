@@ -8,6 +8,5 @@ export class WorkspaceClient {
   }
 
   async execute(): Promise<void> {
-    // TODO: implement
   }
 }

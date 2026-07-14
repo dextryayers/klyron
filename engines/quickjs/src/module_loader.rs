@@ -1,4 +1,5 @@
 use crate::error::QuickJSError;
+use klyron_engine_common::module_loader::CommonModuleLoader;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
@@ -51,5 +52,19 @@ impl QuickJSModuleLoader {
     pub fn instantiate(&self, path: &str, source: &str) -> Result<(), QuickJSError> {
         self.register(path, source);
         Ok(())
+    }
+}
+
+impl CommonModuleLoader for QuickJSModuleLoader {
+    fn resolve(&self, specifier: &str, base: &str) -> Result<String, String> {
+        self.resolve(specifier, base).map_err(|e| e.to_string())
+    }
+
+    fn load(&self, path: &str) -> Result<String, String> {
+        self.load(path).map_err(|e| e.to_string())
+    }
+
+    fn register(&self, name: &str, source: &str) {
+        self.register(name, source)
     }
 }

@@ -1,0 +1,12 @@
+{
+  "name": "laravel",
+  "version": "1.0.0",
+  "description": "Laravel adapter for Klyron",
+  "framework": {
+    "name": "Laravel",
+    "detection_file": "artisan",
+    "supported_versions": ["9", "10", "11", "12", "13"],
+    "default_version": "12",
+    "kind": "Polyglot"
+  }
+}

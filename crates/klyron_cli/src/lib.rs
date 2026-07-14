@@ -1,11 +1,14 @@
 pub mod engines;
 pub mod commands;
 pub mod scaffold_inline;
+pub mod color;
 
 pub(crate) use commands::helpers::*;
 pub(crate) use scaffold_inline::*;
+pub(crate) use color::Color;
 
 use std::path::{Path, PathBuf};
+use std::io::Write;
 use clap::{Parser, Subcommand, Args, CommandFactory};
 use klyron_adapter::AdapterRegistry;
 use klyron_adapter::adapters::register_all;
@@ -118,6 +121,7 @@ pub fn all_extensions() -> Vec<deno_core::Extension> {
         klyron_ext_html::init(),
         klyron_ext_ffi::init(),
         klyron_ext_ws::init(),
+        klyron_ext_process::init(),
     ]
 }
 
@@ -151,6 +155,9 @@ pub struct Cli {
 
     #[arg(long = "engine", global = true, help = "JavaScript engine to use (v8, boa, quickjs, jsc, auto)")]
     pub engine: Option<String>,
+
+    #[arg(long = "json", global = true, help = "Output in JSON format")]
+    pub json: bool,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -430,7 +437,20 @@ pub fn run_cli() -> anyhow::Result<()> {
 
     let engine = resolve_engine(cli.engine.as_deref())?;
 
-    dispatch_command(cli.command, engine)
+    let result = dispatch_command(cli.command, engine);
+
+    if cli.json {
+        match &result {
+            Ok(()) => {
+                println!("{}", serde_json::json!({"status": "ok", "message": "Command completed successfully"}));
+            }
+            Err(e) => {
+                println!("{}", serde_json::json!({"status": "error", "message": e.to_string()}));
+            }
+        }
+    }
+
+    result
 }
 
 // ── Dispatch ──────────────────────────────────────────────────────────────

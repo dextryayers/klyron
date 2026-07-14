@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 int klyron_shell_execute(void) {
-    // TODO: implement
+    printf("[shell] execute\n");
     return 0;
 }
 

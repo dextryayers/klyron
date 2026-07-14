@@ -1,0 +1,11 @@
+{
+  "name": "@klyron/orm-sequelize",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sequelize ORM adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module",
+  "dependencies": {
+    "sequelize": "^6.37.0"
+  }
+}

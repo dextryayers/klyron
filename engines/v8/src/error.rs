@@ -1,5 +1,7 @@
 use std::fmt;
 
+use klyron_engine_common::error::{CommonError, CommonErrorKind};
+
 #[derive(Debug)]
 pub enum V8Error {
     NotInitialized,
@@ -22,6 +24,21 @@ impl V8Error {
     pub fn format_stack_trace() -> String {
         "No stack trace available (V8 native not linked)".to_string()
     }
+
+    pub fn to_common_kind(&self) -> CommonErrorKind {
+        match self {
+            Self::NotInitialized => CommonErrorKind::NotInitialized,
+            Self::InitFailed(msg) => CommonErrorKind::InitFailed(msg.clone()),
+            Self::ExecutionFailed(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
+            Self::CompileError(msg) => CommonErrorKind::CompileError(msg.clone()),
+            Self::SyntaxError(msg) => CommonErrorKind::SyntaxError(msg.clone()),
+            Self::TypeError(msg) => CommonErrorKind::TypeError(msg.clone()),
+            Self::RangeError(msg) => CommonErrorKind::RangeError(msg.clone()),
+            Self::ReferenceError(msg) => CommonErrorKind::ReferenceError(msg.clone()),
+            Self::Timeout => CommonErrorKind::Timeout,
+            Self::OutOfMemory => CommonErrorKind::OutOfMemory,
+        }
+    }
 }
 
 impl fmt::Display for V8Error {
@@ -42,6 +59,16 @@ impl fmt::Display for V8Error {
 }
 
 impl std::error::Error for V8Error {}
+
+impl CommonError for V8Error {
+    fn kind(&self) -> CommonErrorKind {
+        self.to_common_kind()
+    }
+
+    fn format_stack_trace(&self) -> Option<String> {
+        Some(Self::format_stack_trace())
+    }
+}
 
 impl From<anyhow::Error> for V8Error {
     fn from(e: anyhow::Error) -> Self {

@@ -1,5 +1,10 @@
 #include "types.hpp"
+#include <string>
 
 namespace klyron {
-// Klyron::Engine type implementations
+
+std::string klyron_engine_version() {
+    return "klyron_engine 0.1.0";
+}
+
 }

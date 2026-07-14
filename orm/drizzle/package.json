@@ -1,0 +1,11 @@
+{
+  "name": "@klyron/orm-drizzle",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Drizzle ORM adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module",
+  "dependencies": {
+    "drizzle-orm": "^0.40.0"
+  }
+}

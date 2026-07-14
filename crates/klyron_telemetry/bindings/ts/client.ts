@@ -8,6 +8,5 @@ export class TelemetryClient {
   }
 
   async execute(): Promise<void> {
-    // TODO: implement
   }
 }

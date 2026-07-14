@@ -1,6 +1,9 @@
-import { op_set_timeout, op_clear_timer } from "ext:core/ops";
+import { op_set_timeout, op_set_interval, op_clear_timer } from "ext:core/ops";
 
 let timerCounter = 0;
+
+const _timeouts = new Map();
+const _intervals = new Map();
 
 globalThis.setTimeout = (callback, delay, ...args) => {
   const id = ++timerCounter;
@@ -8,34 +11,43 @@ globalThis.setTimeout = (callback, delay, ...args) => {
   op_set_timeout(delayMs);
   if (delayMs === 0) {
     Promise.resolve().then(() => {
-      if (globalThis.__klyron_pending_timeouts?.has(id)) {
-        globalThis.__klyron_pending_timeouts.delete(id);
+      if (_timeouts.has(id)) {
+        _timeouts.delete(id);
         callback(...args);
       }
     });
   }
-  if (!globalThis.__klyron_pending_timeouts) {
-    globalThis.__klyron_pending_timeouts = new Map();
-  }
-  globalThis.__klyron_pending_timeouts.set(id, { callback, args });
+  _timeouts.set(id, { callback, args });
   return id;
 };
 
 globalThis.clearTimeout = (id) => {
-  if (globalThis.__klyron_pending_timeouts) {
-    globalThis.__klyron_pending_timeouts.delete(id);
-  }
-  op_clear_timer();
+  _timeouts.delete(id);
+  op_clear_timer(id);
 };
 
 globalThis.setInterval = (callback, delay, ...args) => {
   const id = ++timerCounter;
-  op_set_timeout(delay || 0);
+  const delayMs = Math.max(delay || 0, 1);
+  op_set_interval(delayMs);
+  const run = () => {
+    if (!_intervals.has(id)) return;
+    try { callback(...args); } catch (_) {}
+    if (_intervals.has(id)) {
+      _intervals.get(id).nextTick = setTimeout(run, delayMs);
+    }
+  };
+  _intervals.set(id, { callback, args, nextTick: setTimeout(run, delayMs) });
   return id;
 };
 
 globalThis.clearInterval = (id) => {
-  op_clear_timer();
+  const iv = _intervals.get(id);
+  if (iv) {
+    clearTimeout(iv.nextTick);
+    _intervals.delete(id);
+  }
+  op_clear_timer(id);
 };
 
 globalThis.queueMicrotask = (callback) => {

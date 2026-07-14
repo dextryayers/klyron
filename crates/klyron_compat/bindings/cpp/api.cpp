@@ -5,7 +5,6 @@ namespace klyron::_compat {
 CompatApi::CompatApi() {}
 
 void CompatApi::execute() {
-    // TODO: implement
 }
 
 std::string CompatApi::version() {

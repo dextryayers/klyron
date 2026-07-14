@@ -1,0 +1,11 @@
+{
+  "name": "@klyron/orm-mongoose",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mongoose ODM adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module",
+  "dependencies": {
+    "mongoose": "^8.9.0"
+  }
+}

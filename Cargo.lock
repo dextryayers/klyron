@@ -3350,6 +3350,7 @@ dependencies = [
  "glob",
  "libc",
  "oxc",
+ "regex",
  "serde",
  "serde_json",
  "tokio",
@@ -3362,6 +3363,16 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "boa_engine",
+ "klyron-engine-common",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "klyron-engine-common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "serde",
  "serde_json",
 ]
@@ -3371,6 +3382,7 @@ name = "klyron-engine-jsc"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "klyron-engine-common",
  "serde",
  "serde_json",
 ]
@@ -3380,6 +3392,7 @@ name = "klyron-engine-quickjs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "klyron-engine-common",
  "serde",
  "serde_json",
 ]
@@ -3389,6 +3402,7 @@ name = "klyron-engine-v8"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "klyron-engine-common",
  "serde",
  "serde_json",
 ]
@@ -3492,11 +3506,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "klyron-ext-process"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "deno_core",
+ "deno_error",
+ "klyron_process",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "klyron-ext-timers"
 version = "0.1.0"
 dependencies = [
  "deno_core",
  "klyron-core",
+ "tokio",
 ]
 
 [[package]]
@@ -3559,6 +3586,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "klyron_engine",
  "rayon",
  "serde",
  "serde_json",
@@ -3572,6 +3600,8 @@ dependencies = [
  "anyhow",
  "glob",
  "hex",
+ "once_cell",
+ "regex",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3610,6 +3640,7 @@ dependencies = [
  "klyron-ext-klyron",
  "klyron-ext-net",
  "klyron-ext-node",
+ "klyron-ext-process",
  "klyron-ext-timers",
  "klyron-ext-web",
  "klyron-ext-ws",
@@ -3726,6 +3757,7 @@ name = "klyron_engine"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bincode",
  "criterion",
  "klyron-engine-boa",
  "klyron-engine-jsc",
@@ -3866,6 +3898,7 @@ name = "klyron_plugin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hex",
  "notify",
  "serde",
  "serde_json",
@@ -3883,13 +3916,16 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "glob",
  "hex",
  "once_cell",
+ "regex",
  "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.18",
+ "walkdir",
 ]
 
 [[package]]
@@ -3922,11 +3958,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "flate2",
  "hex",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tar",
  "thiserror 2.0.18",
 ]
 
@@ -7173,6 +7212,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
+]
+
+[[package]]
 name = "target-lexicon"
 version = "0.12.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9092,6 +9142,16 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "zeroize",
+]
+
+[[package]]
+name = "xattr"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+dependencies = [
+ "libc",
+ "rustix 1.1.4",
 ]
 
 [[package]]

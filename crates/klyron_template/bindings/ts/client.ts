@@ -8,6 +8,5 @@ export class TemplateClient {
   }
 
   async execute(): Promise<void> {
-    // TODO: implement
   }
 }

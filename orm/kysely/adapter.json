@@ -1,0 +1,15 @@
+{
+  "name": "kysely",
+  "version": "1.0.0",
+  "description": "Kysely SQL query builder adapter for Klyron",
+  "orm": {
+    "name": "Kysely",
+    "detection_file": "package.json",
+    "detection_key": "kysely",
+    "supported_versions": ["0.27"],
+    "default_version": "0.27",
+    "kind": "ORM",
+    "language": "TypeScript",
+    "database_support": ["PostgreSQL", "MySQL", "SQLite"]
+  }
+}

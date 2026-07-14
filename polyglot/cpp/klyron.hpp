@@ -14,6 +14,9 @@
 #include <cstdlib>
 #include <memory>
 #include <stdexcept>
+#include <cstdint>
+#include <tuple>
+#include <variant>
 
 namespace klyron {
 
@@ -35,6 +38,10 @@ struct HttpResponse {
     Map<String, String> headers;
     String body;
     bool ok() const { return status >= 200 && status < 300; }
+    String header(const String &name) const {
+        auto it = headers.find(name);
+        return it != headers.end() ? it->second : "";
+    }
 };
 
 struct FileInfo {

@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 int klyron_adapter_execute(void) {
-    // TODO: implement
+    printf("[adapter] execute\n");
     return 0;
 }
 

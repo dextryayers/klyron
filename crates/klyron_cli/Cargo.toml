@@ -36,6 +36,7 @@ klyron-ext-node = { path = "../../src/ext/node" }
 klyron-ext-klyron = { path = "../../src/ext/klyron" }
 klyron-ext-ffi = { path = "../../src/ext/ffi" }
 klyron-ext-ws = { path = "../../src/ext/ws" }
+klyron-ext-process = { path = "../../src/ext/process" }
 deno_core.workspace = true
 clap = { version = "4.5", features = ["derive", "env", "error-context", "help", "usage"] }
 serde = { version = "1", features = ["derive"] }

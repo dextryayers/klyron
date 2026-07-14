@@ -1,0 +1,11 @@
+{
+  "name": "klyron-fullstack",
+  "version": "0.1.0",
+  "description": "Full-stack SPA example using Klyron",
+  "type": "module",
+  "scripts": {
+    "start": "klyron run server.js"
+  },
+  "keywords": ["klyron", "fullstack", "spa", "example"],
+  "license": "MIT"
+}

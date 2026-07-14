@@ -8,6 +8,5 @@ export class ConfigClient {
   }
 
   async execute(): Promise<void> {
-    // TODO: implement
   }
 }

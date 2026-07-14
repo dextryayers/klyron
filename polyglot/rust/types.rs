@@ -1,12 +1,6 @@
-//! Common types for the Klyron polyglot runtime.
-//!
-//! Provides `JsonValue`, `KlyronError`, and `Result` types
-//! used throughout the SDK modules.
-
 use std::collections::BTreeMap;
 use std::fmt;
 
-/// A JSON-compatible value type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
     Null,
@@ -91,6 +85,27 @@ impl JsonValue {
     pub fn is_array(&self) -> bool {
         matches!(self, JsonValue::Array(_))
     }
+
+    pub fn get(&self, key: &str) -> Option<&JsonValue> {
+        match self {
+            JsonValue::Object(m) => m.get(key),
+            _ => None,
+        }
+    }
+
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut JsonValue> {
+        match self {
+            JsonValue::Object(m) => m.get_mut(key),
+            _ => None,
+        }
+    }
+
+    pub fn index(&self, i: usize) -> Option<&JsonValue> {
+        match self {
+            JsonValue::Array(a) => a.get(i),
+            _ => None,
+        }
+    }
 }
 
 impl From<String> for JsonValue {
@@ -135,13 +150,14 @@ impl From<BTreeMap<String, JsonValue>> for JsonValue {
     }
 }
 
-/// Error type for Klyron operations.
 #[derive(Debug)]
 pub enum KlyronError {
     Io(std::io::Error),
     Parse(String),
     Http(String),
     Crypto(String),
+    Dns(String),
+    Process(String),
     Msg(String),
 }
 
@@ -152,6 +168,8 @@ impl fmt::Display for KlyronError {
             KlyronError::Parse(s) => write!(f, "Parse error: {}", s),
             KlyronError::Http(s) => write!(f, "HTTP error: {}", s),
             KlyronError::Crypto(s) => write!(f, "Crypto error: {}", s),
+            KlyronError::Dns(s) => write!(f, "DNS error: {}", s),
+            KlyronError::Process(s) => write!(f, "Process error: {}", s),
             KlyronError::Msg(s) => write!(f, "{}", s),
         }
     }
@@ -177,5 +195,39 @@ impl From<&str> for KlyronError {
     }
 }
 
-/// Convenience result type for Klyron operations.
 pub type Result<T> = std::result::Result<T, KlyronError>;
+
+pub struct ProcessResult {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+    pub success: bool,
+}
+
+pub struct HttpResponse {
+    pub status: u16,
+    pub status_text: String,
+    pub headers: BTreeMap<String, String>,
+    pub body: String,
+}
+
+impl HttpResponse {
+    pub fn ok(&self) -> bool {
+        self.status >= 200 && self.status < 300
+    }
+}
+
+pub struct FileInfo {
+    pub path: String,
+    pub size: u64,
+    pub is_dir: bool,
+    pub is_file: bool,
+    pub modified: i64,
+}
+
+pub struct DnsRecord {
+    pub name: String,
+    pub record_type: String,
+    pub value: String,
+    pub ttl: u32,
+}

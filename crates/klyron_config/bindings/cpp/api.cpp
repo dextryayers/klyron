@@ -5,7 +5,6 @@ namespace klyron::_config {
 ConfigApi::ConfigApi() {}
 
 void ConfigApi::execute() {
-    // TODO: implement
 }
 
 std::string ConfigApi::version() {

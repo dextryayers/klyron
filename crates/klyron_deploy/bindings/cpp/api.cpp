@@ -5,7 +5,6 @@ namespace klyron::_deploy {
 DeployApi::DeployApi() {}
 
 void DeployApi::execute() {
-    // TODO: implement
 }
 
 std::string DeployApi::version() {

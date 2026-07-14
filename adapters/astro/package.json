@@ -1,0 +1,11 @@
+{
+  "name": "@klyron/adapter-astro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Astro adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module",
+  "dependencies": {
+    "astro": "^5.4.0"
+  }
+}

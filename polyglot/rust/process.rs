@@ -1,19 +1,6 @@
-//! Process execution helpers.
-//!
-//! Functions for running commands, capturing output,
-//! and locating executables on the system PATH.
-
-use crate::types::Result;
+use crate::types::{ProcessResult, Result};
 use std::process::{Command, Output, Stdio};
 
-/// Run a command with arguments, inheriting stdio streams.
-///
-/// Returns the exit code (or `-1` if terminated by signal).
-///
-/// ```
-/// use klyron_rust::process::run_command;
-/// let code = run_command("echo", &["hello"]).unwrap();
-/// ```
 pub fn run_command(cmd: &str, args: &[&str]) -> Result<i32> {
     let status = Command::new(cmd)
         .args(args)
@@ -24,14 +11,6 @@ pub fn run_command(cmd: &str, args: &[&str]) -> Result<i32> {
     Ok(status.code().unwrap_or(-1))
 }
 
-/// Run a command and capture its stdout and stderr as strings.
-///
-/// Returns a tuple of `(stdout, stderr, exit_code)`.
-///
-/// ```
-/// use klyron_rust::process::capture_output;
-/// let (out, err, code) = capture_output("echo", &["hello"]).unwrap();
-/// ```
 pub fn capture_output(cmd: &str, args: &[&str]) -> Result<(String, String, i32)> {
     let output: Output = Command::new(cmd)
         .args(args)
@@ -44,14 +23,53 @@ pub fn capture_output(cmd: &str, args: &[&str]) -> Result<(String, String, i32)>
     Ok((stdout, stderr, code))
 }
 
-/// Locate an executable on the system `PATH`.
-///
-/// Returns `Some(full_path)` if found, or `None` otherwise.
-///
-/// ```
-/// use klyron_rust::process::which;
-/// assert!(which("sh").is_some());
-/// ```
+pub fn exec(cmd: &str) -> Result<ProcessResult> {
+    let output = if cfg!(target_os = "windows") {
+        Command::new("cmd").args(["/C", cmd]).output()?
+    } else {
+        Command::new("sh").args(["-c", cmd]).output()?
+    };
+    Ok(ProcessResult {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        exit_code: output.status.code().unwrap_or(-1),
+        success: output.status.success(),
+    })
+}
+
+pub fn spawn(cmd: &str, args: &[&str]) -> Result<u32> {
+    let child = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    Ok(child.id())
+}
+
+pub fn kill(pid: u32) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let status = Command::new("kill")
+            .arg(pid.to_string())
+            .status()?;
+        if !status.success() {
+            return Err(format!("Failed to kill process {}", pid).into());
+        }
+    }
+    #[cfg(windows)]
+    {
+        let status = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .status()?;
+        if !status.success() {
+            return Err(format!("Failed to kill process {}", pid).into());
+        }
+    }
+    Ok(())
+}
+
 pub fn which(program: &str) -> Option<String> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
@@ -68,4 +86,49 @@ pub fn which(program: &str) -> Option<String> {
         }
     }
     None
+}
+
+pub fn pipe_commands(cmds: &[(&str, &[&str])]) -> Result<String> {
+    if cmds.is_empty() {
+        return Err("No commands provided".into());
+    }
+    if cmds.len() == 1 {
+        return Ok(capture_output(cmds[0].0, cmds[0].1)?.0);
+    }
+
+    let mut prev_stdout = None;
+    for (i, (cmd, args)) in cmds.iter().enumerate() {
+        let mut command = Command::new(cmd);
+        command.args(args);
+
+        if let Some(stdout) = prev_stdout.take() {
+            command.stdin(Stdio::piped());
+            if let Some(mut stdin) = command.stdin() {
+                stdin.write_all(stdout.as_bytes());
+            }
+        }
+
+        if i == cmds.len() - 1 {
+            let output = command.output()?;
+            return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+        } else {
+            let output = command.output()?;
+            prev_stdout = Some(String::from_utf8_lossy(&output.stdout).to_string());
+        }
+    }
+    Err("Pipeline failed".into())
+}
+
+pub fn background(cmd: &str, args: &[&str]) -> Result<u32> {
+    let child = Command::new(cmd)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null())
+        .spawn()?;
+    Ok(child.id())
+}
+
+pub fn sleep_ms(ms: u64) {
+    std::thread::sleep(std::time::Duration::from_millis(ms));
 }

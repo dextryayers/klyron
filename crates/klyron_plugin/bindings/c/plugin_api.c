@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 int klyron_plugin_execute(void) {
-    // TODO: implement
+    printf("[plugin] execute\n");
     return 0;
 }
 

@@ -1,0 +1,13 @@
+{
+  "name": "lit",
+  "version": "1.0.0",
+  "description": "Lit adapter for Klyron",
+  "framework": {
+    "name": "Lit",
+    "detection_file": "package.json",
+    "detection_key": "lit",
+    "supported_versions": ["3.0"],
+    "default_version": "3.0",
+    "kind": "Frontend"
+  }
+}

@@ -1,5 +1,10 @@
 #include "types.hpp"
+#include <string>
 
 namespace klyron {
-// Klyron::Utils type implementations
+
+std::string klyron_utils_version() {
+    return "klyron_utils 0.1.0";
+}
+
 }

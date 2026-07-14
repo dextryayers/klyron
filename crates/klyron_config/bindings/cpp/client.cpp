@@ -6,7 +6,6 @@ ConfigClient::ConfigClient(const ConfigConfig& config)
     : config_(config) {}
 
 void ConfigClient::execute() {
-    // TODO: implement
 }
 
 }

@@ -4,6 +4,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <errno.h>
 
 klyron_string_t klyron_fs_read_file(const char *path) {
     klyron_string_t result = {NULL, 0, 0};
@@ -71,12 +73,9 @@ klyron_file_info_t klyron_fs_stat(const char *path) {
 
 bool klyron_fs_copy(const char *src, const char *dst) {
     FILE *fsrc = fopen(src, "rb");
+    if (!fsrc) return false;
     FILE *fdst = fopen(dst, "wb");
-    if (!fsrc || !fdst) {
-        if (fsrc) fclose(fsrc);
-        if (fdst) fclose(fdst);
-        return false;
-    }
+    if (!fdst) { fclose(fsrc); return false; }
     char buf[8192];
     size_t n;
     while ((n = fread(buf, 1, sizeof(buf), fsrc)) > 0) {
@@ -85,4 +84,81 @@ bool klyron_fs_copy(const char *src, const char *dst) {
     fclose(fsrc);
     fclose(fdst);
     return true;
+}
+
+klyron_dir_list_t klyron_fs_read_dir(const char *path) {
+    klyron_dir_list_t list = {NULL, 0};
+    DIR *dir = opendir(path);
+    if (!dir) return list;
+
+    size_t cap = 32;
+    list.entries = (klyron_file_info_t *)malloc(cap * sizeof(klyron_file_info_t));
+    if (!list.entries) { closedir(dir); return list; }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        if (list.count >= cap) {
+            cap *= 2;
+            klyron_file_info_t *tmp = (klyron_file_info_t *)realloc(list.entries, cap * sizeof(klyron_file_info_t));
+            if (!tmp) break;
+            list.entries = tmp;
+        }
+
+        size_t full_len = strlen(path) + 1 + strlen(entry->d_name) + 1;
+        char *full_path = (char *)malloc(full_len);
+        snprintf(full_path, full_len, "%s/%s", path, entry->d_name);
+
+        list.entries[list.count].path = full_path;
+        struct stat st;
+        if (stat(full_path, &st) == 0) {
+            list.entries[list.count].size = (uint64_t)st.st_size;
+            list.entries[list.count].is_dir = S_ISDIR(st.st_mode);
+            list.entries[list.count].is_file = S_ISREG(st.st_mode);
+            list.entries[list.count].modified = (int64_t)st.st_mtime;
+        } else {
+            list.entries[list.count].size = 0;
+            list.entries[list.count].is_dir = (entry->d_type == DT_DIR);
+            list.entries[list.count].is_file = (entry->d_type == DT_REG);
+            list.entries[list.count].modified = 0;
+        }
+        list.count++;
+    }
+    closedir(dir);
+    return list;
+}
+
+bool klyron_fs_rename(const char *old, const char *new_) {
+    return rename(old, new_) == 0;
+}
+
+int64_t klyron_fs_file_size(const char *path) {
+    struct stat st;
+    if (stat(path, &st) != 0) return -1;
+    return (int64_t)st.st_size;
+}
+
+bool klyron_fs_is_dir(const char *path) {
+    struct stat st;
+    if (stat(path, &st) != 0) return false;
+    return S_ISDIR(st.st_mode);
+}
+
+bool klyron_fs_is_file(const char *path) {
+    struct stat st;
+    if (stat(path, &st) != 0) return false;
+    return S_ISREG(st.st_mode);
+}
+
+void klyron_dir_list_free(klyron_dir_list_t *list) {
+    if (list->entries) {
+        for (size_t i = 0; i < list->count; i++) {
+            free(list->entries[i].path);
+        }
+        free(list->entries);
+        list->entries = NULL;
+    }
+    list->count = 0;
 }

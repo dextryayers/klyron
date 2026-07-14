@@ -1,0 +1,12 @@
+{
+  "name": "astro",
+  "version": "1.0.0",
+  "description": "Astro adapter for Klyron",
+  "framework": {
+    "name": "Astro",
+    "detection_file": "astro.config.*",
+    "supported_versions": ["4.0", "5.0", "5.4"],
+    "default_version": "5.4",
+    "kind": "StaticSiteGenerator"
+  }
+}

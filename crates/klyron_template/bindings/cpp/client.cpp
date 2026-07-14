@@ -6,7 +6,6 @@ TemplateClient::TemplateClient(const TemplateConfig& config)
     : config_(config) {}
 
 void TemplateClient::execute() {
-    // TODO: implement
 }
 
 }

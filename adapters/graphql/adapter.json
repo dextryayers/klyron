@@ -1,0 +1,13 @@
+{
+  "name": "graphql",
+  "version": "1.0.0",
+  "description": "GraphQL adapter for Klyron",
+  "framework": {
+    "name": "GraphQL",
+    "detection_file": "package.json",
+    "detection_key": "graphql",
+    "supported_versions": ["16.0", "17.0"],
+    "default_version": "17.0",
+    "kind": "ApiFramework"
+  }
+}

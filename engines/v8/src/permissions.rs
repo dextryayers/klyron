@@ -1,3 +1,5 @@
+use klyron_engine_common::permissions::{CommonPermission, CommonPermissions};
+
 #[derive(Debug, Clone)]
 pub enum Permission {
     Read,
@@ -7,6 +9,34 @@ pub enum Permission {
     Run,
     Ffi,
     All,
+}
+
+impl From<Permission> for CommonPermission {
+    fn from(p: Permission) -> Self {
+        match p {
+            Permission::Read => CommonPermission::Read,
+            Permission::Write => CommonPermission::Write,
+            Permission::Net => CommonPermission::Net,
+            Permission::Env => CommonPermission::Env,
+            Permission::Run => CommonPermission::Run,
+            Permission::Ffi => CommonPermission::Ffi,
+            Permission::All => CommonPermission::All,
+        }
+    }
+}
+
+impl From<CommonPermission> for Permission {
+    fn from(p: CommonPermission) -> Self {
+        match p {
+            CommonPermission::Read => Permission::Read,
+            CommonPermission::Write => Permission::Write,
+            CommonPermission::Net => Permission::Net,
+            CommonPermission::Env => Permission::Env,
+            CommonPermission::Run => Permission::Run,
+            CommonPermission::Ffi => Permission::Ffi,
+            CommonPermission::All => Permission::All,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -25,15 +55,9 @@ impl V8Permissions {
     }
 
     pub fn check(&self, permission: &Permission, resource: Option<&str>) -> bool {
-        match permission {
-            Permission::Read => self.check_path(&self.allow_read, resource),
-            Permission::Write => self.check_path(&self.allow_write, resource),
-            Permission::Net => self.check_net(resource),
-            Permission::Env => self.allow_env,
-            Permission::Run => self.allow_run,
-            Permission::Ffi => self.allow_ffi,
-            Permission::All => true,
-        }
+        let common: CommonPermission = permission.clone().into();
+        let common_perms = self.to_common();
+        common_perms.check(&common, resource)
     }
 
     pub fn deny_all() -> Self {
@@ -58,23 +82,26 @@ impl V8Permissions {
         }
     }
 
-    fn check_path(&self, allowed: &[String], resource: Option<&str>) -> bool {
-        if allowed.is_empty() { return false; }
-        if allowed.iter().any(|p| p == "/") { return true; }
-        if let Some(r) = resource {
-            allowed.iter().any(|p| r.starts_with(p))
-        } else {
-            false
+    pub fn to_common(&self) -> CommonPermissions {
+        CommonPermissions {
+            allow_read: self.allow_read.clone(),
+            allow_write: self.allow_write.clone(),
+            allow_net: self.allow_net.clone(),
+            allow_env: self.allow_env,
+            allow_run: self.allow_run,
+            allow_ffi: self.allow_ffi,
         }
     }
 
-    fn check_net(&self, resource: Option<&str>) -> bool {
-        if self.allow_net.is_empty() { return false; }
-        if self.allow_net.iter().any(|p| p == "*") { return true; }
-        if let Some(r) = resource {
-            self.allow_net.iter().any(|p| p == r)
-        } else {
-            false
+    pub fn from_common(common: CommonPermissions) -> Self {
+        Self {
+            allow_read: common.allow_read,
+            allow_write: common.allow_write,
+            allow_net: common.allow_net,
+            allow_env: common.allow_env,
+            allow_run: common.allow_run,
+            allow_ffi: common.allow_ffi,
         }
     }
+
 }

@@ -1,0 +1,15 @@
+{
+  "name": "mongoose",
+  "version": "1.0.0",
+  "description": "Mongoose ODM adapter for Klyron",
+  "orm": {
+    "name": "Mongoose",
+    "detection_file": "package.json",
+    "detection_key": "mongoose",
+    "supported_versions": ["8.0", "8.9"],
+    "default_version": "8.9",
+    "kind": "ORM",
+    "language": "TypeScript/JavaScript",
+    "database_support": ["MongoDB"]
+  }
+}

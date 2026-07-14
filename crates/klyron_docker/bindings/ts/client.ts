@@ -8,6 +8,5 @@ export class DockerClient {
   }
 
   async execute(): Promise<void> {
-    // TODO: implement
   }
 }

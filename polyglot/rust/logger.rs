@@ -1,13 +1,3 @@
-//! Simple timestamped logger.
-//!
-//! Logs messages to stderr with ISO-8601 UTC timestamps and a level tag.
-//!
-//! ```
-//! use klyron_rust::logger::{info, warn, error, debug};
-//! info("server started");
-//! warn("disk space low");
-//! ```
-
 use std::time::SystemTime;
 
 fn format_timestamp(t: SystemTime) -> String {
@@ -26,7 +16,6 @@ fn format_timestamp(t: SystemTime) -> String {
     )
 }
 
-/// Convert days since 1970-01-01 to a Gregorian (year, month, day).
 fn days_to_date(days: i64) -> (i64, u32, u32) {
     let z = days + 719468;
     let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
@@ -46,22 +35,26 @@ fn log(level: &str, msg: &str) {
     eprintln!("[{}] {}: {}", ts, level, msg);
 }
 
-/// Log an informational message.
 pub fn info(msg: &str) {
     log("INFO", msg);
 }
 
-/// Log a warning message.
 pub fn warn(msg: &str) {
     log("WARN", msg);
 }
 
-/// Log an error message.
 pub fn error(msg: &str) {
     log("ERROR", msg);
 }
 
-/// Log a debug message.
 pub fn debug(msg: &str) {
     log("DEBUG", msg);
+}
+
+pub fn trace(msg: &str) {
+    log("TRACE", msg);
+}
+
+pub fn fatal(msg: &str) {
+    log("FATAL", msg);
 }

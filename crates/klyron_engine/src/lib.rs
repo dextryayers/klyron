@@ -1,7 +1,21 @@
 pub mod process;
 pub mod traits;
 pub mod engine;
+pub mod warmup_cache;
+pub mod memory_limits;
+pub mod sandbox;
+pub mod fallback;
+pub mod snapshot;
+pub mod es_module;
+pub mod sourcemap;
 
 pub use process::{EngineProcess, EngineInput, EngineOutput, FileEntry, find_engine_path};
 pub use traits::EngineTrait;
 pub use engine::{JsEngineKind, EngineRuntime, JsEngine, JsValue, JsError, BenchResult, benchmark_all_engines, detect_best_engine};
+pub use warmup_cache::WarmupCache;
+pub use memory_limits::MemoryLimits;
+pub use sandbox::{SandboxPool, SandboxContext};
+pub use fallback::{FallbackChain, FallbackStrategy};
+pub use snapshot::{EngineSnapshot, WarmupSnapshot};
+pub use es_module::{ESModuleLoader, ESModule, ModuleType, ModuleLoader};
+pub use sourcemap::SourceMap;

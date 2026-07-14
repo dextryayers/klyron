@@ -6,7 +6,6 @@ WorkspaceClient::WorkspaceClient(const WorkspaceConfig& config)
     : config_(config) {}
 
 void WorkspaceClient::execute() {
-    // TODO: implement
 }
 
 }

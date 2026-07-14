@@ -1,0 +1,11 @@
+{
+  "name": "@klyron/orm-mikroorm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MikroORM adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module",
+  "dependencies": {
+    "@mikro-orm/core": "^6.3.0"
+  }
+}

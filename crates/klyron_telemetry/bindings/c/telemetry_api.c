@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 int klyron_telemetry_execute(void) {
-    // TODO: implement
+    printf("[telemetry] execute\n");
     return 0;
 }
 

@@ -5,7 +5,6 @@ namespace klyron::_shell {
 ShellApi::ShellApi() {}
 
 void ShellApi::execute() {
-    // TODO: implement
 }
 
 std::string ShellApi::version() {

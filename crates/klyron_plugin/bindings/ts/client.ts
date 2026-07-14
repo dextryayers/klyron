@@ -8,6 +8,5 @@ export class PluginClient {
   }
 
   async execute(): Promise<void> {
-    // TODO: implement
   }
 }

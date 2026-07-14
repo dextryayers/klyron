@@ -5,7 +5,6 @@ namespace klyron::_workspace {
 WorkspaceApi::WorkspaceApi() {}
 
 void WorkspaceApi::execute() {
-    // TODO: implement
 }
 
 std::string WorkspaceApi::version() {

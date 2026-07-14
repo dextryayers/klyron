@@ -1,0 +1,15 @@
+{
+  "name": "mikroorm",
+  "version": "1.0.0",
+  "description": "MikroORM adapter for Klyron",
+  "orm": {
+    "name": "MikroORM",
+    "detection_file": "package.json",
+    "detection_key": "@mikro-orm/core",
+    "supported_versions": ["6.0", "6.3"],
+    "default_version": "6.3",
+    "kind": "ORM",
+    "language": "TypeScript",
+    "database_support": ["PostgreSQL", "MySQL", "SQLite", "MongoDB"]
+  }
+}

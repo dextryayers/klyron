@@ -1,0 +1,11 @@
+{
+  "name": "@klyron/adapter-next",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Next.js adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module",
+  "dependencies": {
+    "next": "^15.3.0"
+  }
+}

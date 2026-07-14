@@ -1,0 +1,13 @@
+[package]
+name = "klyron-ext-process"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+deno_core.workspace = true
+deno_error.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+klyron_process = { path = "../../../crates/klyron_process" }

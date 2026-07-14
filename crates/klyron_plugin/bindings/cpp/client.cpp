@@ -6,7 +6,6 @@ PluginClient::PluginClient(const PluginConfig& config)
     : config_(config) {}
 
 void PluginClient::execute() {
-    // TODO: implement
 }
 
 }

@@ -1,5 +1,10 @@
 #include "types.hpp"
+#include <string>
 
 namespace klyron {
-// Klyron::Runtime type implementations
+
+std::string klyron_runtime_version() {
+    return "klyron_runtime 0.1.0";
+}
+
 }

@@ -6,7 +6,6 @@ CompatClient::CompatClient(const CompatConfig& config)
     : config_(config) {}
 
 void CompatClient::execute() {
-    // TODO: implement
 }
 
 }

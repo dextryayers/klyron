@@ -1,0 +1,12 @@
+{
+  "name": "klyron-http-server",
+  "version": "0.1.0",
+  "description": "Example HTTP server using Klyron's unified HTTP API",
+  "type": "module",
+  "scripts": {
+    "start": "klyron run server.js",
+    "start:ts": "klyron run server.ts"
+  },
+  "keywords": ["klyron", "http", "server", "example"],
+  "license": "MIT"
+}

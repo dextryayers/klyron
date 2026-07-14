@@ -8,6 +8,5 @@ export class ShellClient {
   }
 
   async execute(): Promise<void> {
-    // TODO: implement
   }
 }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum JsEngineKind {
     V8,
     Boa,

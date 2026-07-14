@@ -11,8 +11,10 @@ static int parse_url(const char *url, char *host, size_t hostlen,
                      char *port, size_t portlen, const char **path)
 {
     const char *p = url;
+    int default_port = 80;
     if (strncmp(p, "http://", 7) == 0) p += 7;
-    else if (strncmp(p, "https://", 8) == 0) p += 8;
+    else if (strncmp(p, "https://", 8) == 0) { p += 8; default_port = 443; }
+    else return -1;
 
     size_t i = 0;
     while (p[i] && p[i] != ':' && p[i] != '/' && p[i] != '?') i++;
@@ -29,7 +31,7 @@ static int parse_url(const char *url, char *host, size_t hostlen,
         memcpy(port, p, i);
         port[i] = '\0';
     } else {
-        snprintf(port, portlen, "80");
+        snprintf(port, portlen, "%d", default_port);
     }
 
     p += i;
@@ -70,7 +72,7 @@ static klyron_response_t *http_request(const char *url, const char *method,
     }
     freeaddrinfo(ai);
 
-    char req[8192];
+    char req[16384];
     int n;
     if (body && content_type) {
         n = snprintf(req, sizeof(req),
@@ -170,6 +172,34 @@ klyron_response_t *klyron_http_post(const char *url, const char *body,
                                     const char *content_type)
 {
     return http_request(url, "POST", body, content_type);
+}
+
+klyron_response_t *klyron_http_put(const char *url, const char *body,
+                                   const char *content_type)
+{
+    return http_request(url, "PUT", body, content_type);
+}
+
+klyron_response_t *klyron_http_delete(const char *url)
+{
+    return http_request(url, "DELETE", NULL, NULL);
+}
+
+klyron_response_t *klyron_http_patch(const char *url, const char *body,
+                                     const char *content_type)
+{
+    return http_request(url, "PATCH", body, content_type);
+}
+
+klyron_response_t *klyron_http_head(const char *url)
+{
+    return http_request(url, "HEAD", NULL, NULL);
+}
+
+klyron_response_t *klyron_http_request(const char *method, const char *url,
+                                       const char *body, const char *content_type)
+{
+    return http_request(url, method, body, content_type);
 }
 
 void klyron_http_free_response(klyron_response_t *resp)

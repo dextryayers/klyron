@@ -1,0 +1,12 @@
+{
+  "name": "rails",
+  "version": "1.0.0",
+  "description": "Ruby on Rails adapter for Klyron",
+  "framework": {
+    "name": "Ruby on Rails",
+    "detection_file": "Gemfile,bin/rails",
+    "supported_versions": ["7.1", "7.2", "8.0"],
+    "default_version": "8.0",
+    "kind": "Polyglot"
+  }
+}

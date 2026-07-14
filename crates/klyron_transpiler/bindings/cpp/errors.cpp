@@ -1,2 +1,13 @@
 #include "errors.hpp"
-// Error classes are header-only
+#include <string>
+
+namespace klyron {
+
+std::string klyron_transpiler_error_string(int code) {
+    switch (code) {
+        case 0: return "ok";
+        default: return "unknown error";
+    }
+}
+
+}

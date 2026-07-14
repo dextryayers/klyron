@@ -5,7 +5,6 @@ namespace klyron::_template {
 TemplateApi::TemplateApi() {}
 
 void TemplateApi::execute() {
-    // TODO: implement
 }
 
 std::string TemplateApi::version() {

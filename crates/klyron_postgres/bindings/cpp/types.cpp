@@ -1,5 +1,10 @@
 #include "types.hpp"
+#include <string>
 
 namespace klyron {
-// Klyron::Postgres type implementations
+
+std::string klyron_postgres_version() {
+    return "klyron_postgres 0.1.0";
+}
+
 }

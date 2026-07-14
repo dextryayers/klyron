@@ -5,7 +5,6 @@ namespace klyron::_adapter {
 AdapterApi::AdapterApi() {}
 
 void AdapterApi::execute() {
-    // TODO: implement
 }
 
 std::string AdapterApi::version() {

@@ -1,0 +1,11 @@
+{
+  "name": "@klyron/adapter-vue",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vue 3 adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module",
+  "dependencies": {
+    "vue": "^3.6.0"
+  }
+}

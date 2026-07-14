@@ -20,6 +20,7 @@ function timestamp(): string {
 
 export class Logger {
   private config: LoggerConfig;
+  private fileStream: import("fs").WriteStream | null = null;
 
   constructor(config?: Partial<LoggerConfig>) {
     this.config = {
@@ -28,6 +29,10 @@ export class Logger {
       colorEnabled: true,
       ...config,
     };
+    if (config?.filePath) {
+      const fs = require("fs");
+      this.fileStream = fs.createWriteStream(config.filePath, { flags: "a" });
+    }
   }
 
   private shouldLog(level: LogLevel): boolean {
@@ -37,15 +42,16 @@ export class Logger {
   private log(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
     if (!this.shouldLog(level)) return;
 
-    const entry = { timestamp: timestamp(), level, message, ...(meta ? { meta } : {}) };
+    const ts = timestamp();
+    const entry = { timestamp: ts, level, message, ...(meta ? { meta } : {}) };
 
     let output: string;
     if (this.config.jsonOutput) {
       output = JSON.stringify(entry);
     } else if (this.config.colorEnabled) {
-      output = `${COLORS[level]}${timestamp()} [${level.padEnd(5)}] ${message}${RESET}`;
+      output = `${COLORS[level]}${ts} [${level.padEnd(5)}] ${message}${RESET}`;
     } else {
-      output = `${timestamp()} [${level.padEnd(5)}] ${message}`;
+      output = `${ts} [${level.padEnd(5)}] ${message}`;
     }
 
     if (level === "ERROR" || level === "FATAL") {
@@ -53,7 +59,14 @@ export class Logger {
     } else {
       console.log(output);
     }
+
+    if (this.fileStream) {
+      this.fileStream.write(JSON.stringify(entry) + "\n");
+    }
   }
+
+  setMinLevel(level: LogLevel): void { this.config.minLevel = level; }
+  setJsonOutput(j: boolean): void { this.config.jsonOutput = j; }
 
   trace(msg: string, meta?: Record<string, unknown>) { this.log("TRACE", msg, meta); }
   debug(msg: string, meta?: Record<string, unknown>) { this.log("DEBUG", msg, meta); }

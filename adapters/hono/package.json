@@ -1,0 +1,11 @@
+{
+  "name": "@klyron/adapter-hono",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hono adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module",
+  "dependencies": {
+    "hono": "^4.7.0"
+  }
+}

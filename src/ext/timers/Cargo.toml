@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 deno_core.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 klyron-core = { path = "../../core" }

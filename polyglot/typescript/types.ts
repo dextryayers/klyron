@@ -44,3 +44,9 @@ export interface LoggerConfig {
   filePath?: string;
   colorEnabled: boolean;
 }
+
+export interface ExecOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+  timeout?: number;
+}

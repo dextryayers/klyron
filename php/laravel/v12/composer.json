@@ -1,0 +1,20 @@
+{
+    "name": "klyron/laravel-v12",
+    "description": "Klyron Laravel 12.x compatibility stubs",
+    "type": "library",
+    "require": {
+        "php": "^8.2",
+        "laravel/framework": "^12.0"
+    },
+    "autoload": {
+        "files": [
+            "src/helpers.php"
+        ]
+    },
+    "extra": {
+        "klyron": {
+            "laravel-version": "12.x",
+            "support": "active"
+        }
+    }
+}

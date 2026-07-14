@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 int klyron_workspace_execute(void) {
-    // TODO: implement
+    printf("[workspace] execute\n");
     return 0;
 }
 

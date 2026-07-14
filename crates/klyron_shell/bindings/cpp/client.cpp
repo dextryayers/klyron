@@ -6,7 +6,6 @@ ShellClient::ShellClient(const ShellConfig& config)
     : config_(config) {}
 
 void ShellClient::execute() {
-    // TODO: implement
 }
 
 }

@@ -1,5 +1,13 @@
 #include "errors.hpp"
+#include <string>
 
 namespace klyron {
-// Klyron::Cli exception implementations
+
+std::string klyron_cli_error_string(int code) {
+    switch (code) {
+        case 0: return "ok";
+        default: return "unknown error";
+    }
+}
+
 }

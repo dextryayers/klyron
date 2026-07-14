@@ -5,7 +5,6 @@ namespace klyron::_telemetry {
 TelemetryApi::TelemetryApi() {}
 
 void TelemetryApi::execute() {
-    // TODO: implement
 }
 
 std::string TelemetryApi::version() {

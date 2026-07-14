@@ -1,0 +1,12 @@
+{
+  "name": "nestjs",
+  "version": "1.0.0",
+  "description": "NestJS adapter for Klyron",
+  "framework": {
+    "name": "NestJS",
+    "detection_file": "nest-cli.json,nest.config.json",
+    "supported_versions": ["10.0"],
+    "default_version": "10.0",
+    "kind": "Backend"
+  }
+}

@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 int klyron_config_execute(void) {
-    // TODO: implement
+    printf("[config] execute\n");
     return 0;
 }
 

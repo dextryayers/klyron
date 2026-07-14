@@ -1,12 +1,14 @@
 use chrono::{DateTime, Utc};
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha512};
+use sha2::{Digest, Sha256, Sha512};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
@@ -1426,6 +1428,294 @@ impl RegistryClient {
       Self::GoProxy(r) => { r.config.auth_token = None; }
     }
   }
+
+  pub fn versions(&self, name: &str) -> Result<Vec<PackageVersion>, RegistryError> {
+    match self {
+      Self::Npm(r) => r.versions(name),
+      _ => Err(RegistryError::UnsupportedRegistry("versions".into())),
+    }
+  }
+
+  pub fn resolve_version(&self, name: &str, constraint: &str) -> Result<String, RegistryError> {
+    match self {
+      Self::Npm(r) => r.resolve_version(name, constraint),
+      _ => Err(RegistryError::UnsupportedRegistry("resolve_version".into())),
+    }
+  }
+
+  pub fn health(&self) -> RegistryHealth {
+    match self {
+      Self::Npm(r) => r.health(),
+      Self::PyPI(_r) => RegistryHealth { ok: true, latency_ms: 0, message: "No health check available".into() },
+      Self::RubyGems(_r) => RegistryHealth { ok: true, latency_ms: 0, message: "No health check available".into() },
+      Self::Cargo(_r) => RegistryHealth { ok: true, latency_ms: 0, message: "No health check available".into() },
+      Self::Packagist(_r) => RegistryHealth { ok: true, latency_ms: 0, message: "No health check available".into() },
+      Self::GoProxy(_r) => RegistryHealth { ok: true, latency_ms: 0, message: "No health check available".into() },
+    }
+  }
+}
+
+// ── Semver Resolution ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageVersion {
+  pub version: String,
+  pub integrity: Option<String>,
+  pub tarball: Option<String>,
+  pub dependencies: Option<HashMap<String, String>>,
+  pub dev_dependencies: Option<HashMap<String, String>>,
+}
+
+pub fn resolve_semver_version(versions: &[String], constraint: &str) -> Option<String> {
+  // Check for exact version match first
+  if let Ok(exact) = Version::parse(constraint) {
+    if versions.iter().any(|v| v == constraint) {
+      return Some(constraint.to_string());
+    }
+  }
+  let req = VersionReq::parse(constraint).ok()?;
+  let mut matched: Vec<&String> = versions.iter()
+    .filter(|v| Version::parse(v).map(|ver| req.matches(&ver)).unwrap_or(false))
+    .collect();
+  matched.sort_by(|a, b| {
+    let va = Version::parse(a).unwrap_or(Version::new(0, 0, 0));
+    let vb = Version::parse(b).unwrap_or(Version::new(0, 0, 0));
+    vb.cmp(&va)
+  });
+  matched.first().map(|s| (*s).clone())
+}
+
+pub fn sort_versions(versions: &[String]) -> Vec<String> {
+  let mut sorted: Vec<String> = versions.to_vec();
+  sorted.sort_by(|a, b| {
+    let va = Version::parse(a).unwrap_or(Version::new(0, 0, 0));
+    let vb = Version::parse(b).unwrap_or(Version::new(0, 0, 0));
+    vb.cmp(&va)
+  });
+  sorted
+}
+
+// ── Content-Addressable Cache ────────────────────────────────────────────────
+
+pub struct ContentAddressableCache {
+  pub cache_dir: PathBuf,
+}
+
+impl ContentAddressableCache {
+  pub fn new(cache_dir: PathBuf) -> Self {
+    std::fs::create_dir_all(&cache_dir).ok();
+    Self { cache_dir }
+  }
+
+  pub fn store(&self, data: &[u8]) -> String {
+    let hash = self.compute_hash(data);
+    let dir = self.cache_dir.join(&hash[..2]);
+    std::fs::create_dir_all(&dir).ok();
+    let path = dir.join(&hash);
+    if !path.exists() {
+      std::fs::write(&path, data).ok();
+    }
+    hash
+  }
+
+  pub fn retrieve(&self, hash: &str) -> Option<Vec<u8>> {
+    let dir = self.cache_dir.join(&hash[..2]);
+    let path = dir.join(hash);
+    std::fs::read(&path).ok()
+  }
+
+  pub fn has(&self, hash: &str) -> bool {
+    let dir = self.cache_dir.join(&hash[..2]);
+    dir.join(hash).exists()
+  }
+
+  fn compute_hash(&self, data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hex::encode(hasher.finalize())
+  }
+}
+
+// ── Tarball Extraction ───────────────────────────────────────────────────────
+
+pub fn extract_tarball(data: &[u8], dest: &Path) -> Result<Vec<PathBuf>, RegistryError> {
+  use flate2::read::GzDecoder;
+  use tar::Archive;
+
+  std::fs::create_dir_all(dest)
+    .map_err(|e| RegistryError::CacheError(format!("Failed to create extract dir: {e}")))?;
+
+  let decoder = GzDecoder::new(data);
+  let mut archive = Archive::new(decoder);
+  let mut extracted = Vec::new();
+
+  for entry in archive.entries()
+    .map_err(|e| RegistryError::CacheError(format!("Tarball read error: {e}")))? {
+    let mut entry = entry
+      .map_err(|e| RegistryError::CacheError(format!("Tarball entry error: {e}")))?;
+
+    let path = entry.path()
+      .map_err(|e| RegistryError::CacheError(format!("Tarball path error: {e}")))?
+      .to_path_buf();
+
+    // Strip the leading directory (package-name/) from the tarball
+    let stripped: PathBuf = path.components().skip(1).collect();
+    if stripped.as_os_str().is_empty() {
+      continue;
+    }
+
+    let target = dest.join(&stripped);
+    if let Some(parent) = target.parent() {
+      std::fs::create_dir_all(parent)
+        .map_err(|e| RegistryError::CacheError(format!("Failed to create parent: {e}")))?;
+    }
+
+    entry.unpack(&target)
+      .map_err(|e| RegistryError::CacheError(format!("Failed to unpack entry: {e}")))?;
+
+    extracted.push(target);
+  }
+
+  Ok(extracted)
+}
+
+// ── Integrity Verification ───────────────────────────────────────────────────
+
+pub fn verify_integrity(data: &[u8], expected_integrity: &str) -> Result<(), RegistryError> {
+  let computed = compute_integrity(data);
+  if computed != expected_integrity {
+    return Err(RegistryError::HttpError(format!(
+      "Integrity mismatch: expected {expected_integrity}, got {computed}"
+    )));
+  }
+  Ok(())
+}
+
+pub fn compute_integrity_sha256(data: &[u8]) -> String {
+  let mut hasher = Sha256::new();
+  hasher.update(data);
+  format!("sha256-{}", hex::encode(hasher.finalize()))
+}
+
+// ── Version Listing for Registry ─────────────────────────────────────────────
+
+impl NpmRegistry {
+  pub fn versions(&self, name: &str) -> Result<Vec<PackageVersion>, RegistryError> {
+    let cache_key = format!("npm:versions:{name}");
+    if let Some(cached) = self.cache.borrow().get(&cache_key) {
+      return serde_json::from_value(cached)
+        .map_err(|e| RegistryError::ParseError(e.to_string()));
+    }
+
+    let url = if name.starts_with('@') {
+      let encoded = name.replace('/', "%2F");
+      format!("{}/{}", self.config.registry_url, encoded)
+    } else {
+      format!("{}/{}", self.config.registry_url, name)
+    };
+
+    let resp = self.http_get(&url)?;
+    let versions_obj = resp.get("versions").and_then(|v| v.as_object())
+      .ok_or_else(|| RegistryError::NotFound(format!("No versions for {name}")))?;
+
+    let mut versions = Vec::new();
+    for (ver_str, ver_data) in versions_obj {
+      let integrity = ver_data.get("dist")
+        .and_then(|d| d.get("integrity"))
+        .and_then(|i| i.as_str())
+        .map(String::from);
+      let tarball = ver_data.get("dist")
+        .and_then(|d| d.get("tarball"))
+        .and_then(|t| t.as_str())
+        .map(String::from);
+      let dependencies = ver_data.get("dependencies")
+        .and_then(|d| d.as_object())
+        .map(|o| o.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect());
+      let dev_dependencies = ver_data.get("devDependencies")
+        .and_then(|d| d.as_object())
+        .map(|o| o.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect());
+
+      versions.push(PackageVersion {
+        version: ver_str.clone(),
+        integrity,
+        tarball,
+        dependencies,
+        dev_dependencies,
+      });
+    }
+
+    if let Ok(val) = serde_json::to_value(&versions) {
+      self.cache.borrow_mut().set(cache_key, val, None);
+    }
+
+    Ok(versions)
+  }
+
+  pub fn resolve_version(&self, name: &str, constraint: &str) -> Result<String, RegistryError> {
+    let versions = self.versions(name)?;
+    let version_strs: Vec<String> = versions.iter().map(|v| v.version.clone()).collect();
+    resolve_semver_version(&version_strs, constraint)
+      .ok_or_else(|| RegistryError::NotFound(format!("No version of {name} matching '{constraint}'")))
+  }
+
+  pub fn download_and_extract(&self, name: &str, version: &str, dest: &Path) -> Result<Vec<PathBuf>, RegistryError> {
+    let download = self.download(name, version)?;
+
+    // Verify integrity against registry metadata
+    let versions = self.versions(name)?;
+    if let Some(pkg_ver) = versions.iter().find(|v| v.version == version) {
+      if let Some(ref expected_integrity) = pkg_ver.integrity {
+        verify_integrity(&download.data, expected_integrity)?;
+      }
+    }
+
+    extract_tarball(&download.data, dest)
+  }
+
+  pub fn download_with_cache(&self, name: &str, version: &str, cache: &ContentAddressableCache) -> Result<Vec<u8>, RegistryError> {
+    let cache_key = format!("{}@{}", name, version);
+    let hash_input = format!("npm:{cache_key}");
+    let cache_hash = {
+      let mut hasher = Sha256::new();
+      hasher.update(hash_input.as_bytes());
+      hex::encode(hasher.finalize())
+    };
+
+    if let Some(cached) = cache.retrieve(&cache_hash) {
+      return Ok(cached);
+    }
+
+    let download = self.download(name, version)?;
+    let _ = cache.store(&download.data);
+    Ok(download.data)
+  }
+}
+
+// ── Registry Health Check ────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryHealth {
+  pub ok: bool,
+  pub latency_ms: u64,
+  pub message: String,
+}
+
+impl NpmRegistry {
+  pub fn health(&self) -> RegistryHealth {
+    let start = Instant::now();
+    match self.http_get(&format!("{}/-/ping", self.config.registry_url)) {
+      Ok(_) => RegistryHealth {
+        ok: true,
+        latency_ms: start.elapsed().as_millis() as u64,
+        message: "Registry is healthy".into(),
+      },
+      Err(e) => RegistryHealth {
+        ok: false,
+        latency_ms: start.elapsed().as_millis() as u64,
+        message: format!("Health check failed: {e}"),
+      },
+    }
+  }
 }
 
 // ── Utility Functions ────────────────────────────────────────────────────────
@@ -1674,6 +1964,107 @@ mod tests {
   fn test_registry_kind_display() {
     assert_eq!(format!("{}", RegistryKind::Npm), "npm");
     assert_eq!(format!("{}", RegistryKind::PyPI), "pypi");
+  }
+
+  #[test]
+  fn test_resolve_semver_simple() {
+    let versions = vec!["1.0.0".into(), "1.1.0".into(), "2.0.0".into()];
+    let resolved = resolve_semver_version(&versions, "^1.0.0");
+    assert_eq!(resolved, Some("1.1.0".into()));
+  }
+
+  #[test]
+  fn test_resolve_semver_exact() {
+    let versions = vec!["1.0.0".into(), "1.1.0".into(), "2.0.0".into()];
+    let resolved = resolve_semver_version(&versions, "1.0.0");
+    assert_eq!(resolved, Some("1.0.0".into()));
+  }
+
+  #[test]
+  fn test_resolve_semver_star() {
+    let versions = vec!["1.0.0".into(), "2.0.0".into(), "3.0.0".into()];
+    let resolved = resolve_semver_version(&versions, "*");
+    assert_eq!(resolved, Some("3.0.0".into()));
+  }
+
+  #[test]
+  fn test_resolve_semver_no_match() {
+    let versions = vec!["1.0.0".into(), "1.1.0".into()];
+    let resolved = resolve_semver_version(&versions, "^2.0.0");
+    assert_eq!(resolved, None);
+  }
+
+  #[test]
+  fn test_sort_versions() {
+    let versions = vec!["2.0.0".into(), "1.0.0".into(), "3.0.0".into()];
+    let sorted = sort_versions(&versions);
+    assert_eq!(sorted, vec!["3.0.0", "2.0.0", "1.0.0"]);
+  }
+
+  #[test]
+  fn test_content_addressable_cache() {
+    let dir = std::env::temp_dir().join("_klyron_registry_cache_test");
+    let _ = std::fs::remove_dir_all(&dir);
+    let cache = ContentAddressableCache::new(dir.clone());
+    let data = b"test data for cache";
+    let hash = cache.store(data);
+    assert!(!hash.is_empty());
+    assert!(cache.has(&hash));
+    let retrieved = cache.retrieve(&hash);
+    assert_eq!(retrieved, Some(data.to_vec()));
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn test_extract_tarball_invalid() {
+    let dir = std::env::temp_dir().join("_klyron_registry_extract_test");
+    let _ = std::fs::remove_dir_all(&dir);
+    let result = extract_tarball(b"not a valid tarball", &dir);
+    assert!(result.is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn test_verify_integrity_valid() {
+    let data = b"test data";
+    let integrity = compute_integrity(data);
+    assert!(verify_integrity(data, &integrity).is_ok());
+  }
+
+  #[test]
+  fn test_verify_integrity_invalid() {
+    let data = b"test data";
+    let integrity = compute_integrity(b"different data");
+    assert!(verify_integrity(data, &integrity).is_err());
+  }
+
+  #[test]
+  fn test_compute_integrity_sha256() {
+    let hash = compute_integrity_sha256(b"test");
+    assert!(hash.starts_with("sha256-"));
+    assert_eq!(hash.len(), 64 + 7);
+  }
+
+  #[test]
+  fn test_package_version_serde() {
+    let pv = PackageVersion {
+      version: "1.0.0".into(),
+      integrity: Some("sha512-test".into()),
+      tarball: Some("https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz".into()),
+      dependencies: None,
+      dev_dependencies: None,
+    };
+    let json = serde_json::to_value(&pv).unwrap();
+    assert_eq!(json["version"], "1.0.0");
+  }
+
+  #[test]
+  fn test_registry_health() {
+    let registry = NpmRegistry::new();
+    let health = registry.health();
+    // This may or may not succeed depending on network
+    // Just check it doesn't panic
+    println!("Registry health: {:?}", health);
   }
 
   #[test]

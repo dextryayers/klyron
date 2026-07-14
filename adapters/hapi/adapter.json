@@ -1,0 +1,13 @@
+{
+  "name": "hapi",
+  "version": "1.0.0",
+  "description": "Hapi.js adapter for Klyron",
+  "framework": {
+    "name": "Hapi.js",
+    "detection_file": "package.json",
+    "detection_key": "@hapi/hapi",
+    "supported_versions": ["21.0"],
+    "default_version": "21.0",
+    "kind": "Backend"
+  }
+}

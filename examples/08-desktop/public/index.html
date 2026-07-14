@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Klyron Desktop</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+  <style>
+    .note-card { margin-bottom: 0.5rem; }
+    .note-card .content { white-space: pre-wrap; }
+    .delete-btn { float: right; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>Klyron Notes</h1>
+    <p>A simple desktop-style notes app powered by <strong>Klyron</strong>.</p>
+
+    <form id="note-form">
+      <input type="text" id="note-title" placeholder="Note title" required />
+      <textarea id="note-content" placeholder="Note content" rows="3" required></textarea>
+      <button type="submit">Add Note</button>
+    </form>
+
+    <div id="notes-container"></div>
+  </main>
+
+  <script src="/renderer.js"></script>
+</body>
+</html>

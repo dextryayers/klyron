@@ -1,0 +1,8 @@
+{
+  "name": "@klyron/adapter-django",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Django adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module"
+}

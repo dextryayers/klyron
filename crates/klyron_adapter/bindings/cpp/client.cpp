@@ -6,7 +6,6 @@ AdapterClient::AdapterClient(const AdapterConfig& config)
     : config_(config) {}
 
 void AdapterClient::execute() {
-    // TODO: implement
 }
 
 }

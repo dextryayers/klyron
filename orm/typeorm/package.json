@@ -1,0 +1,11 @@
+{
+  "name": "@klyron/orm-typeorm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TypeORM adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module",
+  "dependencies": {
+    "typeorm": "^0.3.0"
+  }
+}

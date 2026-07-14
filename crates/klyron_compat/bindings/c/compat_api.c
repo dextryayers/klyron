@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 int klyron_compat_execute(void) {
-    // TODO: implement
+    printf("[compat] execute\n");
     return 0;
 }
 

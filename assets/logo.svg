@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="klyron-grad" x1="0" y1="0" x2="512" y2="512">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#klyron-grad)"/>
+  <!-- Abstract K/lightning bolt shape -->
+  <path d="M160 120 L320 120 L240 280 L352 280 L160 400 L208 296 L128 296 L160 120Z" fill="white" opacity="0.95"/>
+</svg>

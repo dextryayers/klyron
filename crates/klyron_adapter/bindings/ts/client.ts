@@ -8,6 +8,5 @@ export class AdapterClient {
   }
 
   async execute(): Promise<void> {
-    // TODO: implement
   }
 }

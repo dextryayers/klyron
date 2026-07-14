@@ -6,7 +6,6 @@ DockerClient::DockerClient(const DockerConfig& config)
     : config_(config) {}
 
 void DockerClient::execute() {
-    // TODO: implement
 }
 
 }

@@ -56,6 +56,8 @@ pub fn run_docker(action: DockerAction) -> anyhow::Result<()> {
                 profile: DockerProfile::Dev,
                 additional_services: Vec::new(),
                 build_args: std::collections::HashMap::new(),
+                optimize: true,
+                use_build_cache: true,
             };
             println!("Building Docker image: {}", config.image_name);
             DockerManager::build(config)
@@ -68,6 +70,8 @@ pub fn run_docker(action: DockerAction) -> anyhow::Result<()> {
                 profile: DockerProfile::Dev,
                 additional_services: Vec::new(),
                 build_args: std::collections::HashMap::new(),
+                optimize: true,
+                use_build_cache: true,
             };
             println!("Running Docker container from image: {}", config.image_name);
             DockerManager::run(config)

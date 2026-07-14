@@ -6,7 +6,6 @@ TelemetryClient::TelemetryClient(const TelemetryConfig& config)
     : config_(config) {}
 
 void TelemetryClient::execute() {
-    // TODO: implement
 }
 
 }

@@ -1,5 +1,7 @@
 use std::fmt;
 
+use klyron_engine_common::error::{CommonError, CommonErrorKind};
+
 #[derive(Debug)]
 pub enum JSCError {
     NotInitialized,
@@ -15,12 +17,27 @@ pub enum JSCError {
 }
 
 impl JSCError {
-    pub fn catch_error(_ctx: *mut std::ffi::c_void) -> Option<Self> {
+    pub fn catch_error() -> Option<Self> {
         None
     }
 
     pub fn format_stack_trace() -> String {
-        "No stack trace (JSC native not linked)".to_string()
+        "No stack trace available (JSC native)".to_string()
+    }
+
+    pub fn to_common_kind(&self) -> CommonErrorKind {
+        match self {
+            Self::NotInitialized => CommonErrorKind::NotInitialized,
+            Self::InitFailed(msg) => CommonErrorKind::InitFailed(msg.clone()),
+            Self::ExecutionFailed(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
+            Self::CompileError(msg) => CommonErrorKind::CompileError(msg.clone()),
+            Self::SyntaxError(msg) => CommonErrorKind::SyntaxError(msg.clone()),
+            Self::TypeError(msg) => CommonErrorKind::TypeError(msg.clone()),
+            Self::RangeError(msg) => CommonErrorKind::RangeError(msg.clone()),
+            Self::ReferenceError(msg) => CommonErrorKind::ReferenceError(msg.clone()),
+            Self::Timeout => CommonErrorKind::Timeout,
+            Self::OutOfMemory => CommonErrorKind::OutOfMemory,
+        }
     }
 }
 
@@ -42,6 +59,16 @@ impl fmt::Display for JSCError {
 }
 
 impl std::error::Error for JSCError {}
+
+impl CommonError for JSCError {
+    fn kind(&self) -> CommonErrorKind {
+        self.to_common_kind()
+    }
+
+    fn format_stack_trace(&self) -> Option<String> {
+        Some(Self::format_stack_trace())
+    }
+}
 
 impl From<anyhow::Error> for JSCError {
     fn from(e: anyhow::Error) -> Self {

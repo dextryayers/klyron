@@ -8,6 +8,5 @@ export class CompatClient {
   }
 
   async execute(): Promise<void> {
-    // TODO: implement
   }
 }

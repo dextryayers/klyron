@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 int klyron_template_execute(void) {
-    // TODO: implement
+    printf("[template] execute\n");
     return 0;
 }
 

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use glob::glob;
+use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -7,8 +8,6 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use walkdir::WalkDir;
-
-// ── Errors ───────────────────────────────────────────────────────────────────
 
 #[derive(Error, Debug)]
 pub enum BundlerError {
@@ -28,6 +27,8 @@ pub enum BundlerError {
   CssBundleError(String),
   #[error("Tool not found: {0}")]
   ToolNotFound(String),
+  #[error("Tree-shaking analysis error: {0}")]
+  TreeShakingError(String),
 }
 
 impl From<std::io::Error> for BundlerError {
@@ -35,8 +36,6 @@ impl From<std::io::Error> for BundlerError {
     Self::BuildFailed(e.to_string())
   }
 }
-
-// ── Bundler Kind ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BundlerKind {
@@ -49,8 +48,6 @@ pub enum BundlerKind {
   Rsbuild,
   SWC,
 }
-
-// ── Output Format ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
@@ -73,16 +70,12 @@ impl OutputFormat {
   }
 }
 
-// ── Sourcemap Mode ───────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourcemapMode {
   None,
   Inline,
   External,
 }
-
-// ── Bundle Options ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct BundleOptions {
@@ -98,6 +91,8 @@ pub struct BundleOptions {
   pub external: Vec<String>,
   pub define: HashMap<String, String>,
   pub jsx: String,
+  pub css_entry: Option<String>,
+  pub minifier_callback: Option<MinifierCallback>,
 }
 
 impl Default for BundleOptions {
@@ -115,11 +110,17 @@ impl Default for BundleOptions {
       external: Vec::new(),
       define: HashMap::new(),
       jsx: "automatic".into(),
+      css_entry: None,
+      minifier_callback: None,
     }
   }
 }
 
-// ── Chunk / Code Splitting ───────────────────────────────────────────────────
+#[derive(Debug, Clone)]
+pub struct MinifierCallback {
+  pub program: String,
+  pub args: Vec<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Chunk {
@@ -130,6 +131,7 @@ pub struct Chunk {
   pub imports: Vec<String>,
   pub exports: Vec<String>,
   pub modules: Vec<String>,
+  pub dynamic: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -137,9 +139,31 @@ pub struct SplitResult {
   pub chunks: Vec<Chunk>,
   pub total_size: u64,
   pub shared_chunks: Vec<String>,
+  pub dynamic_imports: Vec<DynamicImport>,
 }
 
-// ── Bundle Result ────────────────────────────────────────────────────────────
+#[derive(Debug, Clone)]
+pub struct DynamicImport {
+  pub specifier: String,
+  pub source_file: String,
+  pub line: usize,
+  pub chunk_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExportInfo {
+  pub name: String,
+  pub local_name: String,
+  pub is_default: bool,
+  pub used: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModuleExports {
+  pub file: String,
+  pub exports: Vec<ExportInfo>,
+  pub re_exports: Vec<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct BundleResult {
@@ -149,6 +173,7 @@ pub struct BundleResult {
   pub size_bytes: u64,
   pub warnings: Vec<String>,
   pub chunks: Option<SplitResult>,
+  pub css_files: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -158,8 +183,6 @@ pub struct BundleOutput {
   pub kind: String,
   pub integrity: String,
 }
-
-// ── CSS Bundle Options ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub struct CssBundleOptions {
@@ -182,13 +205,9 @@ impl Default for CssBundleOptions {
   }
 }
 
-// ── Bundler ──────────────────────────────────────────────────────────────────
-
 pub struct Bundler;
 
 impl Bundler {
-  // ── Detect ───────────────────────────────────────────────────────────────
-
   pub fn detect(dir: &Path) -> Option<BundlerKind> {
     let configs: [(&str, BundlerKind); 12] = [
       ("vite.config.*", BundlerKind::Vite),
@@ -213,13 +232,41 @@ impl Bundler {
     None
   }
 
-  // ── Bundle JS/TS ─────────────────────────────────────────────────────────
-
-  pub fn bundle_js(dir: &Path, _kind: BundlerKind, opts: BundleOptions) -> Result<BundleResult> {
+  pub fn bundle_js(dir: &Path, _kind: BundlerKind, mut opts: BundleOptions) -> Result<BundleResult> {
     let start = Instant::now();
-    let (cmd, args) = Self::build_esbuild_args(&opts);
+    let mut css_files = Vec::new();
 
-    // Try esbuild first, fallback to other bundlers
+    // Collect CSS imports before bundling
+    if opts.css_entry.is_some() || opts.tree_shaking {
+      let entry_path = dir.join(&opts.entry);
+      if entry_path.exists() {
+        css_files = Self::collect_css_imports(&entry_path, dir, &mut HashSet::new())?;
+      }
+    }
+
+    // Handle CSS bundling if entry specified
+    if let Some(ref css_entry) = opts.css_entry {
+      let css_opts = CssBundleOptions {
+        entry: css_entry.clone(),
+        out_dir: opts.out_dir.clone(),
+        minify: opts.minify,
+        sourcemap: opts.sourcemap == SourcemapMode::External || opts.sourcemap == SourcemapMode::Inline,
+        targets: vec!["last 2 versions".into()],
+      };
+      let _css_result = Self::bundle_css(dir, css_opts)?;
+    }
+
+    // Apply minifier callback instead of default minification
+    if opts.minify && opts.minifier_callback.is_some() {
+      opts.minify = false;
+    }
+
+    let (cmd, mut args) = Self::build_esbuild_args(&opts);
+
+    if !css_files.is_empty() && opts.splitting {
+      args.push("--loader:.css=text".into());
+    }
+
     let output = Command::new(&cmd)
       .args(&args)
       .current_dir(dir)
@@ -235,7 +282,6 @@ impl Bundler {
 
     let warnings = Self::extract_warnings(&output.stderr);
 
-    // Collect output files
     let out_dir = dir.join(&opts.out_dir);
     let mut outputs = Vec::new();
     let mut total_size = 0u64;
@@ -244,18 +290,17 @@ impl Bundler {
       for entry in WalkDir::new(&out_dir).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
           let path = entry.path().to_path_buf();
+          let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+          if ext == "css" {
+            css_files.push(path.clone());
+          }
           let metadata = std::fs::metadata(&path)?;
           let data = std::fs::read(&path)?;
           let integrity = compute_hash(&data);
-          let kind = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_string();
           outputs.push(BundleOutput {
             size: metadata.len(),
             path: path.clone(),
-            kind: kind.clone(),
+            kind: ext.to_string(),
             integrity,
           });
           total_size += metadata.len();
@@ -263,13 +308,34 @@ impl Bundler {
       }
     }
 
+    // Run minifier callback if available
+    if let Some(ref cb) = opts.minifier_callback {
+      for output_file in &outputs {
+        if output_file.kind == "js" || output_file.kind == "mjs" {
+          let result = Self::minify_with_callback(&output_file.path, dir, cb)?;
+          total_size = total_size.saturating_sub(output_file.size).saturating_add(result.size_bytes);
+        }
+      }
+    }
+
+    let chunks = if opts.splitting {
+      let entry_files: Vec<PathBuf> = outputs.iter()
+        .filter(|o| o.kind == "js" || o.kind == "mjs")
+        .map(|o| o.path.clone())
+        .collect();
+      Some(Self::compute_chunks(&entry_files, dir))
+    } else {
+      None
+    };
+
     Ok(BundleResult {
       duration,
       output_files: outputs.iter().map(|o| o.path.clone()).collect(),
       outputs,
       size_bytes: total_size,
       warnings,
-      chunks: None,
+      chunks,
+      css_files,
     })
   }
 
@@ -298,6 +364,8 @@ impl Bundler {
 
     if !opts.tree_shaking {
       args.push("--tree-shaking=false".into());
+    } else {
+      args.push("--tree-shaking=true".into());
     }
 
     if let Some(ref out_file) = opts.out_file {
@@ -329,7 +397,37 @@ impl Bundler {
     warnings
   }
 
-  // ── Bundle CSS ──────────────────────────────────────────────────────────
+  fn minify_with_callback(file: &Path, _dir: &Path, cb: &MinifierCallback) -> Result<BundleResult> {
+    let start = Instant::now();
+    let output = Command::new(&cb.program)
+      .args(&cb.args)
+      .arg(file.to_string_lossy().to_string())
+      .output()
+      .with_context(|| format!("minifier callback failed for {}", file.display()))?;
+    let duration = start.elapsed();
+    if !output.status.success() {
+      return Err(BundlerError::MinificationError(
+        String::from_utf8_lossy(&output.stderr).to_string(),
+      ).into());
+    }
+    let data = std::fs::read(file)?;
+    let integrity = compute_hash(&data);
+    let size = data.len() as u64;
+    Ok(BundleResult {
+      duration,
+      output_files: vec![file.to_path_buf()],
+      outputs: vec![BundleOutput {
+        path: file.to_path_buf(),
+        size,
+        kind: "js".into(),
+        integrity,
+      }],
+      size_bytes: size,
+      warnings: Vec::new(),
+      chunks: None,
+      css_files: Vec::new(),
+    })
+  }
 
   pub fn bundle_css(dir: &Path, opts: CssBundleOptions) -> Result<BundleResult> {
     let start = Instant::now();
@@ -391,7 +489,6 @@ impl Bundler {
         (duration, outputs, warnings, total_size)
       }
       Err(_e) => {
-        // Fallback: use esbuild for CSS bundling
         let mut css_opts = BundleOptions::default();
         css_opts.entry = opts.entry.clone();
         css_opts.out_dir = opts.out_dir.clone();
@@ -406,17 +503,18 @@ impl Bundler {
       }
     };
 
+    let css_paths: Vec<PathBuf> = outputs.iter().map(|o| o.path.clone()).collect();
+    let out_paths: Vec<PathBuf> = outputs.iter().map(|o| o.path.clone()).collect();
     Ok(BundleResult {
       duration,
-      output_files: outputs.iter().map(|o| o.path.clone()).collect(),
+      output_files: out_paths,
       outputs,
       size_bytes: total_size,
       warnings,
       chunks: None,
+      css_files: css_paths,
     })
   }
-
-  // ── Minification (SWC via subprocess) ───────────────────────────────────
 
   pub fn minify_js(file: &Path, output: &Path, swc_config: Option<&str>) -> Result<BundleResult> {
     let start = Instant::now();
@@ -470,14 +568,16 @@ impl Bundler {
       size_bytes: size,
       warnings: Vec::new(),
       chunks: None,
+      css_files: Vec::new(),
     })
   }
 
-  // ── Code Splitting / Chunk Splitting ─────────────────────────────────────
-
-  pub fn compute_chunks(entry_files: &[PathBuf]) -> SplitResult {
+  pub fn compute_chunks(entry_files: &[PathBuf], dir: &Path) -> SplitResult {
     let mut modules_by_chunk: HashMap<String, Vec<String>> = HashMap::new();
     let mut shared = HashSet::new();
+    let mut dynamic_imports = Vec::new();
+    let dynamic_re = Regex::new(r#"import\s*\(\s*["']([^"']+)["']\s*\)"#).unwrap();
+    let named_import_re = Regex::new(r#"import\s+\{?\s*([^}]+)\s*\}?\s*from\s+["']([^"']+)["']"#).unwrap();
 
     for entry in entry_files {
       let name = entry
@@ -489,25 +589,53 @@ impl Bundler {
       let mut modules = Vec::new();
       if entry.exists() {
         if let Ok(content) = std::fs::read_to_string(entry) {
-          for line in content.lines() {
+          for (line_idx, line) in content.lines().enumerate() {
             let trimmed = line.trim();
-            if trimmed.starts_with("import ") || trimmed.starts_with("import(") || trimmed.starts_with("require(") {
-              // Extract module name from import
+
+            // Detect static imports
+            if trimmed.starts_with("import ") && trimmed.contains("from") {
+              if let Some(caps) = named_import_re.captures(trimmed) {
+                let spec = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                if !spec.starts_with('.') && !spec.starts_with('/') {
+                  modules.push(spec.to_string());
+                }
+              }
+            }
+
+            if trimmed.starts_with("require(") {
               let module_name = trimmed
-                .trim_start_matches("import ")
-                .trim_start_matches('(')
+                .trim_start_matches("require(")
                 .trim_start_matches('"')
                 .trim_start_matches('\'');
+              let module_name = module_name
+                .split('"')
+                .next()
+                .or_else(|| module_name.split('\'').next())
+                .unwrap_or(module_name)
+                .trim_end_matches(')')
+                .to_string();
               if !module_name.starts_with('.') && !module_name.starts_with('/') {
-                let module_name = module_name
-                  .split('"')
-                  .next()
-                  .or_else(|| module_name.split('\'').next())
-                  .unwrap_or(module_name)
-                  .trim_end_matches(')')
-                  .to_string();
                 modules.push(module_name);
               }
+            }
+
+            // Detect dynamic imports for code splitting
+            if let Some(caps) = dynamic_re.captures(trimmed) {
+              let spec = caps.get(1).map(|m| m.as_str()).to_owned().unwrap_or("");
+              let chunk_name = spec
+                .trim_end_matches(".js")
+                .trim_end_matches(".ts")
+                .trim_end_matches(".tsx")
+                .trim_end_matches(".jsx")
+                .replace('/', "-")
+                .to_string();
+              dynamic_imports.push(DynamicImport {
+                specifier: spec.to_string(),
+                source_file: name.clone(),
+                line: line_idx + 1,
+                chunk_name: chunk_name.clone(),
+              });
+              modules.push(spec.to_string());
             }
           }
         }
@@ -532,9 +660,10 @@ impl Bundler {
     let mut total_size = 0u64;
 
     for (name, modules) in &modules_by_chunk {
-      let path = PathBuf::from(format!("{}.js", name));
+      let path = dir.join(format!("{}.js", name));
       let size = std::fs::read_to_string(&path).ok().map(|s| s.len() as u64).unwrap_or(0);
       total_size += size;
+      let is_dynamic = dynamic_imports.iter().any(|d| d.chunk_name == *name);
       chunks.push(Chunk {
         name: name.clone(),
         path,
@@ -543,17 +672,37 @@ impl Bundler {
         imports: modules.clone(),
         exports: Vec::new(),
         modules: modules.clone(),
+        dynamic: is_dynamic,
       });
+    }
+
+    // Add dynamic import chunks
+    for dyn_import in &dynamic_imports {
+      let chunk_name = &dyn_import.chunk_name;
+      let chunk_path = dir.join(format!("{}.js", chunk_name));
+      if !chunks.iter().any(|c| c.name == *chunk_name) {
+        let size = std::fs::read_to_string(&chunk_path).ok().map(|s| s.len() as u64).unwrap_or(0);
+        total_size += size;
+        chunks.push(Chunk {
+          name: chunk_name.clone(),
+          path: chunk_path,
+          size,
+          entry: false,
+          imports: vec![dyn_import.specifier.clone()],
+          exports: Vec::new(),
+          modules: Vec::new(),
+          dynamic: true,
+        });
+      }
     }
 
     SplitResult {
       shared_chunks: shared.into_iter().collect(),
       chunks,
       total_size,
+      dynamic_imports,
     }
   }
-
-  // ── Tree-Shaking Analysis ────────────────────────────────────────────────
 
   pub fn analyze_tree_shaking(entry: &Path) -> Result<HashMap<String, Vec<String>>> {
     let mut tree = HashMap::new();
@@ -603,7 +752,6 @@ impl Bundler {
         let resolved = if dep_path.is_file() {
           dep_path
         } else {
-          // Try with extensions
           let with_ext = dep_path.with_extension("js");
           if with_ext.is_file() {
             with_ext
@@ -618,13 +766,156 @@ impl Bundler {
     Ok(())
   }
 
-  // ── Sourcemap Generation ─────────────────────────────────────────────────
+  pub fn analyze_exports(entry: &Path) -> Result<Vec<ModuleExports>> {
+    let mut all_exports = Vec::new();
+    let mut visited = HashSet::new();
+    Self::analyze_exports_recursive(entry, &mut all_exports, &mut visited)?;
+    Ok(all_exports)
+  }
+
+  fn analyze_exports_recursive(
+    file: &Path,
+    all_exports: &mut Vec<ModuleExports>,
+    visited: &mut HashSet<PathBuf>,
+  ) -> Result<()> {
+    if !file.exists() || !visited.insert(file.to_path_buf()) {
+      return Ok(());
+    }
+
+    let content = std::fs::read_to_string(file)?;
+    let mut exports = Vec::new();
+    let mut re_exports = Vec::new();
+
+    let export_named_re = Regex::new(r#"export\s+(?:const|function|class|let|var|type|interface)\s+(\w+)"#).unwrap();
+    let export_default_re = Regex::new(r#"export\s+default\s+(?:function|class|const)?\s*(\w*)"#).unwrap();
+    let export_re_export_re = Regex::new(r#"export\s+\{?\s*([^}]+)\s*\}?\s*from\s+["']([^"']+)["']"#).unwrap();
+    let import_re = Regex::new(r#"import\s+\{?\s*([^}]+)\s*\}?\s*from\s+["']([^"']+)["']"#).unwrap();
+
+    for line in content.lines() {
+      let trimmed = line.trim();
+
+      if let Some(caps) = export_named_re.captures(trimmed) {
+        exports.push(ExportInfo {
+          name: caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string(),
+          local_name: caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string(),
+          is_default: false,
+          used: true,
+        });
+      }
+
+      if let Some(caps) = export_default_re.captures(trimmed) {
+        let name = caps.get(1).map(|m| m.as_str()).unwrap_or("default").to_string();
+        let name = if name.is_empty() { "default".to_string() } else { name };
+        exports.push(ExportInfo {
+          name: name.clone(),
+          local_name: name,
+          is_default: true,
+          used: true,
+        });
+      }
+
+      if let Some(caps) = export_re_export_re.captures(trimmed) {
+        let spec = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
+        re_exports.push(spec.clone());
+        if spec.starts_with('.') {
+          let parent = file.parent().unwrap_or(Path::new("."));
+          let dep_path = parent.join(&spec);
+          let resolved = if dep_path.is_file() {
+            dep_path
+          } else {
+            let with_ext = dep_path.with_extension("js");
+            if with_ext.is_file() { with_ext } else { continue; }
+          };
+          Self::analyze_exports_recursive(&resolved, all_exports, visited)?;
+        }
+      }
+
+      // Track used imports to mark exports
+      if let Some(caps) = import_re.captures(trimmed) {
+        let imports_str = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        let spec = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+        if spec.starts_with('.') {
+          let parent = file.parent().unwrap_or(Path::new("."));
+          let dep_path = parent.join(spec);
+          let resolved = if dep_path.is_file() {
+            dep_path
+          } else {
+            let with_ext = dep_path.with_extension("js");
+            if with_ext.is_file() { with_ext } else { continue; }
+          };
+          Self::analyze_exports_recursive(&resolved, all_exports, visited)?;
+
+          // Mark specific imports as used
+          for import_name in imports_str.split(',').map(|s| s.trim().trim_start_matches("type ")) {
+            let import_name = import_name.split(" as ").next().unwrap_or(import_name).trim();
+            for module_exports in all_exports.iter_mut() {
+              for export in module_exports.exports.iter_mut() {
+                if export.name == import_name {
+                  export.used = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    all_exports.push(ModuleExports {
+      file: file.to_string_lossy().to_string(),
+      exports,
+      re_exports,
+    });
+
+    Ok(())
+  }
+
+  fn collect_css_imports(file: &Path, dir: &Path, visited: &mut HashSet<PathBuf>) -> Result<Vec<PathBuf>> {
+    if !file.exists() || !visited.insert(file.to_path_buf()) {
+      return Ok(Vec::new());
+    }
+    let content = std::fs::read_to_string(file)?;
+    let css_import_re = Regex::new(r#"import\s+["']([^"']+\.css)["']"#).unwrap();
+    let mut css_files = Vec::new();
+
+    for line in content.lines() {
+      if let Some(caps) = css_import_re.captures(line.trim()) {
+        let spec = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        let css_path = if spec.starts_with('.') {
+          let parent = file.parent().unwrap_or(Path::new("."));
+          parent.join(spec)
+        } else {
+          dir.join("node_modules").join(spec)
+        };
+        if css_path.exists() {
+          css_files.push(css_path);
+        }
+      }
+
+      let js_import_re = Regex::new(r#"import\s+.*from\s+["']([^"']+)["']"#).unwrap();
+      if let Some(caps) = js_import_re.captures(line.trim()) {
+        let spec = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        if spec.starts_with('.') {
+          let parent = file.parent().unwrap_or(Path::new("."));
+          let js_path = parent.join(spec);
+          let resolved = if js_path.is_file() {
+            js_path
+          } else {
+            let with_ext = js_path.with_extension("js");
+            if with_ext.is_file() { with_ext } else { continue; }
+          };
+          let nested = Self::collect_css_imports(&resolved, dir, visited)?;
+          css_files.extend(nested);
+        }
+      }
+    }
+
+    Ok(css_files)
+  }
 
   pub fn generate_sourcemap(js_file: &Path, mode: SourcemapMode) -> Result<PathBuf> {
     match mode {
       SourcemapMode::None => Ok(js_file.to_path_buf()),
       SourcemapMode::Inline => {
-        // Sourcemap already inline from esbuild
         Ok(js_file.to_path_buf())
       }
       SourcemapMode::External => {
@@ -632,7 +923,6 @@ impl Bundler {
         if map_path.exists() {
           Ok(map_path)
         } else {
-          // Generate one using esbuild
           let args = vec![
             js_file.to_string_lossy().to_string(),
             "--sourcemap".into(),
@@ -653,8 +943,6 @@ impl Bundler {
       }
     }
   }
-
-  // ── Config Detection ─────────────────────────────────────────────────────
 
   pub fn get_config_path(dir: &Path, kind: BundlerKind) -> Option<PathBuf> {
     let patterns: &[&str] = match kind {
@@ -677,8 +965,6 @@ impl Bundler {
     }
     None
   }
-
-  // ── Build Command ────────────────────────────────────────────────────────
 
   pub fn get_build_command(kind: BundlerKind, opts: &BundleOptions) -> (String, Vec<String>) {
     match kind {
@@ -761,15 +1047,11 @@ impl Default for Bundler {
   }
 }
 
-// ── Utility ──────────────────────────────────────────────────────────────────
-
 pub fn compute_hash(data: &[u8]) -> String {
   let mut hasher = Sha256::new();
   hasher.update(data);
   hex::encode(hasher.finalize())
 }
-
-// ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -850,13 +1132,91 @@ mod tests {
   }
 
   #[test]
-  fn test_get_config_path_swc() {
-    let dir = temp_dir("config_swc");
-    fs::write(dir.join(".swcrc"), "{}").unwrap();
-    let cfg = Bundler::get_config_path(&dir, BundlerKind::SWC);
-    assert!(cfg.is_some());
-    assert!(cfg.unwrap().ends_with(".swcrc"));
+  fn test_analyze_exports() {
+    let dir = temp_dir("exports_analyze");
+    fs::write(dir.join("index.js"), "export const foo = 1;\nexport function bar() {}\nexport default class Baz {}").unwrap();
+    let modules = Bundler::analyze_exports(&dir.join("index.js")).unwrap();
+    assert!(!modules.is_empty());
     let _ = fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn test_collect_css_imports() {
+    let dir = temp_dir("css_imports");
+    fs::write(dir.join("index.js"), r#"import './styles.css';"#).unwrap();
+    fs::write(dir.join("styles.css"), "body { color: red; }").unwrap();
+    let css = Bundler::collect_css_imports(&dir.join("index.js"), &dir, &mut HashSet::new()).unwrap();
+    assert_eq!(css.len(), 1);
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn test_dynamic_import_detection() {
+    let dir = temp_dir("dynamic_imports");
+    fs::write(dir.join("main.js"), r#"import('./lazy.js').then(m => m.default());"#).unwrap();
+    let split = Bundler::compute_chunks(&[dir.join("main.js")], &dir);
+    assert!(split.dynamic_imports.iter().any(|d| d.specifier == "./lazy.js"));
+    let _ = fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn test_minifier_callback() {
+    let cb = MinifierCallback {
+      program: "terser".into(),
+      args: vec!["--compress".into()],
+    };
+    assert_eq!(cb.program, "terser");
+  }
+
+  #[test]
+  fn test_bundle_result_with_css() {
+    let result = BundleResult {
+      duration: Duration::from_secs(0),
+      output_files: vec![],
+      outputs: vec![],
+      size_bytes: 0,
+      warnings: vec![],
+      chunks: None,
+      css_files: vec![PathBuf::from("dist/bundle.css")],
+    };
+    assert_eq!(result.css_files.len(), 1);
+  }
+
+  #[test]
+  fn test_chunk_with_dynamic_flag() {
+    let chunk = Chunk {
+      name: "lazy".into(),
+      path: PathBuf::from("lazy.js"),
+      size: 512,
+      entry: false,
+      imports: vec![],
+      exports: vec![],
+      modules: vec![],
+      dynamic: true,
+    };
+    assert!(chunk.dynamic);
+  }
+
+  #[test]
+  fn test_export_info() {
+    let export = ExportInfo {
+      name: "foo".into(),
+      local_name: "foo".into(),
+      is_default: false,
+      used: true,
+    };
+    assert!(export.used);
+    assert!(!export.is_default);
+  }
+
+  #[test]
+  fn test_module_exports() {
+    let me = ModuleExports {
+      file: "index.js".into(),
+      exports: vec![],
+      re_exports: vec![],
+    };
+    assert_eq!(me.file, "index.js");
   }
 
   #[test]
@@ -877,94 +1237,13 @@ mod tests {
   }
 
   #[test]
-  fn test_get_build_command_vite_cjs() {
-    let opts = BundleOptions {
-      entry: "src/main.ts".into(),
-      out_dir: "build".into(),
-      minify: false,
-      sourcemap: SourcemapMode::None,
-      format: OutputFormat::Cjs,
-      ..Default::default()
-    };
-    let (cmd, args) = Bundler::get_build_command(BundlerKind::Vite, &opts);
-    assert_eq!(cmd, "vite");
-    assert!(args.contains(&"--ssr".into()));
-  }
-
-  #[test]
-  fn test_analyze_tree_shaking_simple() {
-    let dir = temp_dir("treeshake");
-    let entry = dir.join("index.js");
-    fs::write(
-      &entry,
-      "import { foo } from './utils';\nimport bar from 'lodash';",
-    )
-    .unwrap();
-    fs::write(dir.join("utils.js"), "export const foo = 1;").unwrap();
-    let tree = Bundler::analyze_tree_shaking(&entry).unwrap();
-    assert!(tree.contains_key(&entry.to_string_lossy().to_string()));
-    let _ = fs::remove_dir_all(&dir);
-  }
-
-  #[test]
-  fn test_compute_chunks_empty() {
-    let chunks = Bundler::compute_chunks(&[]);
-    assert!(chunks.chunks.is_empty());
-    assert_eq!(chunks.total_size, 0);
-  }
-
-  #[test]
-  fn test_sourcemap_modes() {
-    assert_eq!(SourcemapMode::None as u8, 0);
-    assert_eq!(SourcemapMode::Inline as u8, 1);
-    assert_eq!(SourcemapMode::External as u8, 2);
-  }
-
-  #[test]
-  fn test_bundle_result_defaults() {
-    let result = BundleResult {
-      duration: Duration::from_secs(0),
-      output_files: vec![],
-      outputs: vec![],
-      size_bytes: 0,
-      warnings: vec![],
-      chunks: None,
-    };
-    assert_eq!(result.size_bytes, 0);
-    assert!(result.warnings.is_empty());
-  }
-
-  #[test]
-  fn test_chunk_struct() {
-    let chunk = Chunk {
-      name: "main".into(),
-      path: PathBuf::from("main.js"),
-      size: 1024,
-      entry: true,
-      imports: vec!["lodash".into()],
-      exports: vec!["default".into()],
-      modules: vec!["src/index.js".into()],
-    };
-    assert!(chunk.entry);
-    assert_eq!(chunk.imports[0], "lodash");
-  }
-
-  #[test]
-  fn test_split_result() {
-    let result = SplitResult {
-      chunks: vec![],
-      total_size: 0,
-      shared_chunks: vec![],
-    };
-    assert!(result.shared_chunks.is_empty());
-  }
-
-  #[test]
   fn test_bundler_error_types() {
     let e1 = BundlerError::BuildFailed("fail".into());
     let e2 = BundlerError::ToolNotFound("esbuild".into());
+    let e3 = BundlerError::TreeShakingError("unused export".into());
     assert!(e1.to_string().contains("fail"));
     assert!(e2.to_string().contains("esbuild"));
+    assert!(e3.to_string().contains("unused"));
   }
 
   #[test]

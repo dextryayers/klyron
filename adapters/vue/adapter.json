@@ -1,0 +1,13 @@
+{
+  "name": "vue",
+  "version": "1.0.0",
+  "description": "Vue 3 adapter for Klyron",
+  "framework": {
+    "name": "Vue.js",
+    "detection_file": "vite.config.*,package.json",
+    "detection_key": "vue",
+    "supported_versions": ["3.4", "3.5", "3.6"],
+    "default_version": "3.6",
+    "kind": "Frontend"
+  }
+}

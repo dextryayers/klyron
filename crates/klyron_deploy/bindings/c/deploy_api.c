@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 int klyron_deploy_execute(void) {
-    // TODO: implement
+    printf("[deploy] execute\n");
     return 0;
 }
 

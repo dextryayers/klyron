@@ -1,0 +1,13 @@
+{
+  "name": "qwik",
+  "version": "1.0.0",
+  "description": "Qwik adapter for Klyron",
+  "framework": {
+    "name": "Qwik",
+    "detection_file": "package.json,vite.config.*",
+    "detection_key": "@builder.io/qwik",
+    "supported_versions": ["1.9"],
+    "default_version": "1.9",
+    "kind": "Frontend"
+  }
+}

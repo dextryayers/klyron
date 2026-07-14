@@ -1,5 +1,10 @@
 #include "types.hpp"
+#include <string>
 
 namespace klyron {
-// Klyron::Updater type implementations
+
+std::string klyron_updater_version() {
+    return "klyron_updater 0.1.0";
+}
+
 }

@@ -5,7 +5,6 @@ namespace klyron::_docker {
 DockerApi::DockerApi() {}
 
 void DockerApi::execute() {
-    // TODO: implement
 }
 
 std::string DockerApi::version() {

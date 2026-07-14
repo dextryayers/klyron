@@ -1,0 +1,14 @@
+{
+  "name": "prisma",
+  "version": "1.0.0",
+  "description": "Prisma ORM adapter for Klyron",
+  "orm": {
+    "name": "Prisma",
+    "detection_file": "prisma/schema.prisma",
+    "supported_versions": ["5.0", "5.22", "6.0"],
+    "default_version": "6.0",
+    "kind": "ORM",
+    "language": "TypeScript",
+    "database_support": ["PostgreSQL", "MySQL", "SQLite", "MongoDB", "SQL Server", "CockroachDB"]
+  }
+}

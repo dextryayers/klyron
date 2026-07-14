@@ -1,0 +1,20 @@
+{
+    "name": "klyron/laravel-v10",
+    "description": "Klyron Laravel 10.x compatibility stubs",
+    "type": "library",
+    "require": {
+        "php": "^8.1",
+        "laravel/framework": "^10.0"
+    },
+    "autoload": {
+        "files": [
+            "src/helpers.php"
+        ]
+    },
+    "extra": {
+        "klyron": {
+            "laravel-version": "10.x",
+            "support": "active"
+        }
+    }
+}

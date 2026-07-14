@@ -1,0 +1,35 @@
+version: "3.9"
+
+services:
+  api-gateway:
+    image: klyron/klyron:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./api-gateway:/app
+    working_dir: /app
+    command: ["run", "server.js"]
+    depends_on:
+      - users-service
+      - orders-service
+    environment:
+      - USERS_SERVICE_URL=http://users-service:4001
+      - ORDERS_SERVICE_URL=http://orders-service:4002
+
+  users-service:
+    image: python:3.12-slim
+    ports:
+      - "4001:4001"
+    volumes:
+      - ./services/users:/app
+    working_dir: /app
+    command: ["python", "server.py"]
+
+  orders-service:
+    image: klyron/klyron:latest
+    ports:
+      - "4002:4002"
+    volumes:
+      - ./services/orders:/app
+    working_dir: /app
+    command: ["run", "server.js"]
