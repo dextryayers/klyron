@@ -23,13 +23,13 @@ export function stringify(obj, sep, eq, options) {
   const pairs = [];
   for (const k of Object.keys(obj || {})) {
     const v = obj[k];
-    if (Array.isArray(v)) { v.forEach(x => pairs.push(encode(k) + eq + encode(x))); }
-    else pairs.push(encode(k) + eq + encode(v));
+    if (Array.isArray(v)) { v.forEach(x => pairs.push(enc(k) + eq + enc(x))); }
+    else pairs.push(enc(k) + eq + enc(v));
   }
   return pairs.join(sep);
 }
 
-function encode(s) { return encodeURIComponent(String(s)).replace(/%20/g, "+"); }
+function enc(s) { return encodeURIComponent(String(s)).replace(/%20/g, "+"); }
 
 export function decode(str) { return parse(str); }
 export function encode(obj) { return stringify(obj); }

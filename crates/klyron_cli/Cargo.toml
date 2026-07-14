@@ -1,0 +1,33 @@
+[package]
+name = "klyron_cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+klyron-core = { path = "../../src/core" }
+klyron_engine = { path = "../klyron_engine" }
+klyron_runtime = { path = "../klyron_runtime" }
+klyron-ext-console = { path = "../../src/ext/console" }
+klyron-ext-timers = { path = "../../src/ext/timers" }
+klyron-ext-fs = { path = "../../src/ext/fs" }
+klyron-ext-net = { path = "../../src/ext/net" }
+klyron-ext-http = { path = "../../src/ext/http" }
+klyron-ext-crypto = { path = "../../src/ext/crypto" }
+klyron-ext-web = { path = "../../src/ext/web" }
+klyron-ext-html = { path = "../../src/ext/html" }
+klyron-ext-node = { path = "../../src/ext/node" }
+klyron-ext-klyron = { path = "../../src/ext/klyron" }
+klyron-ext-ffi = { path = "../../src/ext/ffi" }
+klyron-ext-ws = { path = "../../src/ext/ws" }
+deno_core = { version = "0.403" }
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["fs"] }
+clap_complete = "4"
+dirs = "5"

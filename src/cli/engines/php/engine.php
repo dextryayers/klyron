@@ -5,7 +5,6 @@ final class PhpEngine {
     private const TIMEOUT = 30;
 
     private string $projectRoot;
-    private array $allowedActions;
     private string $cacheDir;
     private array $sections = [];
     private array $sectionStack = [];
@@ -16,13 +15,6 @@ final class PhpEngine {
     public function __construct() {
         $this->projectRoot = getenv('KLYRON_PROJECT_ROOT') ?: getcwd();
         $this->cacheDir = $this->projectRoot . '/storage/framework/views';
-        $this->allowedActions = [
-            'exec', 'file', 'eval',
-            'artisan', 'composer', 'blade', 'blade:clear',
-            'artisan:serve', 'artisan:make', 'artisan:migrate',
-            'artisan:tinker', 'check',
-            'ping',
-        ];
         if (!is_dir($this->cacheDir)) {
             @mkdir($this->cacheDir, 0777, true);
         }
@@ -43,26 +35,83 @@ final class PhpEngine {
         $files = $input['files'] ?? [];
         $filename = $input['filename'] ?? '';
 
-        if (!in_array($action, $this->allowedActions, true)) {
-            $this->output('', "Unknown action: $action", 1, '');
-            return;
-        }
-
         try {
-            match ($action) {
-                'exec' => $this->handleExec($code, $files, $filename),
-                'file' => $this->handleFile($code ?: $args),
-                'eval' => $this->handleEval($code),
-                'check' => $this->handleCheck($code),
-                'artisan' => $this->handleArtisan($args, $project),
-                'composer' => $this->handleComposer($args, $project),
-                'blade' => $this->handleBlade($code, $args, $project),
-                'blade:clear' => $this->handleBladeClear($project),
-                'artisan:serve' => $this->handleArtisanServe($args, $project),
-                'artisan:make' => $this->handleArtisanMake($args, $project),
-                'artisan:migrate' => $this->handleArtisanMigrate($project),
-                'artisan:tinker' => $this->handleArtisanTinker($project),
-                'ping' => $this->output('pong', '', 0, 'ok'),
+            match (true) {
+                // ── Core ──
+                $action === 'exec' => $this->handleExec($code, $files, $filename),
+                $action === 'file' => $this->handleFile($code ?: $args),
+                $action === 'eval' => $this->handleEval($code),
+                $action === 'check' => $this->handleCheck($code),
+                $action === 'ping' => $this->output('pong', '', 0, 'ok'),
+
+                // ── Blade ──
+                $action === 'blade' => $this->handleBlade($code, $args, $project),
+                $action === 'blade:clear' => $this->handleBladeClear($project),
+
+                // ── Composer ──
+                $action === 'composer' => $this->handleComposer($args, $project),
+
+                // ── Artisan pass-through ──
+                $action === 'artisan' => $this->handleArtisan($args, $project),
+                $action === 'artisan:serve' => $this->handleArtisanServe($args, $project),
+                $action === 'artisan:make' => $this->handleArtisanMake($args, $project),
+                $action === 'artisan:migrate' => $this->handleArtisanMigrate($project),
+                $action === 'artisan:tinker' => $this->handleArtisanTinker($project),
+
+                // ── Artisan make:resource (special: make:controller with --resource --model) ──
+                $action === 'artisan:resource' => $this->runArtisanMake('controller', $code, $project, '--resource --model=' . $code),
+
+                // ── Generic artisan make:* commands (catches artisan:model, artisan:cast, artisan:test, etc.) ──
+                str_starts_with($action, 'artisan:') => $this->runArtisanMake(substr($action, 8), $code, $project, $args),
+
+                // ── Horizon ──
+                $action === 'horizon' => $this->runArtisanCommand('horizon', $project),
+                $action === 'horizon:install' => $this->runArtisanCommand('horizon:install', $project),
+                $action === 'horizon:pause' => $this->runArtisanCommand('horizon:pause', $project),
+                $action === 'horizon:continue' => $this->runArtisanCommand('horizon:continue', $project),
+                $action === 'horizon:terminate' => $this->runArtisanCommand('horizon:terminate', $project),
+                $action === 'horizon:status' => $this->runArtisanCommand('horizon:status', $project),
+
+                // ── Telescope ──
+                $action === 'telescope:install' => $this->runArtisanCommand('telescope:install', $project),
+                $action === 'telescope:prune' => $this->runArtisanCommand('telescope:prune', $project),
+                $action === 'telescope:clear' => $this->runArtisanCommand('telescope:clear', $project),
+
+                // ── Sail ──
+                $action === 'sail' => $this->handleSail($args, $project),
+
+                // ── Pennant ──
+                $action === 'pennant:install' => $this->runArtisanCommand('pennant:install', $project),
+                $action === 'pennant:feature' => $this->runArtisanCommand('pennant:feature ' . escapeshellarg($code), $project),
+
+                // ── Pulse ──
+                $action === 'pulse:install' => $this->runArtisanCommand('pulse:install', $project),
+                $action === 'pulse:check' => $this->runArtisanCommand('pulse:check', $project),
+
+                // ── Routes ──
+                $action === 'routes' => $this->runArtisanCommand('route:list', $project),
+
+                // ── Cache Management ──
+                $action === 'cache:clear' => $this->runArtisanCommand('cache:clear', $project),
+                $action === 'config:clear' => $this->runArtisanCommand('config:clear', $project),
+                $action === 'route:clear' => $this->runArtisanCommand('route:clear', $project),
+                $action === 'view:clear' => $this->runArtisanCommand('view:clear', $project),
+
+                // ── Queue Management ──
+                $action === 'queue:work' => $this->runArtisanCommand('queue:work', $project),
+                $action === 'queue:listen' => $this->runArtisanCommand('queue:listen', $project),
+                $action === 'queue:restart' => $this->runArtisanCommand('queue:restart', $project),
+
+                // ── Schedule ──
+                $action === 'schedule:run' => $this->runArtisanCommand('schedule:run', $project),
+                $action === 'schedule:list' => $this->runArtisanCommand('schedule:list', $project),
+
+                // ── Format / Lint / Test ──
+                $action === 'format' => $this->handleFormat($code),
+                $action === 'lint' => $this->handleLint($code),
+                $action === 'test' => $this->handleTest($code, $files),
+
+                default => $this->output('', "Unknown action: $action", 1, ''),
             };
         } catch (\Throwable $e) {
             $this->output('', $e->getMessage() . "\n" . $e->getTraceAsString(), 1, '');
@@ -111,8 +160,21 @@ final class PhpEngine {
                 }
             }
             if (time() - $startTime > self::TIMEOUT) {
-                proc_terminate($process, 9);
+                proc_terminate($process, 15);
                 $stderr .= "\n[Timeout]";
+                $killTime = time() + 3;
+                while (time() < $killTime) {
+                    $status = proc_get_status($process);
+                    if (!$status['running']) {
+                        $running = false;
+                        break;
+                    }
+                    usleep(100000);
+                }
+                if ($running) {
+                    proc_terminate($process, 9);
+                }
+                $stderr .= "\n[Killed]";
                 $running = false;
             }
         }
@@ -127,12 +189,42 @@ final class PhpEngine {
         return ['stdout' => $stdout, 'stderr' => $stderr, 'exit_code' => $exitCode];
     }
 
+    // ─── Artisan helpers ─────────────────────────────────────────────────
+
+    private function findArtisan(string $project): ?string {
+        foreach (["$project/artisan", "$project/bin/artisan"] as $path) {
+            if (file_exists($path)) return realpath($path) ?: $path;
+        }
+        return null;
+    }
+
+    private function runArtisanCommand(string $subcommand, string $project): void {
+        $artisan = $this->findArtisan($project);
+        if (!$artisan) { $this->output('', 'No artisan file found.', 1, ''); return; }
+        $result = $this->runCommand(
+            "php " . escapeshellarg($artisan) . " " . $subcommand,
+            $project
+        );
+        $this->output($result['stdout'], $result['stderr'], $result['exit_code'], $result['stdout']);
+    }
+
+    private function runArtisanMake(string $type, string $name, string $project, string $extraArgs = ''): void {
+        $artisan = $this->findArtisan($project);
+        if (!$artisan) { $this->output('', 'No artisan file found.', 1, ''); return; }
+        if (empty($name)) { $this->output('', "No name provided for $type.", 1, ''); return; }
+        $cmd = "php " . escapeshellarg($artisan) . " make:$type $name";
+        if ($extraArgs !== '') {
+            $cmd .= " " . $extraArgs;
+        }
+        $result = $this->runCommand($cmd, $project);
+        $this->output($result['stdout'], $result['stderr'], $result['exit_code'], $result['stdout']);
+    }
+
     // ─── Execute PHP code ───────────────────────────────────────────────
 
     private function handleExec(string $code, array $files, string $filename): void {
         if (empty($code) && empty($files)) { $this->output('', 'No code provided', 1, ''); return; }
 
-        // Write multi-file sources to temp
         if (!empty($files)) {
             $tmpDir = sys_get_temp_dir() . '/klyron_php_' . bin2hex(random_bytes(8));
             mkdir($tmpDir, 0700, true);
@@ -195,13 +287,6 @@ final class PhpEngine {
 
     // ─── Artisan ────────────────────────────────────────────────────────
 
-    private function findArtisan(string $project): ?string {
-        foreach (["$project/artisan", "$project/bin/artisan"] as $path) {
-            if (file_exists($path)) return realpath($path) ?: $path;
-        }
-        return null;
-    }
-
     private function handleArtisan(string $args, string $project): void {
         $artisan = $this->findArtisan($project);
         if (!$artisan) { $this->output('', 'No artisan file found.', 1, ''); return; }
@@ -236,6 +321,15 @@ final class PhpEngine {
         $cmd = "php " . escapeshellarg($artisan) . " tinker";
         passthru($cmd, $exitCode);
         $this->output('', '', $exitCode, '');
+    }
+
+    // ─── Sail ────────────────────────────────────────────────────────────
+
+    private function handleSail(string $args, string $project): void {
+        $sail = $project . '/vendor/bin/sail';
+        if (!file_exists($sail)) { $this->output('', 'Sail not found.', 1, ''); return; }
+        $result = $this->runCommand(escapeshellarg($sail) . " " . $args, $project);
+        $this->output($result['stdout'], $result['stderr'], $result['exit_code'], $result['stdout']);
     }
 
     private function handleComposer(string $args, string $project): void {
@@ -361,7 +455,6 @@ final class PhpEngine {
         $viewFile = "$viewsPath/" . str_replace('.', '/', $view) . ".blade.php";
         if (!file_exists($viewFile)) { $this->output('', "Blade view not found: $view", 1, ''); return; }
 
-        // Use Laravel View facade if available
         if (class_exists('\Illuminate\Support\Facades\View')) {
             try {
                 $html = \Illuminate\Support\Facades\View::make($view, $data)->render();
@@ -374,7 +467,6 @@ final class PhpEngine {
         $cachedPath = $this->getCachedPath($view, $project);
         $sourceMtime = filemtime($viewFile);
 
-        // Compile if needed
         if (!file_exists($cachedPath) || filemtime($cachedPath) < $sourceMtime) {
             $source = file_get_contents($viewFile);
             $compiled = $this->compileBlade($source);
@@ -395,7 +487,6 @@ final class PhpEngine {
             require $cachedPath;
             $html = ob_get_clean() ?: '';
 
-            // Handle layout inheritance
             if (!empty($this->parentView)) {
                 $parentFile = "$viewsPath/" . str_replace('.', '/', $this->parentView) . ".blade.php";
                 if (file_exists($parentFile)) {
@@ -442,9 +533,7 @@ final class PhpEngine {
         return $this->sections[$name] ?? $default;
     }
 
-    public function startInclude(string $view, array $data = []): void {
-        // Handled by parent compilation
-    }
+    public function startInclude(string $view, array $data = []): void {}
 
     public function startPush(string $stack): void {
         $this->sectionStack[] = '__push_' . $stack;
@@ -500,6 +589,61 @@ final class PhpEngine {
         $count = 0;
         foreach ($files as $f) { if (is_file($f)) { unlink($f); $count++; } }
         $this->output("Cleared $count cached views", '', 0, "ok");
+    }
+
+    // ─── Format ─────────────────────────────────────────────────────────
+
+    private function handleFormat(string $code): void {
+        if (empty($code)) { $this->output('', 'No code provided', 1, ''); return; }
+        $tmpDir = sys_get_temp_dir() . '/klyron_phpfmt_' . bin2hex(random_bytes(4));
+        mkdir($tmpDir, 0700, true);
+        $tmpFile = "$tmpDir/input.php";
+        file_put_contents($tmpFile, "<?php\n" . $code);
+
+        $this->runCommand("php-cs-fixer fix " . escapeshellarg($tmpFile) . " --rules=@PSR12 --allow-risky=no 2>&1 || true");
+
+        $formatted = file_get_contents($tmpFile);
+        if (str_starts_with($formatted, "<?php\n")) {
+            $formatted = substr($formatted, 6);
+        }
+        $this->delTree($tmpDir);
+        $this->output($formatted, '', 0, 'ok');
+    }
+
+    // ─── Lint ───────────────────────────────────────────────────────────
+
+    private function handleLint(string $code): void {
+        if (empty($code)) { $this->output('', 'No code provided', 1, ''); return; }
+        $tmpFile = tempnam(sys_get_temp_dir(), 'php_lint_') . '.php';
+        file_put_contents($tmpFile, "<?php\n" . $code);
+        $result = $this->runCommand('php -l ' . escapeshellarg($tmpFile) . ' 2>&1');
+        unlink($tmpFile);
+        $diags = [];
+        if ($result['exit_code'] !== 0) {
+            $diags[] = ['file' => '<eval>', 'line' => 0, 'col' => 0, 'message' => $result['stderr'], 'severity' => 'error'];
+        }
+        $this->output($result['stdout'], $result['stderr'], $result['exit_code'],
+            $result['exit_code'] === 0 ? 'No syntax errors' : 'Syntax error', $diags);
+    }
+
+    // ─── Test ───────────────────────────────────────────────────────────
+
+    private function handleTest(string $code, array $files): void {
+        $tmpDir = sys_get_temp_dir() . '/klyron_phptest_' . bin2hex(random_bytes(4));
+        mkdir($tmpDir, 0700, true);
+
+        if (!empty($files)) {
+            foreach ($files as $f) {
+                file_put_contents("$tmpDir/" . basename($f['name']), $f['content']);
+            }
+        }
+        if (!empty($code)) {
+            file_put_contents("$tmpDir/Test.php", $code);
+        }
+
+        $result = $this->runCommand("phpunit $tmpDir 2>&1");
+        $this->delTree($tmpDir);
+        $this->output($result['stdout'], $result['stderr'], $result['exit_code'], $result['stdout']);
     }
 }
 

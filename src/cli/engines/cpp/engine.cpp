@@ -81,12 +81,12 @@ public:
     skip_ws();
     const char *saved = p_;
     if (*p_ != '"') return false;
-    p_++; // opening quote
+    p_++;
     while (*p_ && *p_ != '"') { if (*p_ == '\\') p_++; p_++; }
     if (*p_ != '"') return false;
     size_t klen = strlen(key);
     if ((size_t)(p_ - saved - 1) != klen || strncmp(saved + 1, key, klen) != 0) { p_ = saved; return false; }
-    p_++; // closing quote
+    p_++;
     return true;
   }
 
@@ -96,14 +96,14 @@ public:
     if (!maybe_match(key)) { p_ = saved; return false; }
     skip_ws();
     if (*p_ != ':') { p_ = saved; return false; }
-    p_++; // colon
+    p_++;
     return true;
   }
 
   std::string read_string() {
     skip_ws();
     if (*p_ != '"') return {};
-    p_++; // opening quote
+    p_++;
     std::string out;
     while (*p_ && *p_ != '"') {
       if (*p_ == '\\') {
@@ -121,7 +121,7 @@ public:
       }
       p_++;
     }
-    if (*p_ == '"') p_++; // closing quote
+    if (*p_ == '"') p_++;
     return out;
   }
 
@@ -148,21 +148,19 @@ public:
       }
       return std::string(start, p_ - start);
     }
-    // Number / boolean / null
     while (*p_ && *p_ != ',' && *p_ != '}' && *p_ != ']' && *p_ != '\n') p_++;
     return std::string(start, p_ - start);
   }
 
-  // Parse files array into vector of pairs
   std::vector<std::pair<std::string, std::string>> parse_files() {
     std::vector<std::pair<std::string, std::string>> files;
     skip_ws();
     if (*p_ != '[') return files;
-    p_++; // '['
+    p_++;
     while (*p_ && *p_ != ']') {
       skip_ws();
       if (*p_ != '{') break;
-      p_++; // '{'
+      p_++;
       std::string name, content;
       while (*p_ && *p_ != '}') {
         if (match_key("name")) name = read_string();
@@ -179,6 +177,63 @@ public:
   }
 };
 
+// ─── Compiler Argument Parser ──────────────────────────────────────────
+
+struct ParsedArgs {
+  std::string standard = "c++20";
+  std::string optimization = "-O2";
+  std::vector<std::string> warnings;
+  std::vector<std::string> libraries;
+  std::vector<std::string> include_dirs;
+  std::vector<std::string> defines;
+  bool debug = false;
+  std::vector<std::string> sanitizers;
+  bool lto = false;
+  bool modules = false;
+  bool modules_ts = false;
+  std::vector<std::string> extra;
+};
+
+static ParsedArgs parse_args(const std::string &args) {
+  ParsedArgs pa;
+  std::istringstream ss(args);
+  std::string tok;
+  while (ss >> tok) {
+    if ((tok.rfind("--std=", 0) == 0 || tok.rfind("-std=", 0) == 0)) {
+      pa.standard = tok.substr(tok.find('=') + 1);
+    } else if (tok.size() >= 2 && tok.size() <= 6 && tok[0] == '-' && tok[1] == 'O') {
+      pa.optimization = tok;
+    } else if (tok.rfind("-W", 0) == 0) {
+      pa.warnings.push_back(tok);
+    } else if (tok.rfind("-l", 0) == 0 && tok.size() > 2) {
+      pa.libraries.push_back(tok);
+    } else if (tok.rfind("-I", 0) == 0 && tok.size() > 2) {
+      pa.include_dirs.push_back(tok);
+    } else if (tok.rfind("-D", 0) == 0 && tok.size() > 2) {
+      pa.defines.push_back(tok);
+    } else if (tok == "-g") {
+      pa.debug = true;
+    } else if (tok.rfind("-fsanitize=", 0) == 0) {
+      pa.sanitizers.push_back(tok);
+    } else if (tok == "-flto") {
+      pa.lto = true;
+    } else if (tok == "-fmodules") {
+      pa.modules = true;
+    } else if (tok == "-fmodules-ts") {
+      pa.modules_ts = true;
+    } else {
+      pa.extra.push_back(tok);
+    }
+  }
+  return pa;
+}
+
+static bool standard_has_coroutines(const std::string &std) {
+  return std == "c++20" || std == "c++23" || std == "c++26" ||
+         std == "gnu++20" || std == "gnu++23" || std == "gnu++26" ||
+         std == "c++2a" || std == "c++2b";
+}
+
 // ─── Subprocess ────────────────────────────────────────────────────────
 
 struct ProcResult {
@@ -187,16 +242,21 @@ struct ProcResult {
   std::string err;
 };
 
-static ProcResult exec_shell(const std::string &cmd, int timeout_sec) {
-  int po[2], pe[2];
+static ProcResult exec_shell(const std::string &cmd, int timeout_sec,
+                              const std::string &stdin_data = "") {
+  int po[2], pe[2], pi[2];
+  bool has_stdin = !stdin_data.empty();
   if (pipe(po) < 0 || pipe(pe) < 0) return {-1, "", "pipe() failed"};
+  if (has_stdin && pipe(pi) < 0) {
+    close(po[0]); close(po[1]); close(pe[0]); close(pe[1]);
+    return {-1, "", "pipe() failed"};
+  }
 
-  // Set CLOEXEC on all fds except our pipes
   for (int i = 3; i < 256; i++)
-    if (i != po[0] && i != po[1] && i != pe[0] && i != pe[1])
+    if (i != po[0] && i != po[1] && i != pe[0] && i != pe[1] &&
+        (!has_stdin || (i != pi[0] && i != pi[1])))
       fcntl(i, F_SETFD, FD_CLOEXEC);
 
-  // Temporarily disable SA_NOCLDWAIT so waitpid can collect exit status
   struct sigaction old_sa;
   memset(&old_sa, 0, sizeof(old_sa));
   struct sigaction dfl_sa; memset(&dfl_sa, 0, sizeof(dfl_sa)); dfl_sa.sa_handler = SIG_DFL;
@@ -209,12 +269,27 @@ static ProcResult exec_shell(const std::string &cmd, int timeout_sec) {
     close(po[0]); close(pe[0]);
     dup2(po[1], STDOUT_FILENO); dup2(pe[1], STDERR_FILENO);
     close(po[1]); close(pe[1]);
+    if (has_stdin) {
+      dup2(pi[0], STDIN_FILENO);
+      close(pi[0]); close(pi[1]);
+    }
     if (timeout_sec > 0) alarm(timeout_sec);
     execl("/bin/sh", "sh", "-c", cmd.c_str(), (char *)nullptr);
     _exit(127);
   }
 
   close(po[1]); close(pe[1]);
+  if (has_stdin) close(pi[0]);
+
+  if (has_stdin) {
+    size_t written = 0;
+    while (written < stdin_data.size()) {
+      ssize_t n = write(pi[1], stdin_data.data() + written, stdin_data.size() - written);
+      if (n > 0) written += n;
+      else break;
+    }
+    close(pi[1]);
+  }
 
   int fl_o = fcntl(po[0], F_GETFL, 0);
   int fl_e = fcntl(pe[0], F_GETFL, 0);
@@ -251,7 +326,6 @@ static ProcResult exec_shell(const std::string &cmd, int timeout_sec) {
   int wret;
   do { wret = waitpid(pid, &status, 0); } while (wret < 0 && errno == EINTR);
 
-  // Restore SA_NOCLDWAIT
   sigaction(SIGCHLD, &old_sa, nullptr);
 
   if (wret < 0) return {-1, out, err};
@@ -270,7 +344,6 @@ static std::string detect_compiler() {
 
 struct SourceFile { std::string name; std::string content; };
 
-// Write files to tmpdir, return true on success
 static bool write_sources(const std::string &dir, const std::vector<SourceFile> &files,
                            const std::string &code, const std::string &fname) {
   auto write_one = [&](const std::string &path, const std::string &content) -> bool {
@@ -291,7 +364,8 @@ static bool write_sources(const std::string &dir, const std::vector<SourceFile> 
 
 static std::string find_sources(const std::string &dir) {
   std::string result;
-  std::string fcmd = "find " + dir + " -maxdepth 1 \\( -name '*.cpp' -o -name '*.cxx' -o -name '*.cc' \\) 2>/dev/null";
+  std::string fcmd = "find " + dir + " -maxdepth 1 \\( -name '*.cpp' -o -name '*.cxx' "
+    "-o -name '*.cc' -o -name '*.ixx' -o -name '*.hpp' -o -name '*.hxx' \\) 2>/dev/null";
   FILE *fp = popen(fcmd.c_str(), "r");
   if (!fp) return dir + "/main.cpp";
   char line[4096];
@@ -306,15 +380,49 @@ static std::string find_sources(const std::string &dir) {
   return result.empty() ? dir + "/main.cpp" : result;
 }
 
+// ─── Build Compile Command ─────────────────────────────────────────────
+
+static std::string build_compile_cmd(const std::string &compiler,
+                                      const std::string &tmpdir,
+                                      const std::string &src_list,
+                                      const ParsedArgs &pa) {
+  std::string cmd = compiler + " -std=" + pa.standard + " -o " + tmpdir + "/prog " + src_list;
+
+  cmd += " " + pa.optimization;
+
+  for (const auto &w : pa.warnings) { cmd += " "; cmd += w; }
+  for (const auto &idir : pa.include_dirs) { cmd += " "; cmd += idir; }
+  for (const auto &d : pa.defines) { cmd += " "; cmd += d; }
+
+  if (pa.debug) cmd += " -g";
+
+  for (const auto &s : pa.sanitizers) { cmd += " "; cmd += s; }
+
+  if (pa.lto) cmd += " -flto";
+  if (pa.modules) cmd += " -fmodules";
+  if (pa.modules_ts) cmd += " -fmodules-ts";
+
+  if (standard_has_coroutines(pa.standard)) cmd += " -fcoroutines";
+
+  for (const auto &e : pa.extra) { cmd += " "; cmd += e; }
+
+  for (const auto &l : pa.libraries) { cmd += " "; cmd += l; }
+
+  cmd += " -lm -pthread 2>&1";
+  return cmd;
+}
+
 // ─── Main Logic ────────────────────────────────────────────────────────
 
 static void handle_action(const std::string &action, const std::string &code,
                            const std::string &args, const std::string &files_raw,
-                           const std::string &filename) {
+                           const std::string &filename,
+                           const std::string &stdin_data) {
   JsonWriter w;
+  ParsedArgs pa = parse_args(args);
 
   auto compile_and_run = [&](const std::string &src, bool compile_only,
-                              const std::vector<SourceFile> &extra_files) {
+                               const std::vector<SourceFile> &extra_files) {
     char tdir[] = "/tmp/klyron_cpp_XXXXXX";
     if (!mkdtemp(tdir)) {
       w.key("stderr"); w.str("Failed to create temp dir");
@@ -322,9 +430,7 @@ static void handle_action(const std::string &action, const std::string &code,
       return;
     }
     std::string tmpdir(tdir);
-    // RAII cleanup via scope guard
     auto cleanup = [&]() { exec_shell("rm -rf " + tmpdir, 5); };
-    // Use scope exit pattern
     struct ScopeGuard { std::function<void()> fn; ~ScopeGuard() { fn(); } } guard{cleanup};
 
     if (!write_sources(tmpdir, extra_files, src, filename)) {
@@ -335,8 +441,7 @@ static void handle_action(const std::string &action, const std::string &code,
 
     std::string src_list = find_sources(tmpdir);
     std::string compiler = detect_compiler();
-    std::string compile_cmd = compiler + " -std=c++20 -o " + tmpdir + "/prog " + src_list
-      + " -Wall -Wextra -Werror -O2 -lm -pthread 2>&1";
+    std::string compile_cmd = build_compile_cmd(compiler, tmpdir, src_list, pa);
 
     auto cr = exec_shell(compile_cmd, COMPILE_TIMEOUT);
     if (cr.exit_code != 0) {
@@ -355,8 +460,10 @@ static void handle_action(const std::string &action, const std::string &code,
     }
 
     std::string run_cmd = tmpdir + "/prog";
-    if (!args.empty()) run_cmd += " " + args;
-    auto rr = exec_shell(run_cmd, RUN_TIMEOUT);
+    if (!pa.extra.empty()) {
+      for (const auto &e : pa.extra) { run_cmd += " "; run_cmd += e; }
+    }
+    auto rr = exec_shell(run_cmd, RUN_TIMEOUT, stdin_data);
     w.key("stdout"); w.str(rr.out);
     w.key("stderr"); w.str(rr.err);
     w.key("exit_code"); w.num(rr.exit_code);
@@ -364,7 +471,6 @@ static void handle_action(const std::string &action, const std::string &code,
     w.flush();
   };
 
-  // Parse files
   std::vector<SourceFile> extra_files;
   if (!files_raw.empty()) {
     JsonReader jr(files_raw);
@@ -396,6 +502,74 @@ static void handle_action(const std::string &action, const std::string &code,
       "#include <iostream>\n#include <cmath>\n"
       "int main() {\n  std::cout << (" + code + ") << std::endl;\n  return 0;\n}\n";
     compile_and_run(wrapped, false, {});
+  } else if (action == "format") {
+    if (code.empty()) {
+      w.key("stderr"); w.str("No code provided");
+      w.key("exit_code"); w.num(1); w.key("result"); w.str(""); w.flush();
+      return;
+    }
+    char tdir[] = "/tmp/klyron_cpp_XXXXXX";
+    if (!mkdtemp(tdir)) {
+      w.key("stderr"); w.str("Failed to create temp dir");
+      w.key("exit_code"); w.num(1); w.key("result"); w.str(""); w.flush();
+      return;
+    }
+    std::string tmpdir(tdir);
+    auto cleanup = [&]() { exec_shell("rm -rf " + tmpdir, 5); };
+    struct ScopeGuard { std::function<void()> fn; ~ScopeGuard() { fn(); } } guard{cleanup};
+    if (!write_sources(tmpdir, {}, code, "input.cpp")) {
+      w.key("stderr"); w.str("Failed to write source file");
+      w.key("exit_code"); w.num(1); w.key("result"); w.str(""); w.flush();
+      return;
+    }
+    auto fr = exec_shell("clang-format " + tmpdir + "/input.cpp", 10);
+    w.key("stdout"); w.str(fr.out);
+    w.key("stderr"); w.str(fr.err);
+    w.key("exit_code"); w.num(fr.exit_code);
+    w.key("result"); w.str(fr.exit_code == 0 ? "ok" : "Format failed");
+    w.flush();
+  } else if (action == "lint") {
+    if (code.empty()) {
+      w.key("stderr"); w.str("No code provided");
+      w.key("exit_code"); w.num(1); w.key("result"); w.str(""); w.flush();
+      return;
+    }
+    char tdir[] = "/tmp/klyron_cpp_XXXXXX";
+    if (!mkdtemp(tdir)) {
+      w.key("stderr"); w.str("Failed to create temp dir");
+      w.key("exit_code"); w.num(1); w.key("result"); w.str(""); w.flush();
+      return;
+    }
+    std::string tmpdir(tdir);
+    auto cleanup = [&]() { exec_shell("rm -rf " + tmpdir, 5); };
+    struct ScopeGuard { std::function<void()> fn; ~ScopeGuard() { fn(); } } guard{cleanup};
+    std::string wrapped = "#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm>\n" + code;
+    if (!write_sources(tmpdir, {}, wrapped, "input.cpp")) {
+      w.key("stderr"); w.str("Failed to write source file");
+      w.key("exit_code"); w.num(1); w.key("result"); w.str(""); w.flush();
+      return;
+    }
+    std::string lint_out;
+    int lint_exit;
+    auto lr = exec_shell("clang-tidy " + tmpdir + "/input.cpp 2>&1", 30);
+    if (lr.out.find("not found") == std::string::npos) {
+      lint_out = lr.out;
+      lint_exit = lr.exit_code;
+    } else {
+      auto cr = exec_shell("cppcheck --enable=all --language=c++ " + tmpdir + "/input.cpp 2>&1", 30);
+      if (cr.out.find("not found") == std::string::npos) {
+        lint_out = cr.out;
+        lint_exit = cr.exit_code;
+      } else {
+        lint_out = "No linter available (tried clang-tidy and cppcheck)";
+        lint_exit = 1;
+      }
+    }
+    w.key("stdout"); w.str("");
+    w.key("stderr"); w.str(lint_out);
+    w.key("exit_code"); w.num(lint_exit);
+    w.key("result"); w.str(lint_exit == 0 ? "ok" : "Lint issues found");
+    w.flush();
   } else if (action == "ping" || action.empty()) {
     w.key("stdout"); w.str("pong");
     w.key("exit_code"); w.num(0); w.key("result"); w.str("ok"); w.flush();
@@ -420,24 +594,30 @@ int main() {
 
   std::string line;
   while (std::getline(std::cin, line)) {
-    // Trim
     auto nl = line.find_last_not_of("\r\n");
     if (nl == std::string::npos) continue;
     line.resize(nl + 1);
     if (line.empty()) continue;
 
     JsonReader jr(line);
-    jr.match_key("action"); std::string action = jr.read_string();
-    jr.match_key("code");   std::string code = jr.read_string();
-    jr.match_key("args");   std::string args = jr.read_string();
+    jr.match_key("action");   std::string action = jr.read_string();
+    jr.match_key("code");     std::string code = jr.read_string();
+    jr.match_key("args");     std::string args = jr.read_string();
     jr.match_key("filename"); std::string filename = jr.read_string();
+
+    std::string stdin_data;
+    {
+      JsonReader jr2(line);
+      if (jr2.match_key("stdin")) stdin_data = jr2.read_string();
+    }
+
     std::string files_raw;
     {
       JsonReader jr2(line);
       jr2.match_key("files"); files_raw = jr2.read_raw_value();
     }
 
-    handle_action(action, code, args, files_raw, filename);
+    handle_action(action, code, args, files_raw, filename, stdin_data);
   }
   return 0;
 }

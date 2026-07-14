@@ -52,8 +52,16 @@ def exec_code(code, files = nil, filename = "")
 
   # Captured execution
   begin
-    result = eval(code, TOPLEVEL_BINDING)
-    write_output(result: result.inspect)
+    require 'stringio'
+    old_stdout = $stdout
+    $stdout = StringIO.new
+    begin
+      result = eval(code, TOPLEVEL_BINDING)
+      captured_stdout = $stdout.string
+    ensure
+      $stdout = old_stdout
+    end
+    write_output(stdout: captured_stdout, result: result.inspect)
   rescue SyntaxError => e
     diag = [{ file: "<eval>", line: e.lineno&.to_i || 0, col: 0,
               message: e.message, severity: "error" }]

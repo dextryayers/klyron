@@ -2,19 +2,13 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use anyhow::Result;
 use base64::Engine;
-use deno_core::{extension, op2, v8, Extension, FastString, JsRuntime, PollEventLoopOptions, RuntimeOptions, serde_v8};
+use deno_core::{extension, v8, Extension, FastString, JsRuntime, PollEventLoopOptions, RuntimeOptions, serde_v8};
 
 use crate::module_loader::KlyronModuleLoader;
 use crate::permissions::{PermissionSet, Permissions};
 use crate::transpiler::Transpiler;
 
-extension!(klyron_core, ops = [op_klyron_version],);
-
-#[op2]
-#[string]
-fn op_klyron_version() -> String {
-  env!("CARGO_PKG_VERSION").to_string()
-}
+extension!(klyron_core,);
 
 pub struct RuntimeBuilder {
   permissions: PermissionSet,
