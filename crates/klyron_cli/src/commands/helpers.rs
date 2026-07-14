@@ -15,9 +15,10 @@ pub fn detect_project_type(dir: &Path) -> &'static str {
 }
 
 pub fn detect_package_runner(dir: &Path) -> &'static str {
-    if dir.join("bun.lockb").exists() { "bun" }
+    if dir.join("bun.lock").exists() || dir.join("bun.lockb").exists() { "bun" }
     else if dir.join("pnpm-lock.yaml").exists() { "pnpm" }
     else if dir.join("yarn.lock").exists() { "yarn" }
+    else if dir.join("npm-shrinkwrap.json").exists() { "npm" }
     else { "npm" }
 }
 
@@ -75,6 +76,83 @@ pub fn watch_file(path: &PathBuf, on_change: impl Fn()) {
     }
 }
 
+pub fn run_npx(args: &[&str], dir: &Path) -> anyhow::Result<()> {
+    let status = StdCommand::new("npx")
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .map_err(|e| anyhow::anyhow!("Failed to run npx: {e}"))?;
+    if !status.success() {
+        anyhow::bail!("npx {} exited with code {}", args.join(" "), status);
+    }
+    Ok(())
+}
+
+pub fn mkdirs(base: &Path, dirs: &[&str]) -> anyhow::Result<()> {
+    for d in dirs {
+        std::fs::create_dir_all(base.join(d))?;
+    }
+    Ok(())
+}
+
+fn has_npm_dep(dir: &Path, dep: &str) -> Option<bool> {
+    let pkg = dir.join("package.json");
+    let content = std::fs::read_to_string(pkg).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    if let Some(deps) = json.get("dependencies").and_then(|d| d.as_object()) {
+        if deps.contains_key(dep) { return Some(true); }
+    }
+    if let Some(deps) = json.get("devDependencies").and_then(|d| d.as_object()) {
+        if deps.contains_key(dep) { return Some(true); }
+    }
+    Some(false)
+}
+
+pub fn detect_orm(dir: &Path) -> String {
+    if dir.join("schema.prisma").exists() || dir.join("prisma/schema.prisma").exists() {
+        return "prisma".to_string();
+    }
+    if dir.join("drizzle.config.ts").exists() || dir.join("drizzle.config.js").exists() {
+        return "drizzle".to_string();
+    }
+    if dir.join("ormconfig.json").exists() || dir.join("ormconfig.ts").exists() || dir.join("ormconfig.js").exists() {
+        return "typeorm".to_string();
+    }
+    if let Some(true) = has_npm_dep(dir, "typeorm") {
+        return "typeorm".to_string();
+    }
+    if dir.join("mikro-orm.config.ts").exists() || dir.join("mikro-orm.config.js").exists() {
+        return "mikroorm".to_string();
+    }
+    if let Some(true) = has_npm_dep(dir, "@mikro-orm/core") {
+        return "mikroorm".to_string();
+    }
+    if dir.join("config/config.json").exists() && has_npm_dep(dir, "sequelize").unwrap_or(false) {
+        return "sequelize".to_string();
+    }
+    if let Some(true) = has_npm_dep(dir, "sequelize") {
+        if dir.join("models/index.js").exists() || dir.join("models").exists() {
+            return "sequelize".to_string();
+        }
+    }
+    if let Some(true) = has_npm_dep(dir, "mongoose") {
+        return "mongoose".to_string();
+    }
+    if dir.join("kysely.ts").exists() || dir.join("kysely.config.ts").exists() {
+        return "kysely".to_string();
+    }
+    if let Some(true) = has_npm_dep(dir, "kysely") {
+        return "kysely".to_string();
+    }
+    if dir.join("knexfile.ts").exists() || dir.join("knexfile.js").exists() {
+        return "knex".to_string();
+    }
+    if let Some(true) = has_npm_dep(dir, "knex") {
+        return "knex".to_string();
+    }
+    "unknown".to_string()
+}
+
 pub fn start_dev_server(host: &str, port: u16, dir: &Path) -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -90,3 +168,5 @@ pub fn start_dev_server(host: &str, port: u16, dir: &Path) -> anyhow::Result<()>
         Ok(())
     })
 }
+
+

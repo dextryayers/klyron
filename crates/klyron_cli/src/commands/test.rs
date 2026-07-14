@@ -48,7 +48,7 @@ pub fn run_test(args: TestArgs) -> anyhow::Result<()> {
     if args.ui || args.e2e || args.unit || args.integration {
         let category = if args.ui { "ui" } else if args.e2e { "e2e" } else if args.unit { "unit" } else { "integration" };
         println!("Running {category} tests...");
-        let result = TestRunner::run(dir, Some(category))?;
+        let result = TestRunner::run(dir, args.filter.as_deref())?;
         println!(
             "Tests: {} passed, {} failed, {} skipped in {:.2}s",
             result.passed, result.failed, result.skipped, result.time
@@ -73,6 +73,12 @@ fn detect_test_runner(dir: &std::path::Path) -> &'static str {
         "vitest"
     } else if dir.join("jest.config.ts").exists() || dir.join("jest.config.js").exists() {
         "jest"
+    } else if has_npm_dep_check(dir, "mocha") {
+        "mocha"
+    } else if has_npm_dep_check(dir, "ava") {
+        "ava"
+    } else if has_npm_dep_check(dir, "tape") {
+        "tape"
     } else if dir.join("Cargo.toml").exists() {
         "cargo test"
     } else if dir.join("go.mod").exists() {
@@ -84,4 +90,23 @@ fn detect_test_runner(dir: &std::path::Path) -> &'static str {
     } else {
         "unknown"
     }
+}
+
+fn has_npm_dep_check(dir: &std::path::Path, dep: &str) -> bool {
+    let pkg = dir.join("package.json");
+    let content = match std::fs::read_to_string(pkg) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    if let Some(deps) = json.get("dependencies").and_then(|d| d.as_object()) {
+        if deps.contains_key(dep) { return true; }
+    }
+    if let Some(deps) = json.get("devDependencies").and_then(|d| d.as_object()) {
+        if deps.contains_key(dep) { return true; }
+    }
+    false
 }

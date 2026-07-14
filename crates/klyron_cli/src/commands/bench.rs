@@ -56,16 +56,26 @@ fn bench_runtime() -> anyhow::Result<()> {
 
 fn bench_http() -> anyhow::Result<()> {
     println!("HTTP Benchmark");
-    println!("  (requires running server)");
-    println!("  Run `klyron serve --port 3000` in another terminal, then:");
-    println!("  $ wrk -t4 -c100 -d10s http://localhost:3000/");
+    let url = "http://localhost:3000/";
+    println!("  Benchmarking {url} (10s, 10 connections)");
+    match BenchmarkRunner::bench_http(url, 10, std::time::Duration::from_secs(10)) {
+        Ok(result) => {
+            println!("  Requests: {}", result.iterations);
+            println!("  Total time: {:.2}s", result.total_time.as_secs_f64());
+            println!("  Avg latency: {:?}", result.avg_time);
+            println!("  Min latency: {:?}", result.min_time);
+            println!("  Max latency: {:?}", result.max_time);
+            println!("  Requests/sec: {:.0}", result.ops_per_sec);
+        }
+        Err(e) => println!("  Could not benchmark HTTP: {e}"),
+    }
     Ok(())
 }
 
 fn bench_memory() -> anyhow::Result<()> {
     println!("Memory Benchmark");
     match BenchmarkRunner::bench_memory() {
-        Ok(result) => println!("  Memory usage: {:.1} MB", result.ops_per_sec / 1_048_576.0),
+        Ok(result) => println!("  Memory usage: {:.1} MB", result.ops_per_sec / (1024.0 * 1024.0)),
         Err(e) => println!("  Could not measure memory: {e}"),
     }
     Ok(())

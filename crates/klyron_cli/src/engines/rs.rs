@@ -4,7 +4,6 @@ pub struct RsEngine {
     process: EngineProcess,
 }
 
-#[allow(dead_code)]
 impl RsEngine {
     pub fn new() -> anyhow::Result<Self> {
         let path = find_engine_path("klyron-engine-rust");
@@ -28,8 +27,8 @@ impl RsEngine {
 
     pub fn run_file(&mut self, path: &str) -> anyhow::Result<EngineOutput> {
         self.process.communicate(&EngineInput {
-            action: "file".into(), code: Some(path.into()),
-            args: None, filename: None, project: None, files: None,
+            action: "file".into(), code: None,
+            args: None, filename: Some(path.into()), project: None, files: None,
         })
     }
 

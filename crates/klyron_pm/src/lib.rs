@@ -1,11 +1,9 @@
 use hex;
-use once_cell::sync::Lazy;
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use thiserror::Error;
 
 // ── Errors ───────────────────────────────────────────────────────────────────
@@ -54,8 +52,11 @@ impl PackageManagerKind {
     if dir.join("yarn.lock").exists() {
       return Self::Yarn;
     }
-    if dir.join("bun.lockb").exists() {
+    if dir.join("bun.lock").exists() || dir.join("bun.lockb").exists() {
       return Self::Bun;
+    }
+    if dir.join("npm-shrinkwrap.json").exists() {
+      return Self::Npm;
     }
     Self::Npm
   }
@@ -340,8 +341,6 @@ pub struct OutdatedPackage {
 }
 
 // ── Dependency Resolution ────────────────────────────────────────────────────
-
-static RESOLVER_CACHE: Lazy<Mutex<HashMap<String, Vec<String>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn resolve_version(name: &str, constraint: &str) -> Result<String, PmError> {
   // For testing and offline: simulate version resolution

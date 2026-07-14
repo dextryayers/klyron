@@ -1,6 +1,10 @@
+use std::ffi::OsStr;
+use std::fs;
 use std::path::Path;
+use std::process::Stdio;
 use async_trait::async_trait;
 use anyhow::Result;
+use tokio::process::Command;
 use crate::{FrameworkAdapter, BuildOptions, ScaffoldOptions, FrameworkKind};
 
 pub struct WordPressAdapter;
@@ -34,25 +38,83 @@ impl FrameworkAdapter for WordPressAdapter {
     fn kind(&self) -> FrameworkKind { FrameworkKind::Fullstack }
 
     async fn dev(&self, dir: &Path, port: Option<u16>) -> Result<()> {
-        let mut cmd = tokio::process::Command::new("php");
-        cmd.args(["-S", format!("localhost:{}", port.unwrap_or(8000)).as_str(), "-t", dir.to_str().unwrap_or(".")])
+        let host = format!("localhost:{}", port.unwrap_or(8000));
+        let doc_root = dir.to_str().unwrap_or(".");
+        let mut cmd = Command::new("php");
+        cmd.args(["-S", &host, "-t", doc_root])
             .current_dir(dir);
-        cmd.status().await?; Ok(())
+        cmd.status().await?;
+        Ok(())
     }
 
     async fn build(&self, _dir: &Path, _opts: BuildOptions) -> Result<()> { Ok(()) }
 
     async fn test(&self, _dir: &Path, _filter: Option<&str>) -> Result<()> {
-        println!("WordPress testing: use `wp scaffold plugin-tests` for plugin testing.");
+        let status = Command::new("wp")
+            .args(["core", "version", "--allow-root"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status().await?;
+        if status.success() {
+            println!("WordPress core installed and reachable.");
+        } else {
+            println!("WordPress core not found. Run `wp core download` first.");
+        }
         Ok(())
     }
 
-    async fn lint(&self, _dir: &Path, _fix: bool) -> Result<()> { Ok(()) }
+    async fn lint(&self, dir: &Path, _fix: bool) -> Result<()> {
+        fn visit_php(dir: &Path) -> Result<()> {
+            for entry in fs::read_dir(dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_dir() {
+                    let _ = visit_php(&path);
+                } else if path.extension() == Some(OsStr::new("php")) {
+                    let output = std::process::Command::new("php")
+                        .args(["-l", path.to_str().unwrap_or("")])
+                        .output()?;
+                    if !output.status.success() {
+                        print!("{}", String::from_utf8_lossy(&output.stderr));
+                    }
+                }
+            }
+            Ok(())
+        }
+        visit_php(dir)
+    }
 
-    async fn format(&self, _dir: &Path, _write: bool) -> Result<()> { Ok(()) }
+    async fn format(&self, dir: &Path, write: bool) -> Result<()> {
+        let has_phpcbf = Command::new("which")
+            .arg("phpcbf")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status().await
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if has_phpcbf && write {
+            let mut cmd = Command::new("phpcbf");
+            cmd.arg(dir.to_str().unwrap_or("."));
+            let status = cmd.status().await?;
+            if status.success() {
+                println!("PHP files formatted with phpcbf.");
+            }
+        } else if has_phpcbf {
+            let mut cmd = Command::new("phpcbf");
+            cmd.args(["--dry-run", dir.to_str().unwrap_or(".")]);
+            let status = cmd.status().await?;
+            if status.success() {
+                println!("PHP files are properly formatted.");
+            }
+        } else {
+            println!("phpcbf not available. Install PHP_CodeSniffer with: composer global require squizlabs/php_codesniffer");
+        }
+        Ok(())
+    }
 
-    fn external_scaffold_command(&self, _name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
-        None
+    fn external_scaffold_command(&self, _name: &str, version: Option<&str>) -> Option<(String, Vec<String>)> {
+        let wp_ver = version.map(version_wp).unwrap_or("6.7.2");
+        Some(("wp".to_string(), vec!["core".to_string(), "download".to_string(), format!("--version={}", wp_ver)]))
     }
 
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {

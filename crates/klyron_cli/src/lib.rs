@@ -294,48 +294,12 @@ pub enum Commands {
     Doctor,
     Info { #[command(flatten)] args: InfoArgs },
     Version,
-    Clean,
+    Clean { #[arg(long)] yes: bool },
     Telemetry { #[command(flatten)] args: commands::utils::TelemetryArgs },
     Config { #[command(flatten)] args: commands::utils::ConfigArgs },
     Laravel { #[command(subcommand)] action: commands::laravel::LaravelCommand },
     Serve { #[arg(long, default_value = "localhost")] host: String, #[arg(long, default_value_t = 3000)] port: u16, #[arg(long)] dir: Option<PathBuf>, #[arg(long)] watch: bool },
     Completions { shell: clap_complete::Shell },
-}
-
-// ── Dispatch Table ────────────────────────────────────────────────────────
-
-type CmdFn = fn(Commands) -> anyhow::Result<()>;
-
-static COMMAND_TABLE: Lazy<Vec<(&'static str, CmdFn)>> = Lazy::new(|| {
-    vec![
-        ("eval", dispatch_eval as CmdFn),
-        ("info", dispatch_info as CmdFn),
-        ("create", dispatch_create as CmdFn),
-    ]
-});
-
-fn dispatch_eval(cmd: Commands) -> anyhow::Result<()> {
-    if let Commands::Eval { args } = cmd {
-        commands::runtime::run_eval(&args.code, args.module, all_extensions())
-    } else {
-        unreachable!()
-    }
-}
-
-fn dispatch_info(cmd: Commands) -> anyhow::Result<()> {
-    if let Commands::Info { args } = cmd {
-        handle_info(args.json)
-    } else {
-        unreachable!()
-    }
-}
-
-fn dispatch_create(cmd: Commands) -> anyhow::Result<()> {
-    if let Commands::Create { args } = cmd {
-        handle_create(args)
-    } else {
-        unreachable!()
-    }
 }
 
 // ── Info handler ──────────────────────────────────────────────────────────
@@ -472,10 +436,6 @@ pub fn run_cli() -> anyhow::Result<()> {
 // ── Dispatch ──────────────────────────────────────────────────────────────
 
 pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>) -> anyhow::Result<()> {
-    if let Some(&handler) = COMMAND_TABLE.iter().find(|(name, _)| variant_name(&cmd) == *name).map(|(_, f)| f) {
-        return handler(cmd);
-    }
-
     match cmd {
         Commands::Eval { args } => {
             if let Some(eng) = engine {
@@ -667,7 +627,7 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>) -> anyhow:
         Commands::Update => commands::pm::run_update(),
         Commands::Audit => commands::pm::run_audit(),
         Commands::Dedupe => commands::pm::run_dedupe(),
-        Commands::Publish { .. } => commands::registry::run_publish(),
+        Commands::Publish { args } => commands::registry::run_publish(&args),
         Commands::Unpublish { args } => commands::registry::run_unpublish(&args.name),
         Commands::Login { args } => commands::registry::run_login(args.registry.as_deref()),
         Commands::Logout { args } => commands::registry::run_logout(args.registry.as_deref()),
@@ -688,7 +648,7 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>) -> anyhow:
         Commands::Upgrade => commands::utils::run_upgrade(),
         Commands::Doctor => commands::utils::run_doctor(),
         Commands::Version => commands::utils::run_version(),
-        Commands::Clean => commands::utils::run_clean(),
+        Commands::Clean { yes } => commands::utils::run_clean(yes),
         Commands::Telemetry { args } => commands::utils::run_telemetry(args.enabled),
         Commands::Config { args } => commands::utils::run_config(args.key, args.value),
         Commands::Serve { host, port, dir, watch } => {
@@ -713,15 +673,6 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>) -> anyhow:
     }
 }
 
-fn variant_name(cmd: &Commands) -> &'static str {
-    match cmd {
-        Commands::Eval { .. } => "eval",
-        Commands::Info { .. } => "info",
-        Commands::Create { .. } => "create",
-        _ => "",
-    }
-}
-
 // ── Engine helpers ────────────────────────────────────────────────────────
 
 fn run_engine_watch<F>(name: &str, source: &str, watch: bool, f: F) -> anyhow::Result<()>
@@ -740,19 +691,25 @@ where
         });
         return Ok(());
     }
-    let path = PathBuf::from(source);
-    if path.exists() {
-        let code = std::fs::read_to_string(&path)?;
+        let path = PathBuf::from(source);
+        if path.exists() {
+            let code = std::fs::read_to_string(&path)?;
+            let mut eng = new_engine(name)?;
+            let output = eng_exec(&mut eng, name, &code)?;
+            print_engine_output(&output);
+            if output.exit_code != 0 {
+                std::process::exit(output.exit_code);
+            }
+            return Ok(());
+        }
         let mut eng = new_engine(name)?;
-        let output = eng_exec(&mut eng, name, &code)?;
+        let output = eng_exec(&mut eng, name, source)?;
         print_engine_output(&output);
-        std::process::exit(output.exit_code);
+        if output.exit_code != 0 {
+            std::process::exit(output.exit_code);
+        }
+        Ok(())
     }
-    let mut eng = new_engine(name)?;
-    let output = eng_exec(&mut eng, name, source)?;
-    print_engine_output(&output);
-    std::process::exit(output.exit_code);
-}
 
 fn new_engine(name: &str) -> anyhow::Result<Box<dyn EngineTrait>> {
     match name {

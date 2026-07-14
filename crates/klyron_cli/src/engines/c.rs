@@ -4,7 +4,6 @@ pub struct CEngine {
     process: EngineProcess,
 }
 
-#[allow(dead_code)]
 impl CEngine {
     pub fn new() -> anyhow::Result<Self> {
         let path = find_engine_path("klyron-engine-c");
@@ -23,6 +22,13 @@ impl CEngine {
         self.process.communicate(&EngineInput {
             action: "eval".into(), code: Some(expr.into()),
             args: None, filename: None, project: None, files: None,
+        })
+    }
+
+    pub fn run_file(&mut self, path: &str) -> anyhow::Result<EngineOutput> {
+        self.process.communicate(&EngineInput {
+            action: "file".into(), code: None,
+            args: None, filename: Some(path.into()), project: None, files: None,
         })
     }
 

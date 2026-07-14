@@ -5,7 +5,6 @@ pub struct RbEngine {
     process: EngineProcess,
 }
 
-#[allow(dead_code)]
 impl RbEngine {
     pub fn new() -> anyhow::Result<Self> {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -33,8 +32,8 @@ impl RbEngine {
 
     pub fn run_file(&mut self, path: &str) -> anyhow::Result<EngineOutput> {
         self.process.communicate(&EngineInput {
-            action: "file".into(), code: Some(path.into()),
-            args: None, filename: None, project: None, files: None,
+            action: "file".into(), code: None,
+            args: None, filename: Some(path.into()), project: None, files: None,
         })
     }
 

@@ -67,6 +67,7 @@ repository = "https://github.com/aniipid/klyronjs"
 readme = "README.md"
 
 [workspace.dependencies]
+deno_core = "0.403"
 deno_error = "0.7"
 wasmtime = "28"
 wasmtime-wasi = "28"

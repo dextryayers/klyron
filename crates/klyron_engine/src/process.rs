@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::time::Duration;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileEntry {
@@ -58,21 +59,46 @@ impl EngineProcess {
     }
 
     pub fn communicate(&mut self, input: &EngineInput) -> anyhow::Result<EngineOutput> {
+        self.communicate_with_timeout(input, Duration::from_secs(30))
+    }
+
+    pub fn communicate_with_timeout(&mut self, input: &EngineInput, timeout: Duration) -> anyhow::Result<EngineOutput> {
         let json = serde_json::to_string(input)?;
         self.stdin.write_all(json.as_bytes())?;
         self.stdin.write_all(b"\n")?;
         self.stdin.flush()?;
 
         let mut line = String::new();
-        self.stdout.read_line(&mut line)?;
-        if line.is_empty() {
-            let exit = self.child.try_wait().ok().flatten();
-            match exit {
-                Some(status) => anyhow::bail!("Engine exited prematurely with code: {}", status),
-                None => anyhow::bail!("Engine closed stdout unexpectedly"),
+        let start = std::time::Instant::now();
+        loop {
+            if start.elapsed() > timeout {
+                let _ = self.child.kill();
+                anyhow::bail!("Engine timed out after {:?}", timeout);
             }
+            if let Some(status) = self.child.try_wait().ok().flatten() {
+                let _ = self.stdin.write_all(b"\n");
+                let _ = self.stdin.flush();
+                self.stdout.read_line(&mut line).ok();
+                let stderr = {
+                    let mut buf = String::new();
+                    if let Some(mut stderr) = self.child.stderr.take().map(|s| BufReader::new(s)) {
+                        stderr.read_to_string(&mut buf).ok();
+                    }
+                    buf
+                };
+                if !line.trim().is_empty() {
+                    if let Ok(output) = serde_json::from_str::<EngineOutput>(&line.trim().to_string()) {
+                        return Ok(EngineOutput { stderr, ..output });
+                    }
+                }
+                anyhow::bail!("Engine exited prematurely with code: {}", status);
+            }
+            self.stdout.read_line(&mut line).ok();
+            if !line.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
-
         line = line.trim().to_string();
         if line.is_empty() {
             anyhow::bail!("Engine returned empty response");
@@ -93,6 +119,17 @@ impl Drop for EngineProcess {
 }
 
 pub fn find_engine_path(name: &str) -> String {
-    let out_dir = std::env::var("OUT_DIR").unwrap_or_else(|_| "target/debug".to_string());
+    let out_dir = std::env::var("OUT_DIR").unwrap_or_else(|_| {
+        let cwd = std::env::current_dir().ok()
+            .and_then(|p| p.parent().map(|pp| pp.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("target"));
+        let release = cwd.join("target/release");
+        let debug = cwd.join("target/debug");
+        if release.join(name).exists() {
+            release.to_string_lossy().to_string()
+        } else {
+            debug.to_string_lossy().to_string()
+        }
+    });
     Path::new(&out_dir).join(name).to_string_lossy().to_string()
 }

@@ -13,27 +13,42 @@ pub struct RemoveArgs {
 }
 
 pub fn run_add(packages: &[String], dev: bool) -> anyhow::Result<()> {
-    let pkg_list = packages.join(" ");
     let dir = std::env::current_dir()?;
     let project = crate::detect_project_type(&dir);
     let runner = crate::detect_package_runner(&dir);
 
     match project {
         "node" => {
-            let mut args = vec![runner, "install"];
+            let mut args = vec!["install"];
             if dev { args.push("--save-dev"); }
             for p in packages { args.push(p); }
-            crate::run_cmd_str(runner, &args[1..].iter().map(|s| s.to_string()).collect::<Vec<_>>(), &dir)
+            crate::run_cmd(runner, &args, &dir)
         }
-        "laravel" => crate::run_cmd("composer", &["require", &pkg_list], &dir),
-        "python" => crate::run_cmd("pip", &["install", &pkg_list], &dir),
+        "laravel" => {
+            let mut args = vec!["require"];
+            for p in packages { args.push(p); }
+            crate::run_cmd("composer", &args, &dir)
+        }
+        "python" => {
+            let mut args = vec!["install"];
+            for p in packages { args.push(p); }
+            crate::run_cmd("pip", &args, &dir)
+        }
         "ruby" => {
-            let mut args = vec!["add".to_string()];
-            for p in packages { args.push(p.clone()); }
-            crate::run_cmd_str("bundle", &args, &dir)
+            let mut args = vec!["add"];
+            for p in packages { args.push(p); }
+            crate::run_cmd("bundle", &args, &dir)
         }
-        "rust" => crate::run_cmd("cargo", &["add", &pkg_list], &dir),
-        "go" => crate::run_cmd("go", &["get", &pkg_list], &dir),
+        "rust" => {
+            let mut args = vec!["add"];
+            for p in packages { args.push(p); }
+            crate::run_cmd("cargo", &args, &dir)
+        }
+        "go" => {
+            let mut args = vec!["get"];
+            for p in packages { args.push(p); }
+            crate::run_cmd("go", &args, &dir)
+        }
         _ => anyhow::bail!("Package add not supported for {project}"),
     }
 }
@@ -84,8 +99,9 @@ pub fn run_remove(packages: &[String]) -> anyhow::Result<()> {
 pub fn run_update() -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     let project = crate::detect_project_type(&dir);
+    let runner = crate::detect_package_runner(&dir);
     match project {
-        "node" => crate::run_cmd("npm", &["update"], &dir),
+        "node" => crate::run_cmd(runner, &["update"], &dir),
         "laravel" => crate::run_cmd("composer", &["update"], &dir),
         "rust" => crate::run_cmd("cargo", &["update"], &dir),
         "python" => crate::run_cmd("pip", &["install", "--upgrade", "-r", "requirements.txt"], &dir),
@@ -97,8 +113,9 @@ pub fn run_update() -> anyhow::Result<()> {
 pub fn run_outdated() -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     let project = crate::detect_project_type(&dir);
+    let runner = crate::detect_package_runner(&dir);
     match project {
-        "node" => crate::run_cmd("npm", &["outdated"], &dir),
+        "node" => crate::run_cmd(runner, &["outdated"], &dir),
         "laravel" => crate::run_cmd("composer", &["outdated"], &dir),
         "rust" => crate::run_cmd("cargo", &["outdated"], &dir),
         "python" => crate::run_cmd("pip", &["list", "--outdated"], &dir),
@@ -111,8 +128,9 @@ pub fn run_outdated() -> anyhow::Result<()> {
 pub fn run_audit() -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     let project = crate::detect_project_type(&dir);
+    let runner = crate::detect_package_runner(&dir);
     match project {
-        "node" => crate::run_cmd("npm", &["audit"], &dir),
+        "node" => crate::run_cmd(runner, &["audit"], &dir),
         "rust" => crate::run_cmd("cargo", &["audit"], &dir),
         _ => {
             println!("Audit not configured for {project}, running npm audit...");
@@ -124,8 +142,9 @@ pub fn run_audit() -> anyhow::Result<()> {
 pub fn run_dedupe() -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     let project = crate::detect_project_type(&dir);
+    let runner = crate::detect_package_runner(&dir);
     match project {
-        "node" => crate::run_cmd("npm", &["dedupe"], &dir),
+        "node" => crate::run_cmd(runner, &["dedupe"], &dir),
         _ => anyhow::bail!("Dedupe not supported for {project}"),
     }
 }

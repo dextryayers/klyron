@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 use async_trait::async_trait;
 use anyhow::Result;
@@ -48,6 +47,10 @@ impl FrameworkAdapter for ZodiosAdapter {
             .args(if write { ["prettier", "--write", "."] } else { ["prettier", "--check", "."] })
             .current_dir(dir).status().await?;
         Ok(())
+    }
+
+    fn external_scaffold_command(&self, _name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        None
     }
 
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {

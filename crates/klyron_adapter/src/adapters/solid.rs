@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 use async_trait::async_trait;
 use anyhow::Result;
@@ -51,6 +50,10 @@ impl FrameworkAdapter for SolidAdapter {
             .args(if write { ["prettier", "--write", "."] } else { ["prettier", "--check", "."] })
             .current_dir(dir).status().await?;
         Ok(())
+    }
+
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("npx".into(), vec!["create-vite@latest".into(), name.into(), "--template".into(), "solid-ts".into()]))
     }
 
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {

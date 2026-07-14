@@ -94,63 +94,37 @@ pub fn run_upgrade() -> anyhow::Result<()> {
 }
 
 pub fn run_doctor() -> anyhow::Result<()> {
-    println!("🔍 Klyron System Check\n");
+    println!("Klyron System Check\n");
     let checks = [
         ("node", "node --version"),
         ("npm", "npm --version"),
-        ("php", "php --version | head -1"),
-        ("composer", "composer --version 2>/dev/null | head -1 || echo 'not found'"),
-        ("python3", "python3 --version 2>&1 || echo 'not found'"),
-        ("ruby", "ruby --version 2>&1 || echo 'not found'"),
-        ("go", "go version 2>&1 || echo 'not found'"),
-        ("rustc", "rustc --version 2>&1 || echo 'not found'"),
-        ("cargo", "cargo --version 2>&1 || echo 'not found'"),
-        ("zig", "zig version 2>&1 || echo 'not found'"),
-        ("gcc/cc", "cc --version 2>&1 | head -1 || echo 'not found'"),
-        ("g++/c++", "c++ --version 2>&1 | head -1 || echo 'not found'"),
-        ("deno", "deno --version 2>&1 | head -1 || echo 'not found'"),
+        ("php", "php --version"),
+        ("composer", "composer --version"),
+        ("python3", "python3 --version"),
+        ("ruby", "ruby --version"),
+        ("go", "go version"),
+        ("rustc", "rustc --version"),
+        ("cargo", "cargo --version"),
+        ("zig", "zig version"),
+        ("cc", "cc --version"),
+        ("c++", "c++ --version"),
+        ("deno", "deno --version"),
     ];
     for (name, cmd_str) in &checks {
         let parts: Vec<&str> = cmd_str.split_whitespace().collect();
+        if parts.is_empty() {
+            println!("  ?    {name:12} (invalid check)");
+            continue;
+        }
         let output = Command::new(parts[0]).args(&parts[1..]).output();
         match output {
             Ok(o) if o.status.success() => {
-                let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                println!("  ✅ {name:12} {ver}");
+                let ver = String::from_utf8_lossy(&o.stdout).lines().next().unwrap_or("").trim().to_string();
+                println!("  OK   {name:12} {ver}");
             }
-            _ => println!("  ❌ {name:12} not found"),
+            _ => println!("  MISS {name:12} not found"),
         }
     }
-    Ok(())
-}
-
-pub fn run_info() -> anyhow::Result<()> {
-    println!("Klyron v{}", env!("CARGO_PKG_VERSION"));
-    println!("Universal Polyglot Runtime & Toolchain\n");
-    println!("Engines:");
-    println!("  JavaScript/TypeScript   ✓ built-in (Deno Core / V8)");
-    println!("  Node.js                 ✓ engine.js");
-    println!("  C                       ✓ klyron-engine-c");
-    println!("  C++                     ✓ klyron-engine-cpp");
-    println!("  TypeScript              ✓ engine.ts");
-    println!("  PHP                     ✓ engine.php");
-    println!("  Python                  ✓ engine.py");
-    println!("  Ruby                    ✓ engine.rb");
-    println!("  Go                      ✓ engine.go");
-    println!("  Rust                    ✓ engine.rs");
-    println!("  Zig                     ✓ engine.zig\n");
-    println!("Frameworks:");
-    for fw in ["Next.js", "React (Vite)", "Angular", "Vue", "Svelte", "SvelteKit",
-               "Express", "Fastify", "NestJS", "Nuxt", "Remix", "Astro", "Hono",
-               "AdonisJS", "Laravel", "Django", "Rails", "Actix-web", "Axum", "Rocket",
-               "Solid", "Qwik", "Preact", "Lit", "Koa", "Hapi",
-               "Go Gin", "Go Fiber", "Go Echo", "FastAPI", "Flask", "Leptos", "Tauri"] {
-        println!("  klyron create {}", fw.to_lowercase().replace(' ', "-").replace("--", "-").replace('.', ""));
-    }
-    println!("\nPackage Managers:");
-    println!("  npm, pnpm, yarn, bun");
-    println!("\nRegistries:");
-    println!("  npm, PyPI, RubyGems, crates.io, Packagist, Go proxy");
     Ok(())
 }
 
@@ -161,9 +135,9 @@ pub fn run_version() -> anyhow::Result<()> {
 
 pub fn run_telemetry(enabled: Option<bool>) -> anyhow::Result<()> {
     match enabled {
-        Some(true) => { println!("📊 Telemetry enabled"); }
-        Some(false) => { println!("📊 Telemetry disabled"); }
-        None => { println!("📊 Telemetry status: disabled (opt-in in Phase 10)"); }
+        Some(true) => { println!("Telemetry enabled"); }
+        Some(false) => { println!("Telemetry disabled"); }
+        None => { println!("Telemetry status: disabled"); }
     }
     Ok(())
 }
@@ -186,9 +160,27 @@ pub fn run_config(key: Option<String>, value: Option<String>) -> anyhow::Result<
     Ok(())
 }
 
-pub fn run_clean() -> anyhow::Result<()> {
+pub fn run_clean(yes: bool) -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     let dirs_to_clean = ["node_modules", "dist", "build", ".next", ".cache", "target"];
+    if !yes {
+        println!("This will remove the following directories:");
+        for d in &dirs_to_clean {
+            let path = dir.join(d);
+            if path.exists() {
+                println!("  - {}", d);
+            }
+        }
+        print!("Continue? [y/N] ");
+        use std::io::Write;
+        std::io::stdout().flush()?;
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
     for d in &dirs_to_clean {
         let path = dir.join(d);
         if path.exists() {
@@ -196,6 +188,6 @@ pub fn run_clean() -> anyhow::Result<()> {
             println!("  Removed: {}", d);
         }
     }
-    println!("✅ Clean complete");
+    println!("Clean complete");
     Ok(())
 }

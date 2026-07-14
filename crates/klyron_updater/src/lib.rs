@@ -109,11 +109,6 @@ impl Updater {
         self.rollout_percentage = percentage.min(100);
     }
 
-    fn is_rolled_out(&self) -> bool {
-        let id = simple_hash(&self.current_version) % 100;
-        id < self.rollout_percentage as u64
-    }
-
     pub async fn check_version(&self) -> Result<UpdateStatus> {
         let url = format!(
             "https://api.github.com/repos/{}/{}/releases/latest",
@@ -343,14 +338,6 @@ impl Updater {
     pub fn channel(&self) -> UpdateChannel {
         self.channel
     }
-}
-
-fn simple_hash(s: &str) -> u64 {
-    let mut h = 5381u64;
-    for b in s.bytes() {
-        h = h.wrapping_mul(33).wrapping_add(b as u64);
-    }
-    h
 }
 
 fn chrono_now() -> String {

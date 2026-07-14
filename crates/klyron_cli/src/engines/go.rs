@@ -4,7 +4,6 @@ pub struct GoEngine {
     process: EngineProcess,
 }
 
-#[allow(dead_code)]
 impl GoEngine {
     pub fn new() -> anyhow::Result<Self> {
         let path = find_engine_path("klyron-engine-go");
@@ -21,8 +20,8 @@ impl GoEngine {
 
     pub fn run_file(&mut self, path: &str) -> anyhow::Result<EngineOutput> {
         self.process.communicate(&EngineInput {
-            action: "file".into(), code: Some(path.into()),
-            args: None, filename: None, project: None, files: None,
+            action: "file".into(), code: None,
+            args: None, filename: Some(path.into()), project: None, files: None,
         })
     }
 
@@ -30,6 +29,20 @@ impl GoEngine {
         self.process.communicate(&EngineInput {
             action: "eval".into(), code: Some(expr.into()),
             args: None, filename: None, project: None, files: None,
+        })
+    }
+
+    pub fn check(&mut self, project: &str) -> anyhow::Result<EngineOutput> {
+        self.process.communicate(&EngineInput {
+            action: "check".into(), code: None,
+            args: None, filename: None, project: Some(project.into()), files: None,
+        })
+    }
+
+    pub fn build(&mut self, args: Option<&str>, project: Option<&str>) -> anyhow::Result<EngineOutput> {
+        self.process.communicate(&EngineInput {
+            action: "build".into(), code: None,
+            args: args.map(|s| s.into()), filename: None, project: project.map(|s| s.into()), files: None,
         })
     }
 

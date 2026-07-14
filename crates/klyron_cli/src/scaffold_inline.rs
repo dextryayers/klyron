@@ -419,13 +419,13 @@ pub(crate) fn scaffold_rust_project(name: &str, dir: &Path, kind: &str) -> anyho
         match kind {
             "actix-web" => {
                 crate::write_files(&project_dir, vec![
-                    ("Cargo.toml", r#"[package]
-name = "actix-app"
+                    ("Cargo.toml", &r#"[package]
+name = "REPLACE_ME"
 version = "0.1.0"
 edition = "2021"
 [dependencies]
 actix-web = "4"
-"#),
+"#.replace("REPLACE_ME", name)),
                     ("src/main.rs", r#"use actix_web::{get, App, HttpResponse, HttpServer, Responder};
 #[get("/")]
 async fn hello() -> impl Responder { HttpResponse::Ok().body("Hello, world!") }
@@ -437,14 +437,14 @@ async fn main() -> std::io::Result<()> {
             }
             "axum" => {
                 crate::write_files(&project_dir, vec![
-                    ("Cargo.toml", r#"[package]
-name = "axum-app"
+                    ("Cargo.toml", &r#"[package]
+name = "REPLACE_ME"
 version = "0.1.0"
 edition = "2021"
 [dependencies]
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
-"#),
+"#.replace("REPLACE_ME", name)),
                     ("src/main.rs", r#"use axum::{Router, routing::get, response::Html};
 async fn hello() -> Html<&'static str> { Html("<h1>Hello!</h1>") }
 #[tokio::main]
@@ -457,13 +457,13 @@ async fn main() {
             }
             "rocket" => {
                 crate::write_files(&project_dir, vec![
-                    ("Cargo.toml", r#"[package]
-name = "rocket-app"
+                    ("Cargo.toml", &r#"[package]
+name = "REPLACE_ME"
 version = "0.1.0"
 edition = "2021"
 [dependencies]
 rocket = "0.5"
-"#),
+"#.replace("REPLACE_ME", name)),
                     ("src/main.rs", r#"#[macro_use] extern crate rocket;
 #[get("/")]
 fn index() -> &'static str { "Hello, world!" }

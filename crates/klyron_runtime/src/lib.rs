@@ -2,13 +2,11 @@
 
 pub use klyron_core::*;
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use anyhow::Result;
-use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
@@ -129,12 +127,10 @@ impl RuntimeHandle {
     }
 
     pub fn execute_with_timeout(&mut self, name: &str, source: &str, timeout: Duration) -> Result<String> {
-        let rt = self.runtime.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("Runtime not available"))?;
         let name_owned = name.to_string();
         let source_owned = source.to_string();
         let (tx, rx) = std::sync::mpsc::channel();
-        let handle = std::thread::spawn(move || {
+        let _handle = std::thread::spawn(move || {
             let mut local_rt = SendRuntime::new(vec![], true, false)
                 .expect("Failed to create timeout runtime");
             let result = local_rt.execute_script(&name_owned, &source_owned);

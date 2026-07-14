@@ -1,6 +1,6 @@
+use crate::commands::helpers;
 use clap::Subcommand;
 use std::path::Path;
-use std::process::Command;
 
 /// Unified ORM command namespace
 #[derive(Subcommand)]
@@ -27,7 +27,7 @@ pub fn run_orm(cmd: OrmCommand) -> anyhow::Result<()> {
             println!("  kysely     - Kysely (kysely.ts)");
             println!("  knex       - Knex (knexfile.ts)");
             let dir = std::env::current_dir().unwrap_or_default();
-            let detected = detect_orm_in_dir(&dir);
+            let detected = helpers::detect_orm(&dir);
             if detected != "unknown" {
                 println!("\nDetected ORM in current directory: {detected}");
             } else {
@@ -43,23 +43,13 @@ pub fn run_orm(cmd: OrmCommand) -> anyhow::Result<()> {
     }
 }
 
-fn detect_orm_in_dir(dir: &Path) -> String {
-    if dir.join("schema.prisma").exists() || dir.join("prisma/schema.prisma").exists() { return "prisma".into(); }
-    if dir.join("drizzle.config.ts").exists() || dir.join("drizzle.config.js").exists() { return "drizzle".into(); }
-    if dir.join("ormconfig.json").exists() || dir.join("ormconfig.ts").exists() { return "typeorm".into(); }
-    if dir.join("mikro-orm.config.ts").exists() || dir.join("mikro-orm.config.js").exists() { return "mikroorm".into(); }
-    if dir.join("knexfile.ts").exists() || dir.join("knexfile.js").exists() { return "knex".into(); }
-    if dir.join("kysely.ts").exists() { return "kysely".into(); }
-    "unknown".to_string()
-}
-
 fn orm_init_direct(orm: &str, dir: &Path) -> anyhow::Result<()> {
     match orm {
-        "prisma" => run_npx(&["prisma", "init"], dir),
-        "drizzle" => run_npx(&["drizzle-kit", "init"], dir),
-        "typeorm" => run_npx(&["typeorm", "init"], dir),
-        "mikroorm" => run_npx(&["mikro-orm", "init"], dir),
-        "sequelize" => run_npx(&["sequelize", "cli", "init"], dir),
+        "prisma" => helpers::run_npx(&["prisma", "init"], dir),
+        "drizzle" => helpers::run_npx(&["drizzle-kit", "init"], dir),
+        "typeorm" => helpers::run_npx(&["typeorm", "init"], dir),
+        "mikroorm" => helpers::run_npx(&["mikro-orm", "init"], dir),
+        "sequelize" => helpers::run_npx(&["sequelize", "cli", "init"], dir),
         "mongoose" => {
             std::fs::create_dir_all(dir.join("models"))?;
             std::fs::write(dir.join("models/index.js"),
@@ -82,7 +72,7 @@ const db = new Kysely<Database>({
 export { db };"#)?;
             Ok(())
         }
-        "knex" => run_npx(&["knex", "init"], dir),
+        "knex" => helpers::run_npx(&["knex", "init"], dir),
         _ => anyhow::bail!("Unknown ORM: {orm}. Supported: prisma, drizzle, typeorm, mikroorm, sequelize, mongoose, kysely, knex"),
     }
 }
@@ -107,23 +97,24 @@ pub enum PrismaAction {
 pub fn run_prisma(action: PrismaAction) -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     match action {
-        PrismaAction::Init => run_npx(&["prisma", "init"], &dir),
-        PrismaAction::Generate => run_npx(&["prisma", "generate"], &dir),
+        PrismaAction::Init => helpers::run_npx(&["prisma", "init"], &dir),
+        PrismaAction::Generate => helpers::run_npx(&["prisma", "generate"], &dir),
         PrismaAction::Migrate { name } => {
-            if let Some(n) = name { run_npx(&["prisma", "migrate", "dev", "--name", &n], &dir) }
-            else { run_npx(&["prisma", "migrate", "dev"], &dir) }
+            if let Some(n) = name { helpers::run_npx(&["prisma", "migrate", "dev", "--name", &n], &dir) }
+            else { helpers::run_npx(&["prisma", "migrate", "dev"], &dir) }
         }
-        PrismaAction::Studio => run_npx(&["prisma", "studio"], &dir),
-        PrismaAction::DbPush => run_npx(&["prisma", "db", "push"], &dir),
-        PrismaAction::DbPull => run_npx(&["prisma", "db", "pull"], &dir),
-        PrismaAction::Seed { class } => {
-            if let Some(c) = class { run_npx(&["prisma", "db", "seed", "--", "--class", &c], &dir) }
-            else { run_npx(&["prisma", "db", "seed"], &dir) }
+        PrismaAction::Studio => helpers::run_npx(&["prisma", "studio"], &dir),
+        PrismaAction::DbPush => helpers::run_npx(&["prisma", "db", "push"], &dir),
+        PrismaAction::DbPull => helpers::run_npx(&["prisma", "db", "pull"], &dir),
+        PrismaAction::Seed { .. } => {
+            helpers::run_npx(&["prisma", "db", "seed"], &dir)
         }
-        PrismaAction::Reset => run_npx(&["prisma", "migrate", "reset", "--force"], &dir),
-        PrismaAction::Rollback { step: _ } => run_npx(&["prisma", "migrate", "dev", "--create-only"], &dir),
-        PrismaAction::Format => run_npx(&["prisma", "format"], &dir),
-        PrismaAction::Validate => run_npx(&["prisma", "validate"], &dir),
+        PrismaAction::Reset => helpers::run_npx(&["prisma", "migrate", "reset", "--force"], &dir),
+        PrismaAction::Rollback { step: _ } => {
+            helpers::run_npx(&["prisma", "migrate", "dev"], &dir)
+        }
+        PrismaAction::Format => helpers::run_npx(&["prisma", "format"], &dir),
+        PrismaAction::Validate => helpers::run_npx(&["prisma", "validate"], &dir),
     }
 }
 
@@ -145,15 +136,15 @@ pub enum DrizzleAction {
 pub fn run_drizzle(action: DrizzleAction) -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     match action {
-        DrizzleAction::Init => run_npx(&["drizzle-kit", "init"], &dir),
-        DrizzleAction::Generate => run_npx(&["drizzle-kit", "generate"], &dir),
-        DrizzleAction::Migrate => run_npx(&["drizzle-kit", "migrate"], &dir),
-        DrizzleAction::Studio => run_npx(&["drizzle-kit", "studio"], &dir),
-        DrizzleAction::Push => run_npx(&["drizzle-kit", "push"], &dir),
-        DrizzleAction::Pull => run_npx(&["drizzle-kit", "pull"], &dir),
-        DrizzleAction::Check => run_npx(&["drizzle-kit", "check"], &dir),
-        DrizzleAction::Up => run_npx(&["drizzle-kit", "up"], &dir),
-        DrizzleAction::Down => run_npx(&["drizzle-kit", "down"], &dir),
+        DrizzleAction::Init => helpers::run_npx(&["drizzle-kit", "init"], &dir),
+        DrizzleAction::Generate => helpers::run_npx(&["drizzle-kit", "generate"], &dir),
+        DrizzleAction::Migrate => helpers::run_npx(&["drizzle-kit", "migrate"], &dir),
+        DrizzleAction::Studio => helpers::run_npx(&["drizzle-kit", "studio"], &dir),
+        DrizzleAction::Push => helpers::run_npx(&["drizzle-kit", "push"], &dir),
+        DrizzleAction::Pull => helpers::run_npx(&["drizzle-kit", "pull"], &dir),
+        DrizzleAction::Check => helpers::run_npx(&["drizzle-kit", "check"], &dir),
+        DrizzleAction::Up => helpers::run_npx(&["drizzle-kit", "up"], &dir),
+        DrizzleAction::Down => helpers::run_npx(&["drizzle-kit", "down"], &dir),
     }
 }
 
@@ -168,18 +159,34 @@ pub enum TypeOrmAction {
     SchemaSync,
     SchemaDrop,
     MigrationCreate { name: String },
+    Seed,
+    Studio,
+    Pull,
 }
 
 pub fn run_typeorm(action: TypeOrmAction) -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     match action {
-        TypeOrmAction::Init => run_npx(&["typeorm", "init"], &dir),
-        TypeOrmAction::MigrateGenerate { name } => run_npx(&["typeorm", "migration:generate", "-d", &name], &dir),
-        TypeOrmAction::MigrateRun => run_npx(&["typeorm", "migration:run"], &dir),
-        TypeOrmAction::MigrateRevert => run_npx(&["typeorm", "migration:revert"], &dir),
-        TypeOrmAction::SchemaSync => run_npx(&["typeorm", "schema:sync"], &dir),
-        TypeOrmAction::SchemaDrop => run_npx(&["typeorm", "schema:drop"], &dir),
-        TypeOrmAction::MigrationCreate { name } => run_npx(&["typeorm", "migration:create", &name], &dir),
+        TypeOrmAction::Init => helpers::run_npx(&["typeorm", "init"], &dir),
+        TypeOrmAction::MigrateGenerate { name } => helpers::run_npx(&["typeorm", "migration:generate", "--name", &name], &dir),
+        TypeOrmAction::MigrateRun => helpers::run_npx(&["typeorm", "migration:run"], &dir),
+        TypeOrmAction::MigrateRevert => helpers::run_npx(&["typeorm", "migration:revert"], &dir),
+        TypeOrmAction::SchemaSync => helpers::run_npx(&["typeorm", "schema:sync"], &dir),
+        TypeOrmAction::SchemaDrop => helpers::run_npx(&["typeorm", "schema:drop"], &dir),
+        TypeOrmAction::MigrationCreate { name } => helpers::run_npx(&["typeorm", "migration:create", &name], &dir),
+        TypeOrmAction::Seed => {
+            println!("TypeORM does not have a built-in seed command.");
+            println!("Use `typeorm-seeding` package or write a custom seed script.");
+            Ok(())
+        }
+        TypeOrmAction::Studio => {
+            println!("TypeORM does not have a built-in studio command.");
+            println!("Use a GUI tool like DBeaver, TablePlus, or pgAdmin.");
+            Ok(())
+        }
+        TypeOrmAction::Pull => {
+            helpers::run_npx(&["typeorm", "model:sync"], &dir)
+        }
     }
 }
 
@@ -201,15 +208,15 @@ pub enum MikroOrmAction {
 pub fn run_mikroorm(action: MikroOrmAction) -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     match action {
-        MikroOrmAction::Init => run_npx(&["mikro-orm", "init"], &dir),
-        MikroOrmAction::MigrationCreate { name } => run_npx(&["mikro-orm", "migration:create", &name], &dir),
-        MikroOrmAction::MigrationUp => run_npx(&["mikro-orm", "migration:up"], &dir),
-        MikroOrmAction::MigrationDown => run_npx(&["mikro-orm", "migration:down"], &dir),
-        MikroOrmAction::MigrationList => run_npx(&["mikro-orm", "migration:list"], &dir),
-        MikroOrmAction::SchemaUpdate => run_npx(&["mikro-orm", "schema:update", "--run"], &dir),
-        MikroOrmAction::SchemaDrop => run_npx(&["mikro-orm", "schema:drop", "--run"], &dir),
-        MikroOrmAction::SeederRun => run_npx(&["mikro-orm", "seeder:run"], &dir),
-        MikroOrmAction::SeederCreate { name } => run_npx(&["mikro-orm", "seeder:create", &name], &dir),
+        MikroOrmAction::Init => helpers::run_npx(&["mikro-orm", "init"], &dir),
+        MikroOrmAction::MigrationCreate { name } => helpers::run_npx(&["mikro-orm", "migration:create", &name], &dir),
+        MikroOrmAction::MigrationUp => helpers::run_npx(&["mikro-orm", "migration:up"], &dir),
+        MikroOrmAction::MigrationDown => helpers::run_npx(&["mikro-orm", "migration:down"], &dir),
+        MikroOrmAction::MigrationList => helpers::run_npx(&["mikro-orm", "migration:list"], &dir),
+        MikroOrmAction::SchemaUpdate => helpers::run_npx(&["mikro-orm", "schema:update", "--run"], &dir),
+        MikroOrmAction::SchemaDrop => helpers::run_npx(&["mikro-orm", "schema:drop", "--run"], &dir),
+        MikroOrmAction::SeederRun => helpers::run_npx(&["mikro-orm", "seeder:run"], &dir),
+        MikroOrmAction::SeederCreate { name } => helpers::run_npx(&["mikro-orm", "seeder:create", &name], &dir),
     }
 }
 
@@ -227,21 +234,23 @@ pub enum SequelizeAction {
     SeedUndo,
     DbCreate,
     DbDrop,
+    Push,
 }
 
 pub fn run_sequelize(action: SequelizeAction) -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     match action {
-        SequelizeAction::Init => run_npx(&["sequelize", "init"], &dir),
-        SequelizeAction::MigrateGenerate { name } => run_npx(&["sequelize", "migration:generate", "--name", &name], &dir),
-        SequelizeAction::MigrateRun => run_npx(&["sequelize", "db:migrate"], &dir),
-        SequelizeAction::MigrateUndo => run_npx(&["sequelize", "db:migrate:undo"], &dir),
-        SequelizeAction::MigrateUndoAll => run_npx(&["sequelize", "db:migrate:undo:all"], &dir),
-        SequelizeAction::SeedGenerate { name } => run_npx(&["sequelize", "seed:generate", "--name", &name], &dir),
-        SequelizeAction::SeedRun => run_npx(&["sequelize", "db:seed:all"], &dir),
-        SequelizeAction::SeedUndo => run_npx(&["sequelize", "db:seed:undo"], &dir),
-        SequelizeAction::DbCreate => run_npx(&["sequelize", "db:create"], &dir),
-        SequelizeAction::DbDrop => run_npx(&["sequelize", "db:drop"], &dir),
+        SequelizeAction::Init => helpers::run_npx(&["sequelize", "init"], &dir),
+        SequelizeAction::MigrateGenerate { name } => helpers::run_npx(&["sequelize", "migration:generate", "--name", &name], &dir),
+        SequelizeAction::MigrateRun => helpers::run_npx(&["sequelize", "db:migrate"], &dir),
+        SequelizeAction::MigrateUndo => helpers::run_npx(&["sequelize", "db:migrate:undo"], &dir),
+        SequelizeAction::MigrateUndoAll => helpers::run_npx(&["sequelize", "db:migrate:undo:all"], &dir),
+        SequelizeAction::SeedGenerate { name } => helpers::run_npx(&["sequelize", "seed:generate", "--name", &name], &dir),
+        SequelizeAction::SeedRun => helpers::run_npx(&["sequelize", "db:seed:all"], &dir),
+        SequelizeAction::SeedUndo => helpers::run_npx(&["sequelize", "db:seed:undo"], &dir),
+        SequelizeAction::DbCreate => helpers::run_npx(&["sequelize", "db:create"], &dir),
+        SequelizeAction::DbDrop => helpers::run_npx(&["sequelize", "db:drop"], &dir),
+        SequelizeAction::Push => helpers::run_npx(&["sequelize", "db:migrate"], &dir),
     }
 }
 
@@ -269,11 +278,17 @@ module.exports = mongoose;
             Ok(())
         }
         MongooseAction::Generate { name } => {
-            let filename = format!("models/{}.js", name.to_lowercase());
+            let use_ts = dir.join("tsconfig.json").exists();
+            let ext = if use_ts { "ts" } else { "js" };
+            let filename = format!("models/{}.{}", name.to_lowercase(), ext);
             let model_path = dir.join(&filename);
             std::fs::create_dir_all(model_path.parent().unwrap())?;
-            std::fs::write(&model_path,
-                format!("const mongoose = require('mongoose');\nconst {{ Schema }} = mongoose;\n\nconst {name}Schema = new Schema({{\n  name: {{ type: String, required: true }},\n  createdAt: {{ type: Date, default: Date.now }},\n}});\n\nmodule.exports = mongoose.model('{name}', {name}Schema);\n"))?;
+            let content = if use_ts {
+                format!("import mongoose, {{ Schema, Document, Model }} from 'mongoose';\n\ninterface I{name} extends Document {{\n  name: string;\n  createdAt: Date;\n}}\n\nconst {name}Schema = new Schema<I{name}>({{\n  name: {{ type: String, required: true }},\n  createdAt: {{ type: Date, default: Date.now }},\n}});\n\nconst {name}: Model<I{name}> = mongoose.model<I{name}>('{name}', {name}Schema);\nexport default {name};\n")
+            } else {
+                format!("const mongoose = require('mongoose');\nconst {{ Schema }} = mongoose;\n\nconst {name}Schema = new Schema({{\n  name: {{ type: String, required: true }},\n  createdAt: {{ type: Date, default: Date.now }},\n}});\n\nmodule.exports = mongoose.model('{name}', {name}Schema);\n")
+            };
+            std::fs::write(&model_path, content)?;
             println!("Mongoose model created: {}", model_path.display());
             Ok(())
         }
@@ -327,12 +342,12 @@ export type { PersonTable };
             println!("kysely.ts created. Add your schema types.");
             Ok(())
         }
-        KyselyAction::Generate => run_npx(&["kysely", "generate"], &dir),
-        KyselyAction::MigrateLatest => run_npx(&["kysely", "migrate:latest"], &dir),
-        KyselyAction::MigrateUp => run_npx(&["kysely", "migrate:up"], &dir),
-        KyselyAction::MigrateDown => run_npx(&["kysely", "migrate:down"], &dir),
-        KyselyAction::MigrateList => run_npx(&["kysely", "migrate:list"], &dir),
-        KyselyAction::SeedRun => run_npx(&["kysely", "seed:run"], &dir),
+        KyselyAction::Generate => helpers::run_npx(&["kysely", "generate"], &dir),
+        KyselyAction::MigrateLatest => helpers::run_npx(&["kysely", "migrate:latest"], &dir),
+        KyselyAction::MigrateUp => helpers::run_npx(&["kysely", "migrate:up"], &dir),
+        KyselyAction::MigrateDown => helpers::run_npx(&["kysely", "migrate:down"], &dir),
+        KyselyAction::MigrateList => helpers::run_npx(&["kysely", "migrate:list"], &dir),
+        KyselyAction::SeedRun => helpers::run_npx(&["kysely", "seed:run"], &dir),
     }
 }
 
@@ -349,33 +364,35 @@ pub enum KnexAction {
     MigrateList,
     SeedMake { name: String },
     SeedRun,
+    Studio,
+    Pull,
 }
 
 pub fn run_knex(action: KnexAction) -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     match action {
-        KnexAction::Init => run_npx(&["knex", "init"], &dir),
-        KnexAction::MigrateMake { name } => run_npx(&["knex", "migrate:make", &name], &dir),
-        KnexAction::MigrateLatest => run_npx(&["knex", "migrate:latest"], &dir),
-        KnexAction::MigrateUp => run_npx(&["knex", "migrate:up"], &dir),
-        KnexAction::MigrateDown => run_npx(&["knex", "migrate:down"], &dir),
-        KnexAction::MigrateRollback => run_npx(&["knex", "migrate:rollback"], &dir),
-        KnexAction::MigrateList => run_npx(&["knex", "migrate:list"], &dir),
-        KnexAction::SeedMake { name } => run_npx(&["knex", "seed:make", &name], &dir),
-        KnexAction::SeedRun => run_npx(&["knex", "seed:run"], &dir),
+        KnexAction::Init => helpers::run_npx(&["knex", "init"], &dir),
+        KnexAction::MigrateMake { name } => helpers::run_npx(&["knex", "migrate:make", &name], &dir),
+        KnexAction::MigrateLatest => helpers::run_npx(&["knex", "migrate:latest"], &dir),
+        KnexAction::MigrateUp => helpers::run_npx(&["knex", "migrate:up"], &dir),
+        KnexAction::MigrateDown => helpers::run_npx(&["knex", "migrate:down"], &dir),
+        KnexAction::MigrateRollback => helpers::run_npx(&["knex", "migrate:rollback"], &dir),
+        KnexAction::MigrateList => helpers::run_npx(&["knex", "migrate:list"], &dir),
+        KnexAction::SeedMake { name } => helpers::run_npx(&["knex", "seed:make", &name], &dir),
+        KnexAction::SeedRun => helpers::run_npx(&["knex", "seed:run"], &dir),
+        KnexAction::Studio => {
+            println!("knex-admin provides a GUI for Knex. Install it with:");
+            println!("  npm install knex-admin");
+            println!("Then run: npx knex-admin");
+            Ok(())
+        }
+        KnexAction::Pull => {
+            println!("Knex pull is available via plugins like knex-pull or knex-db-pull.");
+            println!("Install with: npm install knex-pull");
+            println!("Then run: npx knex-pull");
+            Ok(())
+        }
     }
 }
 
-// ── Shared helpers ─────────────────────────────────────────────────────────
 
-fn run_npx(args: &[&str], dir: &Path) -> anyhow::Result<()> {
-    let status = Command::new("npx")
-        .args(args)
-        .current_dir(dir)
-        .status()
-        .map_err(|e| anyhow::anyhow!("Failed to run npx: {e}"))?;
-    if !status.success() {
-        anyhow::bail!("npx {} exited with code {}", args.join(" "), status);
-    }
-    Ok(())
-}

@@ -4,6 +4,10 @@ use clap::Args;
 pub struct PublishArgs {
     #[arg(long)]
     pub registry: Option<String>,
+    #[arg(long)]
+    pub tag: Option<String>,
+    #[arg(long)]
+    pub access: Option<String>,
 }
 
 #[derive(Args)]
@@ -39,10 +43,20 @@ pub struct InfoArgs {
     pub registry: Option<String>,
 }
 
-pub fn run_publish() -> anyhow::Result<()> {
+pub fn run_publish(args: &PublishArgs) -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     if dir.join("package.json").exists() {
-        crate::run_cmd("npm", &["publish"], &dir)
+        let runner = crate::detect_package_runner(&dir);
+        let mut cmd_args = vec!["publish"];
+        if let Some(tag) = &args.tag {
+            cmd_args.push("--tag");
+            cmd_args.push(tag);
+        }
+        if let Some(access) = &args.access {
+            cmd_args.push("--access");
+            cmd_args.push(access);
+        }
+        crate::run_cmd(runner, &cmd_args, &dir)
     } else if dir.join("Cargo.toml").exists() {
         crate::run_cmd("cargo", &["publish"], &dir)
     } else {
@@ -58,7 +72,7 @@ pub fn run_login(registry: Option<&str>) -> anyhow::Result<()> {
     let reg = registry.unwrap_or("npm");
     match reg {
         "npm" => crate::run_cmd("npm", &["login"], &std::env::current_dir()?),
-        "pypi" => crate::run_cmd("python3", &["-m", "twine", "upload"], &std::env::current_dir()?),
+        "pypi" => crate::run_cmd("python3", &["-m", "twine", "login"], &std::env::current_dir()?),
         _ => crate::run_cmd("npm", &["login"], &std::env::current_dir()?),
     }
 }

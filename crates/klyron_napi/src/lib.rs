@@ -301,6 +301,7 @@ impl AsyncWork {
 }
 
 pub struct AsyncWorkPool {
+  #[allow(dead_code)]
   workers: usize,
   queue: Arc<Mutex<Vec<AsyncWork>>>,
 }

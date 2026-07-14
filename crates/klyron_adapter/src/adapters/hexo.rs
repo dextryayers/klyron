@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 use async_trait::async_trait;
 use anyhow::Result;
@@ -38,6 +37,10 @@ impl FrameworkAdapter for HexoAdapter {
     async fn lint(&self, _dir: &Path, _fix: bool) -> Result<()> { Ok(()) }
 
     async fn format(&self, _dir: &Path, _write: bool) -> Result<()> { Ok(()) }
+
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("npx".into(), vec!["hexo-cli".into(), "init".into(), name.into()]))
+    }
 
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
         let project_dir = options.dir.join(name);

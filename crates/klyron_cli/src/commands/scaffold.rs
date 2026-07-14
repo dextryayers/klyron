@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use clap::Args;
 use klyron_adapter::{AdapterRegistry, ScaffoldOptions};
@@ -123,24 +123,6 @@ fn project_dir(args: &ScaffoldArgs) -> PathBuf {
     args.dir.join(&args.name)
 }
 
-fn mkdirs(base: &Path, dirs: &[&str]) -> anyhow::Result<()> {
-    for d in dirs {
-        std::fs::create_dir_all(base.join(d))?;
-    }
-    Ok(())
-}
-
-fn write_files(base: &Path, files: Vec<(&str, &str)>) -> anyhow::Result<()> {
-    for (name, content) in files {
-        let path = base.join(name);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, content)?;
-    }
-    Ok(())
-}
-
 pub fn scaffold_next(args: &ScaffoldArgs) -> anyhow::Result<()> {
     scaffold_via_adapter(args, "next")
 }
@@ -229,11 +211,11 @@ pub fn scaffold_tauri(args: &ScaffoldArgs) -> anyhow::Result<()> {
     if pd.exists() {
         anyhow::bail!("Directory exists: {}", pd.display());
     }
-    mkdirs(
+    crate::mkdirs(
         &pd,
         &["src", "src-tauri", "src-tauri/src", "public"],
     )?;
-    write_files(
+    crate::write_files(
         &pd,
         vec![
             (
@@ -290,6 +272,34 @@ fn main() { tauri_app::run(); }"#,
                 "src-tauri/build.rs",
                 r#"fn main() { tauri_build::build(); }"#,
             ),
+            (
+                "vite.config.ts",
+                r#"import { defineConfig } from 'vite'
+
+export default defineConfig({
+  clearScreen: false,
+  server: { port: 5173, strictPort: true },
+  envPrefix: ['VITE_', 'TAURI_'],
+  build: {
+    target: ['es2021', 'chrome100', 'safari13'],
+    minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
+    sourcemap: !!process.env.TAURI_DEBUG,
+  },
+})
+"#,
+            ),
+            (
+                "vitest.config.ts",
+                r#"import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: {
+    environment: 'jsdom',
+    globals: true,
+  },
+})
+"#,
+            ),
         ],
     )?;
     println!("Tauri app created: {}", pd.display());
@@ -316,8 +326,8 @@ pub fn scaffold_leptos(args: &ScaffoldArgs) -> anyhow::Result<()> {
     if pd.exists() {
         anyhow::bail!("Directory exists: {}", pd.display());
     }
-    mkdirs(&pd, &["src", "public"])?;
-    write_files(
+    crate::mkdirs(&pd, &["src", "public"])?;
+    crate::write_files(
         &pd,
         vec![
             (

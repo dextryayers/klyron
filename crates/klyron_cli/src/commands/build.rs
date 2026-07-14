@@ -34,7 +34,11 @@ pub fn run_build(args: BuildArgs) -> anyhow::Result<()> {
             if has_next {
                 crate::run_cmd("npx", &["next", "build"], &dir)
             } else if has_vite {
-                crate::run_cmd("npx", &["vite", "build"], &dir)
+                let mut vite_args = vec!["vite".to_string(), "build".to_string()];
+                if args.minify { vite_args.push("--minify".into()); }
+                if args.sourcemap { vite_args.push("--sourcemap".into()); }
+                if let Some(ref t) = args.target { vite_args.push("--target".into()); vite_args.push(t.clone()); }
+                crate::run_cmd_str("npx", &vite_args, &dir)
             } else {
                 anyhow::bail!("No build configuration found. Use a framework like Next.js or Vite.")
             }

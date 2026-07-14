@@ -33,10 +33,12 @@ fn simple_bootstrap(version: &str) -> bool {
     matches!(version, "11" | "12" | "13")
 }
 
+#[allow(dead_code)]
 fn is_lts(version: &str) -> bool {
     matches!(version, "9" | "11")
 }
 
+#[allow(dead_code)]
 pub fn detect_laravel_version(dir: &Path) -> Option<&'static str> {
     let composer_path = dir.join("composer.json");
     let content = std::fs::read_to_string(composer_path).ok()?;

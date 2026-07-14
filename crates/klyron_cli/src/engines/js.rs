@@ -1,6 +1,5 @@
 use crate::engines::{EngineInput, EngineOutput, EngineProcess};
 
-#[allow(dead_code)]
 pub struct JsEngine {
     process: EngineProcess,
 }

@@ -72,6 +72,7 @@ pub struct WatcherBuilder {
   poll_interval_ms: u64,
 }
 
+#[allow(dead_code)]
 impl WatcherBuilder {
   pub fn new() -> Self {
     Self {
@@ -163,6 +164,7 @@ pub struct FileWatcher {
   recursive: bool,
   debounce: Duration,
   ignore_patterns: Vec<Pattern>,
+  #[allow(dead_code)]
   follow_symlinks: bool,
   poll_interval: Duration,
   running: Arc<AtomicBool>,

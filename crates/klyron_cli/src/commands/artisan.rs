@@ -40,8 +40,7 @@ pub fn run_artisan(args: &[String], project: Option<&str>) -> anyhow::Result<()>
 
 pub fn run_composer(args: &[String], project: Option<&str>) -> anyhow::Result<()> {
     let dir = if let Some(p) = project { std::path::PathBuf::from(p) } else { std::env::current_dir()? };
-    let mut cmd = vec!["composer"];
-    cmd.extend(args.iter().map(|s| s.as_str()));
+    let cmd: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     crate::run_cmd("composer", &cmd, &dir)
 }
 
