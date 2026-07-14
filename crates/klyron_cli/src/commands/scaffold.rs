@@ -58,6 +58,14 @@ pub fn scaffold_via_external_cli(framework: &str, args: &ScaffoldArgs) -> anyhow
         "laravel" => ("composer", vec!["create-project".into(), "laravel/laravel".into(), name.into()]),
         "django" => ("django-admin", vec!["startproject".into(), name.into()]),
         "rails" => ("rails", vec!["new".into(), name.into()]),
+        "symfony" => ("composer", vec!["create-project".into(), "symfony/skeleton".into(), name.into()]),
+        "codeigniter" => ("composer", vec!["create-project".into(), "codeigniter4/appstarter".into(), name.into()]),
+        "wordpress" => {
+            println!("WordPress external scaffold: download WordPress from wordpress.org");
+            println!("  wp core download --path={}", project_dir.display());
+            println!("Or use `klyron create wordpress {}` (without --external)", name);
+            return Ok(());
+        }
         _ => anyhow::bail!("Unknown framework for external CLI: {framework}"),
     };
 
@@ -286,6 +294,18 @@ fn main() { tauri_app::run(); }"#,
     )?;
     println!("Tauri app created: {}", pd.display());
     Ok(())
+}
+
+pub fn scaffold_symfony(args: &ScaffoldArgs) -> anyhow::Result<()> {
+    scaffold_via_adapter(args, "symfony")
+}
+
+pub fn scaffold_codeigniter(args: &ScaffoldArgs) -> anyhow::Result<()> {
+    scaffold_via_adapter(args, "codeigniter")
+}
+
+pub fn scaffold_wordpress(args: &ScaffoldArgs) -> anyhow::Result<()> {
+    scaffold_via_adapter(args, "wordpress")
 }
 
 pub fn scaffold_leptos(args: &ScaffoldArgs) -> anyhow::Result<()> {

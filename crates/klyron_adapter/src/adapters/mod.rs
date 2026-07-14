@@ -34,6 +34,9 @@ mod wintersmith;
 mod docpad;
 mod metalsmith;
 mod hexo;
+mod symfony;
+mod codeigniter;
+mod wordpress;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -75,6 +78,9 @@ pub use wintersmith::WintersmithAdapter;
 pub use docpad::DocPadAdapter;
 pub use metalsmith::MetalsmithAdapter;
 pub use hexo::HexoAdapter;
+pub use symfony::SymfonyAdapter;
+pub use codeigniter::CodeIgniterAdapter;
+pub use wordpress::WordPressAdapter;
 
 pub fn register_all(registry: &mut AdapterRegistry) {
     registry.register(Arc::new(ReactAdapter));
@@ -113,10 +119,13 @@ pub fn register_all(registry: &mut AdapterRegistry) {
     registry.register(Arc::new(DocPadAdapter));
     registry.register(Arc::new(MetalsmithAdapter));
     registry.register(Arc::new(HexoAdapter));
+    registry.register(Arc::new(SymfonyAdapter));
+    registry.register(Arc::new(CodeIgniterAdapter));
+    registry.register(Arc::new(WordPressAdapter));
 }
 
 pub fn detect_adapter(dir: &Path) -> Option<&'static str> {
-    let adapters: [&dyn crate::FrameworkAdapter; 36] = [
+    let adapters: [&dyn crate::FrameworkAdapter; 39] = [
         &ReactAdapter,
         &VueAdapter,
         &NextAdapter,
@@ -153,6 +162,9 @@ pub fn detect_adapter(dir: &Path) -> Option<&'static str> {
         &DocPadAdapter,
         &MetalsmithAdapter,
         &HexoAdapter,
+        &SymfonyAdapter,
+        &CodeIgniterAdapter,
+        &WordPressAdapter,
     ];
     for adapter in &adapters {
         if adapter.detect(dir) {

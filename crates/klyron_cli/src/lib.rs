@@ -240,6 +240,9 @@ pub enum Commands {
     CreateGoEcho { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
     CreateTauri { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
     CreateLeptos { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    CreateSymfony { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    CreateCodeIgniter { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    CreateWordPress { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
     CreateSvelteKit { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
     CreateHono { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
     CreateKoa { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
@@ -253,9 +256,16 @@ pub enum Commands {
     Bench { #[command(flatten)] args: commands::bench::BenchArgs },
     Start,
     RunScript { #[command(flatten)] args: commands::scripts::RunScriptArgs },
-    Db { #[command(subcommand)] action: commands::db::DbAction },
+    Db { #[command(flatten)] args: commands::db::DbArgs },
     Prisma { #[command(subcommand)] action: commands::orm::PrismaAction },
     Drizzle { #[command(subcommand)] action: commands::orm::DrizzleAction },
+    Typeorm { #[command(subcommand)] action: commands::orm::TypeOrmAction },
+    MikroOrm { #[command(subcommand)] action: commands::orm::MikroOrmAction },
+    Sequelize { #[command(subcommand)] action: commands::orm::SequelizeAction },
+    Mongoose { #[command(subcommand)] action: commands::orm::MongooseAction },
+    Kysely { #[command(subcommand)] action: commands::orm::KyselyAction },
+    KnexCmd { #[command(subcommand)] action: commands::orm::KnexAction },
+    Orm { #[command(subcommand)] action: commands::orm::OrmCommand },
     Install,
     Add { #[command(flatten)] args: commands::pm::AddArgs },
     Remove { #[command(flatten)] args: commands::pm::RemoveArgs },
@@ -389,7 +399,7 @@ fn list_frameworks() {
     }
     println!();
     println!("Additional frameworks available via --external:");
-    println!("  express, nest, django, rails, sveltekit, remix, angular");
+    println!("  express, nest, django, rails, sveltekit, remix, angular, symfony, codeigniter");
 }
 
 fn handle_create(args: CreateArgs) -> anyhow::Result<()> {
@@ -627,6 +637,9 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>) -> anyhow:
         Commands::CreateHapi { args } => commands::scaffold::scaffold_hapi(&args),
         Commands::CreateTauri { args } => commands::scaffold::scaffold_tauri(&args),
         Commands::CreateLeptos { args } => commands::scaffold::scaffold_leptos(&args),
+        Commands::CreateSymfony { args } => commands::scaffold::scaffold_symfony(&args),
+        Commands::CreateCodeIgniter { args } => commands::scaffold::scaffold_codeigniter(&args),
+        Commands::CreateWordPress { args } => commands::scaffold::scaffold_wordpress(&args),
         Commands::Dev { args } => commands::dev::run_dev(args),
         Commands::Build { args } => commands::build::run_build(args),
         Commands::Test { args } => commands::test::run_test(args),
@@ -636,9 +649,16 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>) -> anyhow:
         Commands::Bench { args } => commands::bench::run_bench(args),
         Commands::Start => commands::scripts::run_start(),
         Commands::RunScript { args } => commands::scripts::run_script(args),
-        Commands::Db { action } => commands::db::run_db(action),
+        Commands::Db { args } => commands::db::run_db(args.action, args.orm.as_deref()),
         Commands::Prisma { action } => commands::orm::run_prisma(action),
         Commands::Drizzle { action } => commands::orm::run_drizzle(action),
+        Commands::Typeorm { action } => commands::orm::run_typeorm(action),
+        Commands::MikroOrm { action } => commands::orm::run_mikroorm(action),
+        Commands::Sequelize { action } => commands::orm::run_sequelize(action),
+        Commands::Mongoose { action } => commands::orm::run_mongoose(action),
+        Commands::Kysely { action } => commands::orm::run_kysely(action),
+        Commands::KnexCmd { action } => commands::orm::run_knex(action),
+        Commands::Orm { action } => commands::orm::run_orm(action),
         Commands::Install => commands::pm::run_install(),
         Commands::Add { args } => commands::pm::run_add(&args.packages, args.dev),
         Commands::Remove { args } => commands::pm::run_remove(&args.packages),

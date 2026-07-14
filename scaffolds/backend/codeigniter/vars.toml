@@ -1,0 +1,5 @@
+[variables]
+name = { type = "string", prompt = "Project name", default = "my-ci4-app" }
+description = { type = "string", prompt = "Project description", default = "A CodeIgniter 4 application" }
+author = { type = "string", prompt = "Author name", default = "Klyron" }
+version = { type = "string", prompt = "CodeIgniter version", default = "4.5" }
