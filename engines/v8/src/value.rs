@@ -1,6 +1,4 @@
-//! JS value conversion for V8
-
-use crate::error::v8Error;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub enum V8Value {
@@ -11,7 +9,7 @@ pub enum V8Value {
     Number(f64),
     String(String),
     Array(Vec<V8Value>),
-    Object(std::collections::HashMap<String, V8Value>),
+    Object(HashMap<String, V8Value>),
 }
 
 impl V8Value {
@@ -59,25 +57,17 @@ impl V8Value {
 }
 
 impl From<String> for V8Value {
-    fn from(s: String) -> Self {
-        Self::String(s)
-    }
+    fn from(s: String) -> Self { Self::String(s) }
 }
 
 impl From<i64> for V8Value {
-    fn from(i: i64) -> Self {
-        Self::Integer(i)
-    }
+    fn from(i: i64) -> Self { Self::Integer(i) }
 }
 
 impl From<f64> for V8Value {
-    fn from(n: f64) -> Self {
-        Self::Number(n)
-    }
+    fn from(n: f64) -> Self { Self::Number(n) }
 }
 
 impl From<bool> for V8Value {
-    fn from(b: bool) -> Self {
-        Self::Boolean(b)
-    }
+    fn from(b: bool) -> Self { Self::Boolean(b) }
 }

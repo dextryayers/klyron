@@ -1,20 +1,18 @@
-//! JS value conversion for Quickjs
-
-use crate::error::quickjsError;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
-pub enum QuickjsValue {
+pub enum QuickJSValue {
     Null,
     Undefined,
     Boolean(bool),
     Integer(i64),
     Number(f64),
     String(String),
-    Array(Vec<QuickjsValue>),
-    Object(std::collections::HashMap<String, QuickjsValue>),
+    Array(Vec<QuickJSValue>),
+    Object(HashMap<String, QuickJSValue>),
 }
 
-impl QuickjsValue {
+impl QuickJSValue {
     pub fn from_json(json: &serde_json::Value) -> Self {
         match json {
             serde_json::Value::Null => Self::Null,
@@ -58,26 +56,18 @@ impl QuickjsValue {
     }
 }
 
-impl From<String> for QuickjsValue {
-    fn from(s: String) -> Self {
-        Self::String(s)
-    }
+impl From<String> for QuickJSValue {
+    fn from(s: String) -> Self { Self::String(s) }
 }
 
-impl From<i64> for QuickjsValue {
-    fn from(i: i64) -> Self {
-        Self::Integer(i)
-    }
+impl From<i64> for QuickJSValue {
+    fn from(i: i64) -> Self { Self::Integer(i) }
 }
 
-impl From<f64> for QuickjsValue {
-    fn from(n: f64) -> Self {
-        Self::Number(n)
-    }
+impl From<f64> for QuickJSValue {
+    fn from(n: f64) -> Self { Self::Number(n) }
 }
 
-impl From<bool> for QuickjsValue {
-    fn from(b: bool) -> Self {
-        Self::Boolean(b)
-    }
+impl From<bool> for QuickJSValue {
+    fn from(b: bool) -> Self { Self::Boolean(b) }
 }

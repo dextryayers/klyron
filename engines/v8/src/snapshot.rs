@@ -1,33 +1,33 @@
-//! Snapshot support for V8
-
-use crate::error::v8Error;
+use crate::error::V8Error;
+use crate::runtime::V8Runtime;
+use std::time::SystemTime;
 
 pub struct V8Snapshot {
     data: Vec<u8>,
-    created_at: std::time::SystemTime,
+    created_at: SystemTime,
 }
 
 impl V8Snapshot {
     pub fn new(data: Vec<u8>) -> Self {
-        Self { data, created_at: std::time::SystemTime::now() }
+        Self { data, created_at: SystemTime::now() }
     }
 
-    pub fn create(runtime: &crate::runtime::V8Runtime) -> Result<Self, v8Error> {
-        if !runtime.is_initialized() {
-            return Err(v8Error::NotInitialized);
-        }
+    pub fn create(_runtime: &V8Runtime) -> Result<Self, V8Error> {
         Ok(Self {
-            data: vec![],
-            created_at: std::time::SystemTime::now(),
+            data: Vec::new(),
+            created_at: SystemTime::now(),
         })
     }
 
-    pub fn load(data: &[u8]) -> Result<crate::runtime::V8Runtime, v8Error> {
-        let runtime = crate::runtime::V8Runtime::new();
-        Ok(runtime)
+    pub fn load(_data: &[u8]) -> Result<V8Runtime, V8Error> {
+        V8Runtime::new()
     }
 
     pub fn as_bytes(&self) -> &[u8] {
         &self.data
+    }
+
+    pub fn created_at(&self) -> SystemTime {
+        self.created_at
     }
 }

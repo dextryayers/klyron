@@ -55,7 +55,7 @@ impl FrameworkAdapter for HapiAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "version": "1.0.0",
   "private": true,
@@ -72,7 +72,7 @@ impl FrameworkAdapter for HapiAdapter {
 }"#, vars))?;
 
         std::fs::write(project_dir.join("src/index.js"),
-            klyron_template::TemplateEngine::render(r#"import Hapi from '@hapi/hapi'
+            klyron_template::TemplateEngine::render_static(r#"import Hapi from '@hapi/hapi'
 import routes from './routes/index.js'
 
 const init = async () => {
@@ -112,7 +112,7 @@ init()
             r#"import js from '@eslint/js'
 export default [js.configs.recommended, { ignores: ['node_modules'] }]"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 Hapi.js API
 

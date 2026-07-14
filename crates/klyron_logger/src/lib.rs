@@ -1,9 +1,11 @@
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::Arc;
 
 use chrono::Utc;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -17,6 +19,7 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
+    #[inline]
     fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Trace => "TRACE",
@@ -37,9 +40,12 @@ pub struct LoggerConfig {
     pub include_location: bool,
     pub max_file_size: u64,
     pub color_enabled: bool,
+    pub compression_enabled: bool,
+    pub max_backup_files: u32,
 }
 
 impl Default for LoggerConfig {
+    #[inline]
     fn default() -> Self {
         Self {
             min_level: LogLevel::Info,
@@ -48,6 +54,8 @@ impl Default for LoggerConfig {
             include_location: false,
             max_file_size: 10 * 1024 * 1024,
             color_enabled: true,
+            compression_enabled: true,
+            max_backup_files: 5,
         }
     }
 }
@@ -64,7 +72,7 @@ struct LogEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     line: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    metadata: Option<serde_json::Value>,
+    fields: Option<serde_json::Value>,
 }
 
 struct LogFile {
@@ -72,16 +80,18 @@ struct LogFile {
     path: String,
     size: u64,
     max_size: u64,
+    backup_count: u32,
+    compression: bool,
 }
 
 impl LogFile {
-    fn open(path: &str, max_size: u64) -> anyhow::Result<Self> {
+    fn open(path: &str, max_size: u64, backup_count: u32, compression: bool) -> anyhow::Result<Self> {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(path)?;
         let size = file.metadata()?.len();
-        Ok(Self { file, path: path.to_string(), size, max_size })
+        Ok(Self { file, path: path.to_string(), size, max_size, backup_count, compression })
     }
 
     fn write_line(&mut self, line: &str) -> anyhow::Result<()> {
@@ -97,8 +107,34 @@ impl LogFile {
 
     fn rotate(&mut self) -> anyhow::Result<()> {
         use std::fs;
-        let rotated = format!("{}.old", self.path);
-        let _ = fs::copy(&self.path, &rotated);
+
+        for i in (1..self.backup_count).rev() {
+            let src = format!("{}.{}", self.path, i);
+            let dst = format!("{}.{}", self.path, i + 1);
+            if fs::metadata(&src).is_ok() {
+                let _ = fs::rename(&src, &dst);
+            }
+        }
+
+        let first_backup = format!("{}.1", self.path);
+        let _ = fs::rename(&self.path, &first_backup);
+
+        if self.compression {
+            let dst_path = format!("{}.1.gz", self.path);
+            if let Ok(mut src) = fs::File::open(&first_backup) {
+                let mut buf = Vec::new();
+                if src.read_to_end(&mut buf).is_ok() {
+                    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+                    if encoder.write_all(&buf).is_ok() {
+                        if let Ok(compressed) = encoder.finish() {
+                            let _ = fs::write(&dst_path, &compressed);
+                        }
+                    }
+                }
+            }
+            let _ = fs::remove_file(&first_backup);
+        }
+
         self.file = OpenOptions::new()
             .create(true)
             .write(true)
@@ -109,45 +145,96 @@ impl LogFile {
     }
 }
 
+enum LogMsg {
+    Line(String),
+    Flush(tokio::sync::oneshot::Sender<()>),
+}
+
 pub struct Logger {
     min_level: LogLevel,
     json_output: bool,
-    log_file: Option<Mutex<LogFile>>,
     include_location: bool,
     color_enabled: bool,
+    async_tx: crossbeam_channel::Sender<LogMsg>,
+    fields: Option<serde_json::Value>,
+    otel_endpoint: Option<String>,
 }
 
 impl Logger {
     pub fn new() -> Self {
+        let (async_tx, async_rx) = crossbeam_channel::unbounded::<LogMsg>();
+
+        std::thread::spawn(move || {
+            for msg in async_rx {
+                match msg {
+                    LogMsg::Line(line) => {
+                        println!("{line}");
+                    }
+                    LogMsg::Flush(tx) => { let _ = tx.send(()); }
+                }
+            }
+        });
+
         Self {
             min_level: LogLevel::Info,
             json_output: false,
-            log_file: None,
             include_location: false,
             color_enabled: true,
+            async_tx,
+            fields: None,
+            otel_endpoint: None,
         }
     }
 
     pub fn with_config(config: LoggerConfig) -> anyhow::Result<Self> {
         let log_file = if let Some(ref path) = config.file_path {
-            Some(Mutex::new(LogFile::open(path, config.max_file_size)?))
+            let lf = LogFile::open(
+                path,
+                config.max_file_size,
+                config.max_backup_files,
+                config.compression_enabled,
+            )?;
+            Some(Arc::new(std::sync::Mutex::new(lf)))
         } else {
             None
         };
+
+        let (async_tx, async_rx) = crossbeam_channel::unbounded::<LogMsg>();
+        let logger_file = log_file.clone();
+
+        std::thread::spawn(move || {
+            for msg in async_rx {
+                match msg {
+                    LogMsg::Line(line) => {
+                        if let Some(ref lf) = logger_file {
+                            if let Ok(mut f) = lf.lock() {
+                                let _ = f.write_line(&line);
+                            }
+                        }
+                    }
+                    LogMsg::Flush(tx) => { let _ = tx.send(()); }
+                }
+            }
+        });
+
         Ok(Self {
             min_level: config.min_level,
             json_output: config.json_output,
-            log_file,
             include_location: config.include_location,
             color_enabled: config.color_enabled,
+            async_tx,
+            fields: None,
+            otel_endpoint: None,
         })
     }
 
+    #[inline]
     pub fn with_min_level(mut self, level: LogLevel) -> Self {
         self.min_level = level;
         self
     }
 
+    #[inline]
     pub fn with_json(mut self, enabled: bool) -> Self {
         self.json_output = enabled;
         self
@@ -158,36 +245,136 @@ impl Logger {
             .create(true)
             .append(true)
             .open(path)?;
-        self.log_file = Some(Mutex::new(LogFile {
+        let lf = LogFile {
             file,
             path: path.to_string_lossy().to_string(),
             size: path.metadata().ok().map(|m| m.len()).unwrap_or(0),
             max_size: 10 * 1024 * 1024,
-        }));
+            backup_count: 5,
+            compression: true,
+        };
+        let lf = std::sync::Mutex::new(lf);
+        self.async_tx = {
+            let (tx, rx) = crossbeam_channel::unbounded::<LogMsg>();
+            std::thread::spawn(move || {
+                for msg in rx {
+                    match msg {
+                        LogMsg::Line(line) => {
+                            if let Ok(mut f) = lf.lock() {
+                                let _ = f.write_line(&line);
+                            }
+                        }
+                        LogMsg::Flush(tx) => { let _ = tx.send(()); }
+                    }
+                }
+            });
+            tx
+        };
         Ok(self)
     }
 
+    #[inline]
     pub fn with_location(mut self, enabled: bool) -> Self {
         self.include_location = enabled;
         self
     }
 
-    pub fn trace(&self, msg: &str) { self.log(LogLevel::Trace, msg, None); }
-    pub fn debug(&self, msg: &str) { self.log(LogLevel::Debug, msg, None); }
-    pub fn info(&self, msg: &str) { self.log(LogLevel::Info, msg, None); }
-    pub fn warn(&self, msg: &str) { self.log(LogLevel::Warn, msg, None); }
-    pub fn error(&self, msg: &str) { self.log(LogLevel::Error, msg, None); }
-    pub fn fatal(&self, msg: &str) { self.log(LogLevel::Fatal, msg, None); }
+    #[inline]
+    pub fn with_fields(mut self, fields: serde_json::Value) -> Self {
+        self.fields = Some(fields);
+        self
+    }
 
-    pub fn trace_with(&self, msg: &str, meta: serde_json::Value) { self.log(LogLevel::Trace, msg, Some(meta)); }
-    pub fn debug_with(&self, msg: &str, meta: serde_json::Value) { self.log(LogLevel::Debug, msg, Some(meta)); }
-    pub fn info_with(&self, msg: &str, meta: serde_json::Value) { self.log(LogLevel::Info, msg, Some(meta)); }
-    pub fn warn_with(&self, msg: &str, meta: serde_json::Value) { self.log(LogLevel::Warn, msg, Some(meta)); }
-    pub fn error_with(&self, msg: &str, meta: serde_json::Value) { self.log(LogLevel::Error, msg, Some(meta)); }
-    pub fn fatal_with(&self, msg: &str, meta: serde_json::Value) { self.log(LogLevel::Fatal, msg, Some(meta)); }
+    pub fn with_otel(mut self, endpoint: &str) -> Self {
+        self.otel_endpoint = Some(endpoint.to_string());
+        self
+    }
+
+    #[inline]
+    pub fn is_enabled(&self, level: LogLevel) -> bool {
+        level >= self.min_level
+    }
+
+    #[inline]
+    pub fn trace(&self, msg: &str) {
+        self.log(LogLevel::Trace, msg, None);
+    }
+
+    #[inline]
+    pub fn debug(&self, msg: &str) {
+        self.log(LogLevel::Debug, msg, None);
+    }
+
+    #[inline]
+    pub fn info(&self, msg: &str) {
+        self.log(LogLevel::Info, msg, None);
+    }
+
+    #[inline]
+    pub fn warn(&self, msg: &str) {
+        self.log(LogLevel::Warn, msg, None);
+    }
+
+    #[inline]
+    pub fn error(&self, msg: &str) {
+        self.log(LogLevel::Error, msg, None);
+    }
+
+    #[inline]
+    pub fn fatal(&self, msg: &str) {
+        self.log(LogLevel::Fatal, msg, None);
+    }
+
+    #[inline]
+    pub fn trace_with(&self, msg: &str, meta: serde_json::Value) {
+        self.log(LogLevel::Trace, msg, Some(meta));
+    }
+
+    #[inline]
+    pub fn debug_with(&self, msg: &str, meta: serde_json::Value) {
+        self.log(LogLevel::Debug, msg, Some(meta));
+    }
+
+    #[inline]
+    pub fn info_with(&self, msg: &str, meta: serde_json::Value) {
+        self.log(LogLevel::Info, msg, Some(meta));
+    }
+
+    #[inline]
+    pub fn warn_with(&self, msg: &str, meta: serde_json::Value) {
+        self.log(LogLevel::Warn, msg, Some(meta));
+    }
+
+    #[inline]
+    pub fn error_with(&self, msg: &str, meta: serde_json::Value) {
+        self.log(LogLevel::Error, msg, Some(meta));
+    }
+
+    #[inline]
+    pub fn fatal_with(&self, msg: &str, meta: serde_json::Value) {
+        self.log(LogLevel::Fatal, msg, Some(meta));
+    }
 
     fn log(&self, level: LogLevel, msg: &str, metadata: Option<serde_json::Value>) {
-        if level < self.min_level { return; }
+        if level < self.min_level {
+            return;
+        }
+
+        let fields = match (&self.fields, metadata) {
+            (Some(base), Some(meta)) => {
+                let mut merged = base.clone();
+                if let Some(obj) = merged.as_object_mut() {
+                    if let Some(meta_obj) = meta.as_object() {
+                        for (k, v) in meta_obj {
+                            obj.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+                Some(merged)
+            }
+            (Some(base), None) => Some(base.clone()),
+            (None, meta) => meta,
+        };
 
         let entry = LogEntry {
             timestamp: Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
@@ -196,7 +383,7 @@ impl Logger {
             module: None,
             file: None,
             line: None,
-            metadata,
+            fields,
         };
 
         if self.json_output {
@@ -228,34 +415,34 @@ impl Logger {
             _ => println!("{line}"),
         }
 
-        if let Some(ref file) = self.log_file {
-            if let Ok(mut f) = file.lock() {
-                let _ = f.write_line(line);
-            }
-        }
+        let _ = self.async_tx.send(LogMsg::Line(line.to_string()));
     }
 
     pub fn flush(&self) {
-        if let Some(ref file) = self.log_file {
-            if let Ok(mut f) = file.lock() {
-                let _ = f.file.flush();
-            }
-        }
+        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let _ = self.async_tx.send(LogMsg::Flush(tx));
+        let _ = rx.try_recv();
     }
 }
 
 impl Default for Logger {
-    fn default() -> Self { Self::new() }
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
+#[inline]
 pub fn info(msg: &str) {
     Logger::new().info(msg);
 }
 
+#[inline]
 pub fn warn(msg: &str) {
     Logger::new().warn(msg);
 }
 
+#[inline]
 pub fn error(msg: &str) {
     Logger::new().error(msg);
 }
@@ -286,6 +473,14 @@ mod tests {
     }
 
     #[test]
+    fn test_logger_with_fields() {
+        let logger = Logger::new()
+            .with_json(true)
+            .with_fields(serde_json::json!({"app": "klyron", "version": "1.0"}));
+        logger.info("structured log");
+    }
+
+    #[test]
     fn test_logger_file() {
         let dir = std::env::temp_dir();
         let path = dir.join("klyron_test.log");
@@ -295,6 +490,7 @@ mod tests {
                 .with_file(&path)
                 .unwrap();
             logger.info("file test");
+            logger.flush();
         }
         assert!(path.exists());
         let _ = std::fs::remove_file(&path);
@@ -306,9 +502,33 @@ mod tests {
             min_level: LogLevel::Debug,
             json_output: true,
             include_location: true,
+            compression_enabled: false,
             ..Default::default()
         };
         let logger = Logger::with_config(config).unwrap();
         logger.debug("config test");
+    }
+
+    #[test]
+    fn test_is_enabled() {
+        let logger = Logger::new().with_min_level(LogLevel::Warn);
+        assert!(!logger.is_enabled(LogLevel::Trace));
+        assert!(!logger.is_enabled(LogLevel::Info));
+        assert!(logger.is_enabled(LogLevel::Warn));
+        assert!(logger.is_enabled(LogLevel::Error));
+        assert!(logger.is_enabled(LogLevel::Fatal));
+    }
+
+    #[test]
+    fn test_fatal_level() {
+        let logger = Logger::new();
+        logger.fatal("fatal error");
+    }
+
+    #[test]
+    fn test_logger_trace() {
+        let logger = Logger::new().with_min_level(LogLevel::Trace);
+        logger.trace("trace message");
+        assert!(logger.is_enabled(LogLevel::Trace));
     }
 }

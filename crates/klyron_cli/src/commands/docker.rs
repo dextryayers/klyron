@@ -24,6 +24,9 @@ pub fn run_docker(action: DockerAction) -> anyhow::Result<()> {
                 image_name: "klyron-app".into(),
                 port: 3000,
                 project_dir: dir,
+                profile: klyron_docker::DockerProfile::Dev,
+                additional_services: Vec::new(),
+                build_args: std::collections::HashMap::new(),
             };
             DockerManager::build(config)
         }
@@ -32,6 +35,9 @@ pub fn run_docker(action: DockerAction) -> anyhow::Result<()> {
                 image_name: "klyron-app".into(),
                 port: 3000,
                 project_dir: dir,
+                profile: klyron_docker::DockerProfile::Dev,
+                additional_services: Vec::new(),
+                build_args: std::collections::HashMap::new(),
             };
             DockerManager::run(config)
         }

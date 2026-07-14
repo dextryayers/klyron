@@ -46,12 +46,17 @@ impl FrameworkAdapter for FastifyAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("npm".into(), vec!["create".into(), "fastify@latest".into(), name.into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        if options.template_vars.get("external").map(|s| s == "true").unwrap_or(false) {
-            let status = std::process::Command::new("npx")
-                .args(["create-fastify@latest", name]).current_dir(&options.dir).status()?;
-            if !status.success() { anyhow::bail!("External scaffolding failed"); }
-            return Ok(());
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
         }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
@@ -61,7 +66,7 @@ impl FrameworkAdapter for FastifyAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}", "version": "1.0.0", "private": true, "type": "module",
   "scripts": { "dev": "node --watch src/index.js", "start": "node src/index.js", "test": "tap", "lint": "eslint .", "format": "prettier --write ." },
   "dependencies": { "fastify": "^5.2.0", "@fastify/cors": "^11.0.0" },
@@ -69,7 +74,7 @@ impl FrameworkAdapter for FastifyAdapter {
 }"#, vars))?;
 
         std::fs::write(project_dir.join("src/index.js"),
-            klyron_template::TemplateEngine::render(r#"import Fastify from 'fastify'
+            klyron_template::TemplateEngine::render_static(r#"import Fastify from 'fastify'
 import routes from './routes/index.js'
 const app = Fastify({ logger: true })
 const port = process.env.PORT || 3000
@@ -88,7 +93,7 @@ export default fp(async function (fastify, opts) { fastify.decorate('support', {
         std::fs::write(project_dir.join(".prettierrc"), r#"{"semi": true, "singleQuote": true, "tabWidth": 2, "trailingComma": "es5", "printWidth": 100}"#)?;
         std::fs::write(project_dir.join("eslint.config.js"), r#"import js from '@eslint/js'\nexport default [js.configs.recommended, { ignores: ['node_modules'] }]"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}\nFastify API\nnpm run dev"#, vars))?;
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}\nFastify API\nnpm run dev"#, vars))?;
 
         Ok(())
     }

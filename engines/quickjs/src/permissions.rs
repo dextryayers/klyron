@@ -1,5 +1,3 @@
-//! Permission checking for Quickjs
-
 #[derive(Debug, Clone)]
 pub enum Permission {
     Read,
@@ -12,7 +10,7 @@ pub enum Permission {
 }
 
 #[derive(Debug, Default)]
-pub struct QuickjsPermissions {
+pub struct QuickJSPermissions {
     pub allow_read: Vec<String>,
     pub allow_write: Vec<String>,
     pub allow_net: Vec<String>,
@@ -21,7 +19,7 @@ pub struct QuickjsPermissions {
     pub allow_ffi: bool,
 }
 
-impl QuickjsPermissions {
+impl QuickJSPermissions {
     pub fn new() -> Self {
         Self::default()
     }
@@ -35,6 +33,21 @@ impl QuickjsPermissions {
             Permission::Run => self.allow_run,
             Permission::Ffi => self.allow_ffi,
             Permission::All => true,
+        }
+    }
+
+    pub fn deny_all() -> Self {
+        Self::default()
+    }
+
+    pub fn allow_all() -> Self {
+        Self {
+            allow_read: vec!["/".to_string()],
+            allow_write: vec!["/".to_string()],
+            allow_net: vec!["*".to_string()],
+            allow_env: true,
+            allow_run: true,
+            allow_ffi: true,
         }
     }
 

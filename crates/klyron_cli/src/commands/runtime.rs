@@ -108,8 +108,20 @@ pub fn run_file(args: RunArgs, extensions: Vec<deno_core::Extension>) -> anyhow:
 }
 
 pub fn repl_loop() -> anyhow::Result<()> {
+    repl_loop_ext(None)
+}
+
+pub fn repl_loop_ext(engine: Option<klyron_engine::EngineRuntime>) -> anyhow::Result<()> {
+    let engine_kind = engine.as_ref().map(|e| e.kind().to_string());
     println!("Klyron REPL v{}", env!("CARGO_PKG_VERSION"));
+    print!("JS Engine: ");
+    if let Some(ref kind) = engine_kind {
+        println!("{kind} (--engine override)");
+    } else {
+        println!("Deno Core (V8)");
+    }
     println!("Type '.help' for help, '.exit' to quit");
+    let mut current_engine = engine;
     loop {
         let mut input = String::new();
         std::io::Write::flush(&mut std::io::stdout())?;
@@ -123,21 +135,58 @@ pub fn repl_loop() -> anyhow::Result<()> {
                 println!("  .help           Show this help");
                 println!("  .clear          Clear screen");
                 println!("  .version        Show version");
-                println!("  .engine         Show engine info");
+                println!("  .engine         Show/switch engine");
+                println!("  .engine <name>  Switch to engine (v8, boa, quickjs, jsc, auto)");
             }
             ".clear" => { print!("\x1B[2J\x1B[1;1H"); std::io::stdout().flush()?; }
             ".version" => println!("Klyron v{}", env!("CARGO_PKG_VERSION")),
-            ".engine" => println!("JavaScript/TypeScript engine: Deno Core (V8)"),
+            ".engine" => {
+                match current_engine.as_ref() {
+                    Some(e) => println!("Current engine: {}", e.kind()),
+                    None => println!("Current engine: Deno Core (V8)"),
+                }
+                println!("Available: v8, boa, quickjs, jsc, auto. Use `.engine <name>` to switch.");
+            }
+            s if s.starts_with(".engine ") => {
+                let name = s.trim_start_matches(".engine ").trim();
+                match name {
+                    "v8" | "boa" | "quickjs" | "jsc" | "auto" => {
+                        let kind = match name {
+                            "v8" => klyron_engine::JsEngineKind::V8,
+                            "boa" => klyron_engine::JsEngineKind::Boa,
+                            "quickjs" => klyron_engine::JsEngineKind::QuickJS,
+                            "jsc" => klyron_engine::JsEngineKind::JSC,
+                            "auto" => klyron_engine::detect_best_engine(),
+                            _ => unreachable!(),
+                        };
+                        match klyron_engine::EngineRuntime::new(kind) {
+                            Ok(eng) => {
+                                current_engine = Some(eng);
+                                println!("Switched to engine: {kind}");
+                            }
+                            Err(e) => eprintln!("Failed to switch to {name}: {e}"),
+                        }
+                    }
+                    other => eprintln!("Unknown engine '{other}'. Available: v8, boa, quickjs, jsc, auto"),
+                }
+            }
             "" => continue,
             _ => {
-                let runtime = Runtime::builder()
-                    .async_(true)
-                    .enable_typescript(true)
-                    .extensions(crate::all_extensions())
-                    .build()?;
-                match runtime.eval(input) {
-                    Ok(result) => { if !result.is_empty() && result != "undefined" { println!("{}", result); } }
-                    Err(e) => eprintln!("Error: {e}"),
+                if let Some(ref eng) = current_engine {
+                    match eng.eval(input) {
+                        Ok(result) => { if !result.is_empty() { println!("{result}"); } }
+                        Err(e) => eprintln!("Error: {e}"),
+                    }
+                } else {
+                    let runtime = Runtime::builder()
+                        .async_(true)
+                        .enable_typescript(true)
+                        .extensions(crate::all_extensions())
+                        .build()?;
+                    match runtime.eval(input) {
+                        Ok(result) => { if !result.is_empty() && result != "undefined" { println!("{}", result); } }
+                        Err(e) => eprintln!("Error: {e}"),
+                    }
                 }
             }
         }

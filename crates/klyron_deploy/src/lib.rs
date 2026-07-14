@@ -1,311 +1,335 @@
-/// Deployment abstraction for Klyron — generate config files and deploy to cloud platforms.
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-/// Supported deployment platforms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeployPlatform {
-    Vercel,
-    Cloudflare,
-    Railway,
-    Fly,
-    Docker,
+  Vercel,
+  Cloudflare,
+  Railway,
+  Fly,
+  Docker,
 }
 
-/// Configuration for a deployment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeployConfig {
-    pub platform: DeployPlatform,
-    pub preview: bool,
-    pub project_dir: PathBuf,
+  pub platform: DeployPlatform,
+  pub preview: bool,
+  pub project_dir: PathBuf,
+  pub env_vars: HashMap<String, String>,
+  pub secrets: Vec<String>,
 }
 
-/// Deployment orchestrator.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceConfig {
+  pub name: String,
+  pub port: u16,
+  pub build_command: String,
+  pub start_command: String,
+  pub install_command: String,
+  pub output_dir: String,
+  pub health_check_path: String,
+  pub node_version: String,
+  pub python_version: String,
+  pub rust_version: String,
+  pub go_version: String,
+}
+
+impl Default for ServiceConfig {
+  fn default() -> Self {
+    ServiceConfig {
+      name: "app".into(),
+      port: 3000,
+      build_command: "npm run build".into(),
+      start_command: "npm start".into(),
+      install_command: "npm install".into(),
+      output_dir: "dist".into(),
+      health_check_path: "/".into(),
+      node_version: "20".into(),
+      python_version: "3.12".into(),
+      rust_version: "1.78".into(),
+      go_version: "1.22".into(),
+    }
+  }
+}
+
 pub struct Deployment;
 
 impl Deployment {
-    /// Create a new `Deployment`.
-    pub fn new() -> Self {
-        Self
+  pub fn new() -> Self {
+    Self
+  }
+
+  pub fn deploy(config: DeployConfig) -> Result<()> {
+    Self::generate_config(&config.project_dir, config.platform, &config)?;
+
+    match config.platform {
+      DeployPlatform::Vercel => {
+        let mut cmd = Command::new("npx");
+        cmd.args(["vercel", "--prod"])
+          .arg("--yes")
+          .current_dir(&config.project_dir);
+        if config.preview {
+          cmd.arg("--prebuilt");
+        }
+        for (key, val) in &config.env_vars {
+          cmd.env(key, val);
+        }
+        let status = cmd.status().context("Failed to run Vercel CLI")?;
+        if !status.success() {
+          bail!("Vercel deploy failed with exit code: {:?}", status.code());
+        }
+      }
+      DeployPlatform::Cloudflare => {
+        let mut cmd = Command::new("npx");
+        cmd.args(["wrangler", "deploy"])
+          .current_dir(&config.project_dir);
+        if config.preview {
+          cmd.arg("--preview");
+        }
+        for secret in &config.secrets {
+          cmd.args(["--secret", secret]);
+        }
+        let status = cmd.status().context("Failed to run Wrangler CLI")?;
+        if !status.success() {
+          bail!("Cloudflare deploy failed with exit code: {:?}", status.code());
+        }
+      }
+      DeployPlatform::Railway => {
+        let mut cmd = Command::new("railway");
+        cmd.arg("up").current_dir(&config.project_dir);
+        if config.preview {
+          cmd.args(["--environment", "preview"]);
+        }
+        let status = cmd.status().context("Failed to run Railway CLI")?;
+        if !status.success() {
+          bail!("Railway deploy failed with exit code: {:?}", status.code());
+        }
+      }
+      DeployPlatform::Fly => {
+        let status = Command::new("flyctl")
+          .args(["deploy", "--remote-only"])
+          .current_dir(&config.project_dir)
+          .status()
+          .context("Failed to run Fly CLI")?;
+        if !status.success() {
+          bail!("Fly deploy failed with exit code: {:?}", status.code());
+        }
+      }
+      DeployPlatform::Docker => {
+        let image_name = format!(
+          "klyron-deploy-{}",
+          config.project_dir.file_name().unwrap_or_default().to_string_lossy()
+        );
+        let build_status = Command::new("docker")
+          .args(["build", "-t", &image_name, "."])
+          .current_dir(&config.project_dir)
+          .status()
+          .context("Failed to run Docker build")?;
+        if !build_status.success() {
+          bail!("Docker build failed with exit code: {:?}", build_status.code());
+        }
+        let run_status = Command::new("docker")
+          .args(["run", "-d", "--rm", "-p", "3000:3000", &image_name])
+          .current_dir(&config.project_dir)
+          .status()
+          .context("Failed to run Docker container")?;
+        if !run_status.success() {
+          bail!("Docker run failed with exit code: {:?}", run_status.code());
+        }
+      }
     }
 
-    /// Deploy the project using the given configuration.
-    ///
-    /// This runs the appropriate CLI command for the selected platform.
-    pub fn deploy(config: DeployConfig) -> Result<()> {
-        // Ensure configs are generated
-        Self::generate_config(&config.project_dir, config.platform)?;
+    Ok(())
+  }
 
-        match config.platform {
-            DeployPlatform::Vercel => {
-                let mut cmd = std::process::Command::new("npx");
-                cmd.args(["vercel", "--prod"])
-                    .arg("--yes")
-                    .current_dir(&config.project_dir);
-                if config.preview {
-                    cmd.arg("--prebuilt");
-                }
-                let status = cmd.status().context("Failed to run Vercel CLI")?;
-                if !status.success() {
-                    bail!("Vercel deploy failed with exit code: {:?}", status.code());
-                }
-            }
-            DeployPlatform::Cloudflare => {
-                let mut cmd = std::process::Command::new("npx");
-                cmd.args(["wrangler", "deploy"])
-                    .current_dir(&config.project_dir);
-                if config.preview {
-                    cmd.arg("--preview");
-                }
-                let status = cmd.status().context("Failed to run Wrangler CLI")?;
-                if !status.success() {
-                    bail!("Cloudflare deploy failed with exit code: {:?}", status.code());
-                }
-            }
-            DeployPlatform::Railway => {
-                let mut cmd = std::process::Command::new("railway");
-                cmd.arg("up").current_dir(&config.project_dir);
-                if config.preview {
-                    cmd.args(["--environment", "preview"]);
-                }
-                let status = cmd.status().context("Failed to run Railway CLI")?;
-                if !status.success() {
-                    bail!("Railway deploy failed with exit code: {:?}", status.code());
-                }
-            }
-            DeployPlatform::Fly => {
-                let status = std::process::Command::new("flyctl")
-                    .args(["deploy", "--remote-only"])
-                    .current_dir(&config.project_dir)
-                    .status()
-                    .context("Failed to run Fly CLI")?;
-                if !status.success() {
-                    bail!("Fly deploy failed with exit code: {:?}", status.code());
-                }
-            }
-            DeployPlatform::Docker => {
-                let image_name = format!(
-                    "klyron-deploy-{}",
-                    config
-                        .project_dir
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                );
-                // Build
-                let build_status = std::process::Command::new("docker")
-                    .args(["build", "-t", &image_name, "."])
-                    .current_dir(&config.project_dir)
-                    .status()
-                    .context("Failed to run Docker build")?;
-                if !build_status.success() {
-                    bail!("Docker build failed with exit code: {:?}", build_status.code());
-                }
-                // Run (detached)
-                let run_status = std::process::Command::new("docker")
-                    .args(["run", "-d", "--rm", "-p", "3000:3000", &image_name])
-                    .current_dir(&config.project_dir)
-                    .status()
-                    .context("Failed to run Docker container")?;
-                if !run_status.success() {
-                    bail!("Docker run failed with exit code: {:?}", run_status.code());
-                }
-            }
-        }
+  pub fn generate_config(dir: &Path, platform: DeployPlatform, config: &DeployConfig) -> Result<()> {
+    let svc = Self::detect_service_config(dir);
+    match platform {
+      DeployPlatform::Vercel => Self::generate_vercel_config(dir, &svc, config),
+      DeployPlatform::Cloudflare => Self::generate_cloudflare_config(dir, &svc, config),
+      DeployPlatform::Railway => Self::generate_railway_config(dir, &svc, config),
+      DeployPlatform::Fly => Self::generate_fly_config(dir, &svc, config),
+      DeployPlatform::Docker => Self::generate_docker_config(dir, &svc, config),
+    }
+  }
 
-        Ok(())
+  pub fn detect_platform(dir: &Path) -> Option<DeployPlatform> {
+    if dir.join("vercel.json").exists() || dir.join(".vercel").exists() {
+      return Some(DeployPlatform::Vercel);
+    }
+    if dir.join("wrangler.toml").exists() {
+      return Some(DeployPlatform::Cloudflare);
+    }
+    if dir.join("railway.json").exists() {
+      return Some(DeployPlatform::Railway);
+    }
+    if dir.join("fly.toml").exists() {
+      return Some(DeployPlatform::Fly);
+    }
+    if dir.join("Dockerfile").exists() || dir.join("docker-compose.yml").exists() {
+      return Some(DeployPlatform::Docker);
+    }
+    None
+  }
+
+  pub fn write_env_file(dir: &Path, env_vars: &HashMap<String, String>) -> Result<()> {
+    let mut content = String::new();
+    for (key, val) in env_vars {
+      content.push_str(&format!("{key}={val}\n"));
+    }
+    std::fs::write(dir.join(".env"), content.trim()).context("Failed to write .env")
+  }
+
+  pub fn write_env_example(dir: &Path, env_vars: &HashMap<String, String>) -> Result<()> {
+    let mut content = String::new();
+    for key in env_vars.keys() {
+      content.push_str(&format!("{key}=\n"));
+    }
+    std::fs::write(dir.join(".env.example"), content.trim()).context("Failed to write .env.example")
+  }
+
+  fn detect_service_config(dir: &Path) -> ServiceConfig {
+    let name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let mut svc = ServiceConfig {
+      name,
+      ..Default::default()
+    };
+
+    if dir.join("Cargo.toml").exists() {
+      svc.port = 8080;
+      svc.build_command = "cargo build --release".into();
+      svc.start_command = "./target/release/app".into();
+      svc.install_command = String::new();
+      svc.output_dir = "target/release".into();
+    } else if dir.join("go.mod").exists() {
+      svc.port = 8080;
+      svc.build_command = "go build -o dist/app".into();
+      svc.start_command = "./dist/app".into();
+      svc.output_dir = "dist".into();
+    } else if dir.join("requirements.txt").exists() || dir.join("setup.py").exists() {
+      svc.port = 8000;
+      svc.build_command = "pip install -r requirements.txt".into();
+      svc.start_command = "python main.py".into();
+      svc.output_dir = ".".into();
+    } else if dir.join("composer.json").exists() {
+      svc.port = 8000;
+      svc.build_command = "composer install --no-dev".into();
+      svc.start_command = "php -S 0.0.0.0:8000 -t public".into();
+      svc.output_dir = "public".into();
     }
 
-    /// Generate platform-specific configuration files in `dir`.
-    pub fn generate_config(dir: &Path, platform: DeployPlatform) -> Result<()> {
-        match platform {
-            DeployPlatform::Vercel => Self::generate_vercel_config(dir),
-            DeployPlatform::Cloudflare => Self::generate_cloudflare_config(dir),
-            DeployPlatform::Railway => Self::generate_railway_config(dir),
-            DeployPlatform::Fly => Self::generate_fly_config(dir),
-            DeployPlatform::Docker => Self::generate_docker_config(dir),
+    if let Ok(content) = std::fs::read_to_string(dir.join("package.json")) {
+      if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+        if let Some(deps) = json.get("dependencies").and_then(|v| v.as_object()) {
+          if deps.contains_key("next") {
+            svc.build_command = "next build".into();
+            svc.start_command = "next start".into();
+            svc.output_dir = ".next".into();
+          }
         }
+      }
     }
 
-    /// Auto-detect deployment platform from existing configuration files in `dir`.
-    pub fn detect_platform(dir: &Path) -> Option<DeployPlatform> {
-        if dir.join("vercel.json").exists() || dir.join(".vercel").exists() {
-            return Some(DeployPlatform::Vercel);
-        }
-        if dir.join("wrangler.toml").exists() {
-            return Some(DeployPlatform::Cloudflare);
-        }
-        if dir.join("railway.json").exists() {
-            return Some(DeployPlatform::Railway);
-        }
-        if dir.join("fly.toml").exists() {
-            return Some(DeployPlatform::Fly);
-        }
-        if dir.join("Dockerfile").exists() || dir.join("docker-compose.yml").exists() {
-            return Some(DeployPlatform::Docker);
-        }
-        None
+    svc
+  }
+
+  fn generate_vercel_config(dir: &Path, svc: &ServiceConfig, config: &DeployConfig) -> Result<()> {
+    let project_json = serde_json::json!({
+      "framework": svc.name,
+      "buildCommand": svc.build_command,
+      "outputDirectory": svc.output_dir,
+      "installCommand": svc.install_command,
+      "devCommand": "npm run dev",
+    });
+    let content = serde_json::to_string_pretty(&project_json)?;
+    std::fs::write(dir.join("vercel.json"), content).context("Failed to write vercel.json")?;
+
+    if !config.env_vars.is_empty() {
+      Self::write_env_file(dir, &config.env_vars)?;
     }
+    Ok(())
+  }
 
-    // -----------------------------------------------------------------------
-    // Config generators
-    // -----------------------------------------------------------------------
-
-    fn generate_vercel_config(dir: &Path) -> Result<()> {
-        let project_type = Self::detect_project_type(dir);
-        let config = match project_type.as_str() {
-            "node" | "next" | "react" => {
-                let (build_cmd, out_dir) = if project_type == "next" {
-                    ("next build", ".next")
-                } else {
-                    ("npm run build", "dist")
-                };
-                serde_json::json!({
-                    "framework": project_type,
-                    "buildCommand": build_cmd,
-                    "outputDirectory": out_dir,
-                    "installCommand": "npm install",
-                })
-            }
-            "python" => serde_json::json!({
-                "buildCommand": "pip install -r requirements.txt",
-                "outputDirectory": "public",
-            }),
-            "rust" => serde_json::json!({
-                "buildCommand": "cargo build --release",
-                "outputDirectory": "target/release",
-            }),
-            "go" => serde_json::json!({
-                "buildCommand": "go build -o dist/app",
-                "outputDirectory": "dist",
-            }),
-            "php" => serde_json::json!({
-                "buildCommand": "composer install --no-dev",
-                "outputDirectory": "public",
-            }),
-            _ => serde_json::json!({
-                "version": 2,
-                "builds": [{ "src": "**/*.js", "use": "@vercel/node" }],
-            }),
-        };
-        let content = serde_json::to_string_pretty(&config)?;
-        std::fs::write(dir.join("vercel.json"), content)
-            .context("Failed to write vercel.json")
-    }
-
-    fn generate_cloudflare_config(dir: &Path) -> Result<()> {
-        let project_type = Self::detect_project_type(dir);
-        let name = dir.file_name().unwrap_or_default().to_string_lossy();
-        let config = format!(
-            r#"name = "{name}"
+  fn generate_cloudflare_config(dir: &Path, svc: &ServiceConfig, config: &DeployConfig) -> Result<()> {
+    let content = format!(
+      r#"name = "{name}"
 compatibility_date = "2024-12-01"
 main = "src/index.js"
-"#
-        );
-        // Add language-specific config
-        let config = match project_type.as_str() {
-            "rust" => config + "build.command = \"cargo build --release\"\n",
-            "python" => config + "build.command = \"pip install -r requirements.txt\"\n",
-            "go" => config + "build.command = \"go build -o dist/app\"\n",
-            _ => config,
-        };
-        std::fs::write(dir.join("wrangler.toml"), config)
-            .context("Failed to write wrangler.toml")
-    }
 
-    fn generate_railway_config(dir: &Path) -> Result<()> {
-        let project_type = Self::detect_project_type(dir);
-        let (builder, build_cmd, start_cmd) = match project_type.as_str() {
-            "node" => ("NIXPACKS", Some("npm run build"), Some("npm start")),
-            "python" => ("NIXPACKS", None, Some("python main.py")),
-            "rust" => ("CARGO", Some("cargo build --release"), Some("./target/release/app")),
-            "go" => ("GO", Some("go build -o app"), Some("./app")),
-            "php" => ("NIXPACKS", Some("composer install --no-dev"), Some("php -S 0.0.0.0:8000 -t public")),
-            _ => ("NIXPACKS", None, None),
-        };
-        let config = serde_json::json!({
-            "build": {
-                "builder": builder,
-                "buildCommand": build_cmd,
-            },
-            "deploy": {
-                "startCommand": start_cmd,
-                "healthcheckPath": "/",
-            },
-        });
-        let content = serde_json::to_string_pretty(&config)?;
-        std::fs::write(dir.join("railway.json"), content)
-            .context("Failed to write railway.json")
-    }
+[build]
+command = "{build_cmd}"
 
-    fn generate_fly_config(dir: &Path) -> Result<()> {
-        let project_type = Self::detect_project_type(dir);
-        let name = dir.file_name().unwrap_or_default().to_string_lossy();
-        let (_build_cmd, _start_cmd, internal_port) = match project_type.as_str() {
-            "node" => ("npm run build", "npm start", "3000"),
-            "next" => ("next build", "next start", "3000"),
-            "react" => ("npm run build", "npx serve -s dist -l 3000", "3000"),
-            "python" => ("echo 'ok'", "python main.py", "8000"),
-            "rust" => ("cargo build --release", "./target/release/app", "8080"),
-            "go" => ("go build -o app", "./app", "8080"),
-            "php" => ("composer install --no-dev", "php -S 0.0.0.0:8000 -t public", "8000"),
-            _ => ("npm run build", "npm start", "3000"),
-        };
-        let config = format!(
-            r#"app = "{name}"
+[env]
+{env_vars}
+
+[secrets]
+{secrets}
+"#,
+      name = svc.name,
+      build_cmd = svc.build_command,
+      env_vars = config.env_vars.iter().map(|(k, v)| format!("{k} = \"{v}\"")).collect::<Vec<_>>().join("\n"),
+      secrets = config.secrets.iter().map(|s| format!("{s} = \"\"")).collect::<Vec<_>>().join("\n"),
+    );
+    std::fs::write(dir.join("wrangler.toml"), content).context("Failed to write wrangler.toml")
+  }
+
+  fn generate_railway_config(dir: &Path, svc: &ServiceConfig, config: &DeployConfig) -> Result<()> {
+    let rail_json = serde_json::json!({
+      "build": {
+        "builder": "NIXPACKS",
+        "buildCommand": svc.build_command,
+      },
+      "deploy": {
+        "startCommand": svc.start_command,
+        "healthcheckPath": svc.health_check_path,
+        "restartPolicyType": "always",
+      },
+      "env": config.env_vars,
+    });
+    let content = serde_json::to_string_pretty(&rail_json)?;
+    std::fs::write(dir.join("railway.json"), content).context("Failed to write railway.json")
+  }
+
+  fn generate_fly_config(dir: &Path, svc: &ServiceConfig, config: &DeployConfig) -> Result<()> {
+    let env_section: String = config.env_vars.iter()
+      .map(|(k, v)| format!("  {k} = \"{v}\""))
+      .collect::<Vec<_>>()
+      .join("\n");
+
+    let content = format!(
+      r#"app = "{name}"
 primary_region = "iad"
 
 [build]
   builder = "heroku/buildpacks:20"
 
-[http_service]
-  internal_port = {internal_port}
-  force_https = true
-
 [env]
-  NODE_ENV = "production"
-"#
-        );
-        std::fs::write(dir.join("fly.toml"), config).context("Failed to write fly.toml")
-    }
+{env_section}
 
-    fn generate_docker_config(dir: &Path) -> Result<()> {
-        let project_type = Self::detect_project_type(dir);
-        let dockerfile = match project_type.as_str() {
-            "node" | "next" | "react" => {
-                r#"FROM node:20-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
+[http_service]
+  internal_port = {port}
+  force_https = true
+  healthcheck = {{ path = "{health}", interval = "10s", timeout = "5s" }}
+"#,
+      name = svc.name,
+      port = svc.port,
+      health = svc.health_check_path,
+      env_section = env_section,
+    );
+    std::fs::write(dir.join("fly.toml"), content).context("Failed to write fly.toml")
+  }
 
-FROM node:20-alpine
-WORKDIR /app
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY package*.json ./
-EXPOSE 3000
-CMD ["node", "dist/index.js"]
-"#
-            }
-            "python" => {
-                r#"FROM python:3.12-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-EXPOSE 8000
-CMD ["python", "main.py"]
-"#
-            }
-            "rust" => {
-                r#"FROM rust:1.78 AS builder
+  fn generate_docker_config(dir: &Path, svc: &ServiceConfig, _config: &DeployConfig) -> Result<()> {
+    let dockerfile = if dir.join("Cargo.toml").exists() {
+      format!(
+        r#"FROM rust:{rust_ver} AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN mkdir src && echo "fn main() {{}}" > src/main.rs
 RUN cargo build --release 2>/dev/null || true
 COPY src ./src
 RUN cargo build --release
@@ -313,12 +337,15 @@ RUN cargo build --release
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/app /usr/local/bin/app
-EXPOSE 8080
+EXPOSE {port}
 CMD ["app"]
-"#
-            }
-            "go" => {
-                r#"FROM golang:1.22 AS builder
+"#,
+        rust_ver = svc.rust_version,
+        port = svc.port,
+      )
+    } else if dir.join("go.mod").exists() {
+      format!(
+        r#"FROM golang:{go_ver} AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -328,145 +355,153 @@ RUN CGO_ENABLED=0 go build -o /app/server .
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 COPY --from=builder /app/server /server
-EXPOSE 8080
+EXPOSE {port}
 CMD ["/server"]
-"#
-            }
-            "php" => {
-                r#"FROM php:8.2-cli
+"#,
+        go_ver = svc.go_version,
+        port = svc.port,
+      )
+    } else {
+      format!(
+        r#"FROM node:{node_ver}-alpine AS builder
 WORKDIR /app
+COPY package*.json ./
+RUN npm ci
 COPY . .
-EXPOSE 8000
-CMD ["php", "-S", "0.0.0.0:8000", "-t", "public"]
-"#
-            }
-            _ => {
-                r#"FROM alpine:latest
-WORKDIR /app
-COPY . .
-CMD ["sh"]
-"#
-            }
-        };
-        std::fs::write(dir.join("Dockerfile"), dockerfile)
-            .context("Failed to write Dockerfile")
-    }
+RUN {build_cmd}
 
-    fn detect_project_type(dir: &Path) -> String {
-        if dir.join("package.json").exists() {
-            if let Ok(content) = std::fs::read_to_string(dir.join("package.json")) {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                    if let Some(deps) = json.get("dependencies").and_then(|v| v.as_object()) {
-                        if deps.contains_key("next") {
-                            return "next".into();
-                        }
-                        if deps.contains_key("react") || deps.contains_key("react-dom") {
-                            return "react".into();
-                        }
-                    }
-                }
-            }
-            return "node".into();
-        }
-        if dir.join("Cargo.toml").exists() {
-            return "rust".into();
-        }
-        if dir.join("go.mod").exists() {
-            return "go".into();
-        }
-        if dir.join("requirements.txt").exists() || dir.join("setup.py").exists() {
-            return "python".into();
-        }
-        if dir.join("composer.json").exists() {
-            return "php".into();
-        }
-        "node".into()
-    }
+FROM node:{node_ver}-alpine
+WORKDIR /app
+COPY --from=builder /app/{output_dir} ./{output_dir}
+COPY --from=builder /app/node_modules ./node_modules
+COPY package*.json ./
+EXPOSE {port}
+CMD {start_cmd}
+"#,
+        node_ver = svc.node_version,
+        build_cmd = svc.build_command,
+        output_dir = svc.output_dir,
+        port = svc.port,
+        start_cmd = svc.start_command,
+      )
+    };
+    std::fs::write(dir.join("Dockerfile"), dockerfile).context("Failed to write Dockerfile")
+  }
 }
 
 impl Default for Deployment {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::fs;
-    use std::sync::atomic::{AtomicU64, Ordering};
+  use super::*;
+  use std::fs;
+  use std::sync::atomic::{AtomicU64, Ordering};
 
-    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+  static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    fn temp_dir() -> PathBuf {
-        let id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("klyron_deploy_test_{}_{}", std::process::id(), id));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+  fn temp_dir() -> PathBuf {
+    let id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!("klyron_deploy_test_{}_{}", std::process::id(), id));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    dir
+  }
 
-    #[test]
-    fn test_detect_platform_vercel() {
-        let dir = temp_dir();
-        fs::write(dir.join("vercel.json"), "{}").unwrap();
-        assert_eq!(Deployment::detect_platform(&dir), Some(DeployPlatform::Vercel));
-    }
+  #[test]
+  fn test_detect_platform_vercel() {
+    let dir = temp_dir();
+    fs::write(dir.join("vercel.json"), "{}").unwrap();
+    assert_eq!(Deployment::detect_platform(&dir), Some(DeployPlatform::Vercel));
+  }
 
-    #[test]
-    fn test_detect_platform_cloudflare() {
-        let dir = temp_dir();
-        fs::write(dir.join("wrangler.toml"), "").unwrap();
-        assert_eq!(
-            Deployment::detect_platform(&dir),
-            Some(DeployPlatform::Cloudflare)
-        );
-    }
+  #[test]
+  fn test_detect_platform_cloudflare() {
+    let dir = temp_dir();
+    fs::write(dir.join("wrangler.toml"), "").unwrap();
+    assert_eq!(Deployment::detect_platform(&dir), Some(DeployPlatform::Cloudflare));
+  }
 
-    #[test]
-    fn test_detect_platform_none() {
-        let dir = temp_dir();
-        assert_eq!(Deployment::detect_platform(&dir), None);
-    }
+  #[test]
+  fn test_detect_platform_none() {
+    let dir = temp_dir();
+    assert_eq!(Deployment::detect_platform(&dir), None);
+  }
 
-    #[test]
-    fn test_generate_vercel_config() {
-        let dir = temp_dir();
-        fs::write(dir.join("package.json"), r#"{"name":"test"}"#).unwrap();
-        Deployment::generate_config(&dir, DeployPlatform::Vercel).expect("Generate failed");
-        assert!(dir.join("vercel.json").exists());
-        let content = fs::read_to_string(dir.join("vercel.json")).unwrap();
-        assert!(content.contains("framework") || content.contains("version"));
-    }
+  #[test]
+  fn test_generate_vercel_config() {
+    let dir = temp_dir();
+    fs::write(dir.join("package.json"), r#"{"name":"test"}"#).unwrap();
+    let config = DeployConfig {
+      platform: DeployPlatform::Vercel,
+      preview: false,
+      project_dir: dir.clone(),
+      env_vars: HashMap::new(),
+      secrets: vec![],
+    };
+    Deployment::generate_config(&dir, DeployPlatform::Vercel, &config).expect("Generate failed");
+    assert!(dir.join("vercel.json").exists());
+  }
 
-    #[test]
-    fn test_generate_cloudflare_config() {
-        let dir = temp_dir();
-        fs::write(dir.join("package.json"), r#"{"name":"test"}"#).unwrap();
-        Deployment::generate_config(&dir, DeployPlatform::Cloudflare).expect("Generate failed");
-        assert!(dir.join("wrangler.toml").exists());
-    }
+  #[test]
+  fn test_generate_cloudflare_config() {
+    let dir = temp_dir();
+    let config = DeployConfig {
+      platform: DeployPlatform::Cloudflare,
+      preview: false,
+      project_dir: dir.clone(),
+      env_vars: HashMap::new(),
+      secrets: vec![],
+    };
+    fs::write(dir.join("package.json"), r#"{"name":"test"}"#).unwrap();
+    Deployment::generate_config(&dir, DeployPlatform::Cloudflare, &config).expect("Generate failed");
+    assert!(dir.join("wrangler.toml").exists());
+  }
 
-    #[test]
-    fn test_generate_docker_config() {
-        let dir = temp_dir();
-        fs::write(dir.join("Cargo.toml"), "[package]\nname = \"test\"\n").unwrap();
-        Deployment::generate_config(&dir, DeployPlatform::Docker).expect("Generate failed");
-        assert!(dir.join("Dockerfile").exists());
-        let content = fs::read_to_string(dir.join("Dockerfile")).unwrap();
-        assert!(content.contains("FROM rust"));
-    }
+  #[test]
+  fn test_generate_docker_config() {
+    let dir = temp_dir();
+    let config = DeployConfig {
+      platform: DeployPlatform::Docker,
+      preview: false,
+      project_dir: dir.clone(),
+      env_vars: HashMap::new(),
+      secrets: vec![],
+    };
+    fs::write(dir.join("Cargo.toml"), "[package]\nname = \"test\"\n").unwrap();
+    Deployment::generate_config(&dir, DeployPlatform::Docker, &config).expect("Generate failed");
+    assert!(dir.join("Dockerfile").exists());
+    let content = fs::read_to_string(dir.join("Dockerfile")).unwrap();
+    assert!(content.contains("FROM rust"));
+  }
 
-    #[test]
-    fn test_serialization() {
-        let config = DeployConfig {
-            platform: DeployPlatform::Vercel,
-            preview: true,
-            project_dir: PathBuf::from("/tmp/test"),
-        };
-        let json = serde_json::to_string(&config).unwrap();
-        let back: DeployConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.platform, DeployPlatform::Vercel);
-        assert!(back.preview);
-    }
+  #[test]
+  fn test_env_file_management() {
+    let dir = temp_dir();
+    let mut vars = HashMap::new();
+    vars.insert("DATABASE_URL".into(), "postgres://localhost".into());
+    vars.insert("API_KEY".into(), "secret123".into());
+    Deployment::write_env_file(&dir, &vars).unwrap();
+    assert!(dir.join(".env").exists());
+    Deployment::write_env_example(&dir, &vars).unwrap();
+    assert!(dir.join(".env.example").exists());
+  }
+
+  #[test]
+  fn test_serialization() {
+    let config = DeployConfig {
+      platform: DeployPlatform::Vercel,
+      preview: true,
+      project_dir: PathBuf::from("/tmp/test"),
+      env_vars: HashMap::new(),
+      secrets: vec![],
+    };
+    let json = serde_json::to_string(&config).unwrap();
+    let back: DeployConfig = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.platform, DeployPlatform::Vercel);
+    assert!(back.preview);
+  }
 }

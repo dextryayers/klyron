@@ -1,6 +1,7 @@
 use std::io::{Read, Write};
 use std::path::Path;
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct ProcessResult {
@@ -11,6 +12,7 @@ pub struct ProcessResult {
 }
 
 impl From<Output> for ProcessResult {
+    #[inline]
     fn from(o: Output) -> Self {
         Self {
             stdout: String::from_utf8_lossy(&o.stdout).to_string(),
@@ -26,9 +28,16 @@ pub struct ChildProcess {
 }
 
 impl ChildProcess {
-    pub fn id(&self) -> u32 { self.child.id() }
-    pub fn pid(&self) -> u32 { self.child.id() }
+    #[inline]
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
 
+    pub fn status(&mut self) -> Option<ExitStatus> {
+        self.child.try_wait().ok().flatten()
+    }
+
+    #[inline]
     pub fn write_stdin(&mut self, data: &[u8]) -> anyhow::Result<()> {
         if let Some(ref mut stdin) = self.child.stdin {
             Ok(stdin.write_all(data)?)
@@ -48,6 +57,7 @@ impl ChildProcess {
         Ok(())
     }
 
+    #[inline]
     pub fn try_wait(&mut self) -> anyhow::Result<Option<i32>> {
         match self.child.try_wait()? {
             Some(status) => Ok(Some(status.code().unwrap_or(-1))),
@@ -59,7 +69,10 @@ impl ChildProcess {
 pub struct ProcessManager;
 
 impl ProcessManager {
-    pub fn new() -> Self { Self }
+    #[inline]
+    pub fn new() -> Self {
+        Self
+    }
 
     pub fn spawn(&self, program: &str, args: &[&str]) -> anyhow::Result<ChildProcess> {
         let child = Command::new(program)
@@ -69,6 +82,38 @@ impl ProcessManager {
             .stderr(Stdio::piped())
             .spawn()?;
         Ok(ChildProcess { child })
+    }
+
+    pub fn spawn_with_pipes(
+        &self,
+        program: &str,
+        args: &[&str],
+        stdin: Stdio,
+        stdout: Stdio,
+        stderr: Stdio,
+    ) -> anyhow::Result<ChildProcess> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            let child = Command::new(program)
+                .args(args)
+                .stdin(stdin)
+                .stdout(stdout)
+                .stderr(stderr)
+                .process_group(0)
+                .spawn()?;
+            Ok(ChildProcess { child })
+        }
+        #[cfg(not(unix))]
+        {
+            let child = Command::new(program)
+                .args(args)
+                .stdin(stdin)
+                .stdout(stdout)
+                .stderr(stderr)
+                .spawn()?;
+            Ok(ChildProcess { child })
+        }
     }
 
     pub fn spawn_in_dir(&self, program: &str, args: &[&str], dir: &Path) -> anyhow::Result<ChildProcess> {
@@ -85,6 +130,23 @@ impl ProcessManager {
     pub fn spawn_inherit(&self, program: &str, args: &[&str]) -> anyhow::Result<ChildProcess> {
         let child = Command::new(program).args(args).spawn()?;
         Ok(ChildProcess { child })
+    }
+
+    pub fn signal(&self, pid: u32, signal: i32) -> anyhow::Result<()> {
+        #[cfg(unix)]
+        {
+            use nix::sys::signal::{kill, Signal};
+            use nix::unistd::Pid;
+            let sig = Signal::try_from(signal)
+                .map_err(|_| anyhow::anyhow!("Invalid signal: {signal}"))?;
+            kill(Pid::from_raw(pid as i32), sig)?;
+            Ok(())
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (pid, signal);
+            anyhow::bail!("signal() not supported on this platform")
+        }
     }
 
     fn build_exec(&self, program: &str, args: &[&str]) -> Command {
@@ -181,12 +243,14 @@ impl ProcessManager {
         Ok(output.into())
     }
 
+    #[inline]
     pub fn which(&self, program: &str) -> Option<String> {
         self.exec("which", &[program]).ok()
             .filter(|r| r.success)
             .map(|r| r.stdout.trim().to_string())
     }
 
+    #[inline]
     pub fn is_running(&self, program: &str) -> bool {
         self.exec("pgrep", &["-x", program])
             .map(|r| r.success)
@@ -203,14 +267,74 @@ impl ProcessManager {
                     processes.push(ProcessInfo {
                         pid,
                         ppid: parts[1].parse().ok(),
-                        name: parts[2..parts.len()-2].join(" "),
-                        cpu: parts[parts.len()-2].parse().unwrap_or(0.0),
-                        mem: parts[parts.len()-1].parse().unwrap_or(0.0),
+                        name: parts[2..parts.len() - 2].join(" "),
+                        cpu: parts[parts.len() - 2].parse().unwrap_or(0.0),
+                        mem: parts[parts.len() - 1].parse().unwrap_or(0.0),
                     });
                 }
             }
         }
         Ok(processes)
+    }
+
+    pub async fn spawn_async(&self, program: &str, args: &[&str]) -> anyhow::Result<tokio::process::Child> {
+        let child = tokio::process::Command::new(program)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        Ok(child)
+    }
+
+    pub async fn exec_async(&self, program: &str, args: &[&str]) -> anyhow::Result<ProcessResult> {
+        let output = tokio::process::Command::new(program)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await?;
+        Ok(output.into())
+    }
+
+    pub async fn wait_with_timeout(
+        &self,
+        program: &str,
+        args: &[&str],
+        timeout: Duration,
+    ) -> anyhow::Result<Option<ProcessResult>> {
+        let mut child = tokio::process::Command::new(program)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                return Ok(None);
+            }
+            match child.try_wait() {
+                Ok(Some(_status)) => {
+                    let output = child.wait_with_output().await?;
+                    return Ok(Some(output.into()));
+                }
+                Ok(None) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(e) => anyhow::bail!("Process error: {e}"),
+            }
+        }
+    }
+}
+
+impl Default for ProcessManager {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -223,10 +347,12 @@ pub struct ProcessInfo {
     pub mem: f64,
 }
 
+#[inline]
 pub fn exec(program: &str, args: &[&str]) -> anyhow::Result<ProcessResult> {
     ProcessManager::new().exec(program, args)
 }
 
+#[inline]
 pub fn exec_with_stdin(program: &str, args: &[&str], input: &str) -> anyhow::Result<ProcessResult> {
     ProcessManager::new().exec_with_stdin(program, args, input)
 }
@@ -262,5 +388,28 @@ mod tests {
         assert!(result.success);
         let count: usize = result.stdout.trim().parse().unwrap_or(0);
         assert!(count > 0);
+    }
+
+    #[test]
+    fn test_child_pid() {
+        let pm = ProcessManager::new();
+        let child = pm.spawn("echo", &["hi"]).unwrap();
+        assert!(child.pid() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_exec_async() {
+        let pm = ProcessManager::new();
+        let result = pm.exec_async("echo", &["async"]).await.unwrap();
+        assert!(result.success);
+        assert_eq!(result.stdout.trim(), "async");
+    }
+
+    #[tokio::test]
+    async fn test_wait_with_timeout() {
+        let pm = ProcessManager::new();
+        let result = pm.wait_with_timeout("echo", &["fast"], Duration::from_secs(5)).await.unwrap();
+        assert!(result.is_some());
+        assert!(result.unwrap().success);
     }
 }

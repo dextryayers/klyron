@@ -24,5 +24,7 @@ pub fn run_deploy(args: DeployArgs) -> anyhow::Result<()> {
         platform,
         preview: args.preview,
         project_dir: dir,
+        env_vars: std::collections::HashMap::new(),
+        secrets: Vec::new(),
     })
 }

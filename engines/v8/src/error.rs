@@ -1,10 +1,9 @@
-//! Error types for V8
-
 use std::fmt;
 
 #[derive(Debug)]
 pub enum V8Error {
     NotInitialized,
+    InitFailed(String),
     ExecutionFailed(String),
     CompileError(String),
     SyntaxError(String),
@@ -15,10 +14,21 @@ pub enum V8Error {
     OutOfMemory,
 }
 
+impl V8Error {
+    pub fn catch_error() -> Option<Self> {
+        None
+    }
+
+    pub fn format_stack_trace() -> String {
+        "No stack trace available (V8 native not linked)".to_string()
+    }
+}
+
 impl fmt::Display for V8Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotInitialized => write!(f, "V8 not initialized"),
+            Self::InitFailed(msg) => write!(f, "V8 initialization failed: {msg}"),
             Self::ExecutionFailed(msg) => write!(f, "Execution failed: {msg}"),
             Self::CompileError(msg) => write!(f, "Compile error: {msg}"),
             Self::SyntaxError(msg) => write!(f, "Syntax error: {msg}"),

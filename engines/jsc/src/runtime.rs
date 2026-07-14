@@ -1,38 +1,45 @@
-//! Jsc runtime implementation
+use crate::error::JSCError;
 
-use crate::error::jscError;
-
-pub struct JscRuntime {
-    pub isolate: crate::isolate::JscIsolate,
-    initialized: bool,
+pub struct JSCRuntime {
+    ctx: *mut std::ffi::c_void,
 }
 
-impl JscRuntime {
+unsafe impl Send for JSCRuntime {}
+unsafe impl Sync for JSCRuntime {}
+
+impl JSCRuntime {
     pub fn new() -> Self {
         Self {
-            isolate: crate::isolate::JscIsolate::new(),
-            initialized: false,
+            ctx: std::ptr::null_mut(),
         }
     }
 
-    pub fn init(&mut self) -> Result<(), jscError> {
-        self.initialized = true;
-        Ok(())
-    }
-
-    pub fn is_initialized(&self) -> bool {
-        self.initialized
-    }
-
-    pub fn execute(&self, _code: &str) -> Result<String, jscError> {
-        if !self.initialized {
-            return Err(jscError::NotInitialized);
+    pub fn eval(&self, code: &str) -> Result<String, JSCError> {
+        if code.trim().is_empty() {
+            return Ok(String::new());
         }
-        Ok(String::new())
+        Err(JSCError::ExecutionFailed(
+            "JSC native engine not linked; enable the 'jsc_native' feature".into()
+        ))
+    }
+
+    pub fn execute_script(&self, _filename: &str, source: &str) -> Result<String, JSCError> {
+        self.eval(source)
+    }
+
+    pub fn execute_module(&self, _filename: &str, source: &str) -> Result<String, JSCError> {
+        self.eval(source)
+    }
+
+    pub fn context(&self) -> *mut std::ffi::c_void {
+        self.ctx
+    }
+
+    pub fn set_exception_handler(&self) {
     }
 }
 
-impl Default for JscRuntime {
+impl Default for JSCRuntime {
     fn default() -> Self {
         Self::new()
     }

@@ -10,24 +10,41 @@ pub fn run_bench(args: BenchArgs) -> anyhow::Result<()> {
     match args.category.as_deref() {
         None | Some("all") => {
             bench_runtime()?;
+            bench_engine()?;
             bench_http()?;
             bench_memory()?;
             bench_startup()?;
             Ok(())
         }
         Some("runtime") => bench_runtime(),
+        Some("engine") => bench_engine(),
         Some("http") => bench_http(),
         Some("memory") => bench_memory(),
         Some("startup") => bench_startup(),
         Some(cat) => anyhow::bail!(
-            "Unknown benchmark category: {cat}. Use: runtime, http, memory, startup"
+            "Unknown benchmark category: {cat}. Use: runtime, engine, http, memory, startup"
         ),
     }
 }
 
+fn bench_engine() -> anyhow::Result<()> {
+    println!("JS Engine Benchmark (via klyron_engine)");
+    let results = klyron_engine::benchmark_all_engines();
+    let mut sorted: Vec<_> = results.into_iter().collect();
+    sorted.sort_by_key(|(_, r)| r.eval_time);
+    for (kind, result) in &sorted {
+        let status = if result.success { "OK" } else { "FAIL" };
+        println!("  {kind:<8} {status}  {:>12?}", result.eval_time);
+    }
+    if let Some((best, _)) = sorted.first() {
+        println!("  Best engine: {best}");
+    }
+    Ok(())
+}
+
 fn bench_runtime() -> anyhow::Result<()> {
     println!("Runtime Benchmark");
-    let result = BenchmarkRunner::run_runtime("runtime_bench", &mut || {
+    let result = BenchmarkRunner::run_micro("runtime_bench", &mut || {
         let _ = 1 + 1;
     })?;
     println!(

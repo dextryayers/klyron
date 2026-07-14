@@ -5,3 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+rustyline = "14"
+rustyline-derive = "0.10"
+anyhow.workspace = true
+tracing.workspace = true
+serde_json.workspace = true

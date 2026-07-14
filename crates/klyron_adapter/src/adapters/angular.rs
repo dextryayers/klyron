@@ -47,7 +47,18 @@ impl FrameworkAdapter for AngularAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("npx".into(), vec!["@angular/cli@latest".into(), "new".into(), name.into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
+        }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
         std::fs::create_dir_all(project_dir.join("src/app/pages/home"))?;
@@ -58,7 +69,7 @@ impl FrameworkAdapter for AngularAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("angular.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
   "version": 1,
   "newProjectRoot": "projects",
@@ -102,7 +113,7 @@ impl FrameworkAdapter for AngularAdapter {
 }"#, vars))?;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "version": "1.0.0",
   "private": true,
@@ -190,7 +201,7 @@ impl FrameworkAdapter for AngularAdapter {
 }"#)?;
 
         std::fs::write(project_dir.join("src/index.html"),
-            klyron_template::TemplateEngine::render(r#"<!doctype html>
+            klyron_template::TemplateEngine::render_static(r#"<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -252,7 +263,7 @@ export class AppComponent {}
 "#)?;
 
         std::fs::write(project_dir.join("src/app/pages/home/home.component.ts"),
-            klyron_template::TemplateEngine::render(r#"import { Component } from '@angular/core'
+            klyron_template::TemplateEngine::render_static(r#"import { Component } from '@angular/core'
 
 @Component({
   selector: 'app-home',
@@ -287,7 +298,7 @@ export default tseslint.config(
   { ignores: ['dist'] },
 )"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 Angular project
 

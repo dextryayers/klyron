@@ -1,20 +1,18 @@
-//! JS value conversion for Jsc
-
-use crate::error::jscError;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
-pub enum JscValue {
+pub enum JSCValue {
     Null,
     Undefined,
     Boolean(bool),
     Integer(i64),
     Number(f64),
     String(String),
-    Array(Vec<JscValue>),
-    Object(std::collections::HashMap<String, JscValue>),
+    Array(Vec<JSCValue>),
+    Object(HashMap<String, JSCValue>),
 }
 
-impl JscValue {
+impl JSCValue {
     pub fn from_json(json: &serde_json::Value) -> Self {
         match json {
             serde_json::Value::Null => Self::Null,
@@ -58,26 +56,18 @@ impl JscValue {
     }
 }
 
-impl From<String> for JscValue {
-    fn from(s: String) -> Self {
-        Self::String(s)
-    }
+impl From<String> for JSCValue {
+    fn from(s: String) -> Self { Self::String(s) }
 }
 
-impl From<i64> for JscValue {
-    fn from(i: i64) -> Self {
-        Self::Integer(i)
-    }
+impl From<i64> for JSCValue {
+    fn from(i: i64) -> Self { Self::Integer(i) }
 }
 
-impl From<f64> for JscValue {
-    fn from(n: f64) -> Self {
-        Self::Number(n)
-    }
+impl From<f64> for JSCValue {
+    fn from(n: f64) -> Self { Self::Number(n) }
 }
 
-impl From<bool> for JscValue {
-    fn from(b: bool) -> Self {
-        Self::Boolean(b)
-    }
+impl From<bool> for JSCValue {
+    fn from(b: bool) -> Self { Self::Boolean(b) }
 }

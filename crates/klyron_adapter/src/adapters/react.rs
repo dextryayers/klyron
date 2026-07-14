@@ -53,12 +53,17 @@ impl FrameworkAdapter for ReactAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("npx".into(), vec!["create-vite@latest".into(), name.into(), "--template".into(), "react-ts".into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        if options.template_vars.get("external").map(|s| s == "true").unwrap_or(false) {
-            let status = std::process::Command::new("npx")
-                .args(["create-react-app@latest", name]).current_dir(&options.dir).status()?;
-            if !status.success() { anyhow::bail!("External scaffolding failed"); }
-            return Ok(());
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
         }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
@@ -69,7 +74,7 @@ impl FrameworkAdapter for ReactAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "private": true,
   "version": "1.0.0",
@@ -107,7 +112,7 @@ impl FrameworkAdapter for ReactAdapter {
 }"#, vars))?;
 
         std::fs::write(project_dir.join("tsconfig.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "compilerOptions": {
     "target": "ES2022",
     "useDefineForClassFields": true,
@@ -148,7 +153,7 @@ export default defineConfig({
 })"#)?;
 
         std::fs::write(project_dir.join("index.html"),
-            klyron_template::TemplateEngine::render(r#"<!doctype html>
+            klyron_template::TemplateEngine::render_static(r#"<!doctype html>
 <html lang="en">
   <head><meta charset="UTF-8" /><link rel="icon" type="image/svg+xml" href="/vite.svg" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>{{ name }}</title></head>
   <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
@@ -181,7 +186,7 @@ function App() {
 export default App"#)?;
 
         std::fs::write(project_dir.join("src/pages/Home.tsx"),
-            klyron_template::TemplateEngine::render(r#"function Home() {
+            klyron_template::TemplateEngine::render_static(r#"function Home() {
   return <div><h1>Welcome to {{ name }}</h1></div>
 }
 export default Home"#, vars))?;
@@ -217,7 +222,7 @@ export default tseslint.config(
         std::fs::write(project_dir.join("public/vite.svg"), r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><title>Vite</title><path d="M29.883 6.146L16.741 29.645a.423.423 0 01-.744 0L2.117 6.146a.423.423 0 01.508-.606L16 9.678l13.375-4.138a.423.423 0 01.508.606z" fill="#646CFF"/></svg>"##)?;
 
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 React + Vite + TypeScript
 npm run dev
 "#, vars))?;

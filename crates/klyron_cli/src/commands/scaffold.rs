@@ -25,7 +25,7 @@ pub fn scaffold_via_external_cli(framework: &str, args: &ScaffoldArgs) -> anyhow
     }
     let name = &args.name;
     let dir = &args.dir;
-    let version_flag = args.version.as_deref().map(|v| format!("--version {v}")).unwrap_or_default();
+    let _version_flag = args.version.as_deref().map(|v| format!("--version {v}")).unwrap_or_default();
 
     let (cmd, base_args): (&str, Vec<String>) = match framework {
         "react" => ("npx", vec!["create-vite@latest".into(), name.into(), "--template".into(), "react-ts".into()]),
@@ -101,6 +101,7 @@ pub fn scaffold_via_adapter(args: &ScaffoldArgs, framework: &str) -> anyhow::Res
         dir: args.dir.clone(),
         version: args.version.clone(),
         template_vars,
+        external: args.external,
     };
 
     let rt = tokio::runtime::Runtime::new()?;

@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 pub mod adapters;
 pub mod js_versions;
+pub mod laravel_ecosystem;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,7 @@ pub struct ScaffoldOptions {
     pub dir: PathBuf,
     pub version: Option<String>,
     pub template_vars: HashMap<String, String>,
+    pub external: bool,
 }
 
 impl Default for ScaffoldOptions {
@@ -29,6 +31,7 @@ impl Default for ScaffoldOptions {
             dir: PathBuf::from("."),
             version: None,
             template_vars: HashMap::new(),
+            external: false,
         }
     }
 }
@@ -67,6 +70,10 @@ pub trait FrameworkAdapter: Send + Sync {
     async fn test(&self, dir: &Path, filter: Option<&str>) -> anyhow::Result<()>;
     async fn lint(&self, dir: &Path, fix: bool) -> anyhow::Result<()>;
     async fn format(&self, dir: &Path, write: bool) -> anyhow::Result<()>;
+    fn external_scaffold_command(&self, _name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        None
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> anyhow::Result<()>;
 }
 

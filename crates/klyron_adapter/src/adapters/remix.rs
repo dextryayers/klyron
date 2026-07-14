@@ -51,7 +51,18 @@ impl FrameworkAdapter for RemixAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("npx".into(), vec!["create-remix@latest".into(), name.into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
+        }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
         std::fs::create_dir_all(project_dir.join("app/routes"))?;
@@ -62,7 +73,7 @@ impl FrameworkAdapter for RemixAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "version": "1.0.0",
   "private": true,
@@ -136,7 +147,7 @@ export default defineConfig({
 }"#)?;
 
         std::fs::write(project_dir.join("app/root.tsx"),
-            klyron_template::TemplateEngine::render(r#"import { Links, LiveReload, Meta, Outlet, Scripts, ScrollRestoration } from '@remix-run/react'
+            klyron_template::TemplateEngine::render_static(r#"import { Links, LiveReload, Meta, Outlet, Scripts, ScrollRestoration } from '@remix-run/react'
 import './tailwind.css'
 
 export default function App() {
@@ -160,7 +171,7 @@ export default function App() {
 "#, vars))?;
 
         std::fs::write(project_dir.join("app/routes/_index.tsx"),
-            klyron_template::TemplateEngine::render(r#"export default function Index() {
+            klyron_template::TemplateEngine::render_static(r#"export default function Index() {
   return (
     <main>
       <h1>Welcome to {{ name }}</h1>
@@ -223,7 +234,7 @@ export default tseslint.config(
   { ignores: ['build'] },
 )"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 Remix project
 

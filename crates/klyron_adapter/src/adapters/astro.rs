@@ -47,12 +47,17 @@ impl FrameworkAdapter for AstroAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("npm".into(), vec!["create".into(), "astro@latest".into(), name.into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        if options.template_vars.get("external").map(|s| s == "true").unwrap_or(false) {
-            let status = std::process::Command::new("npx")
-                .args(["create-astro@latest", name]).current_dir(&options.dir).status()?;
-            if !status.success() { anyhow::bail!("External scaffolding failed"); }
-            return Ok(());
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
         }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
@@ -65,7 +70,7 @@ impl FrameworkAdapter for AstroAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}", "version": "1.0.0", "private": true, "type": "module",
   "scripts": { "dev": "astro dev", "build": "astro build", "preview": "astro preview", "check": "astro check", "lint": "eslint .", "format": "prettier --write ." },
   "dependencies": { "astro": "^5.4.0" },
@@ -80,7 +85,7 @@ export default defineConfig({ site: 'https://example.com', server: { port: 4321,
             r#"{"compilerOptions":{"target":"ESNext","module":"ESNext","moduleResolution":"bundler","allowImportingTsExtensions":true,"isolatedModules":true,"noEmit":true,"strict":true,"skipLibCheck":true},"include":["src"]}"#)?;
 
         std::fs::write(project_dir.join("src/pages/index.astro"),
-            klyron_template::TemplateEngine::render(r#"---
+            klyron_template::TemplateEngine::render_static(r#"---
 import Layout from '../layouts/Layout.astro'
 ---
 <Layout title="{{ name }}"><main><h1>Welcome to {{ name }}</h1></main></Layout>"#, vars))?;
@@ -103,7 +108,7 @@ const { title } = Astro.props
 import astro from 'eslint-plugin-astro'
 export default [js.configs.recommended, ...astro.configs.recommended, { ignores: ['dist'] }]"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}\nAstro project\nnpm run dev"#, vars))?;
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}\nAstro project\nnpm run dev"#, vars))?;
 
         Ok(())
     }

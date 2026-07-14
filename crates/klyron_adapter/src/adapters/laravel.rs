@@ -101,7 +101,18 @@ impl FrameworkAdapter for LaravelAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("composer".into(), vec!["create-project".into(), "laravel/laravel".into(), name.into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
+        }
         let version = options.version.as_deref().unwrap_or("11");
         let (fw_dep, php_req, phpunit_ver) = version_composer(version);
         let sanctum_dep = version_sanctum(version);
@@ -141,7 +152,7 @@ exit($status);
 "#)?;
 
         std::fs::write(project_dir.join("composer.json"),
-            klyron_template::TemplateEngine::render(
+            klyron_template::TemplateEngine::render_static(
                 &format!(r#"{{
   "name": "app/{{ name }}",
   "type": "project",
@@ -256,14 +267,14 @@ return $app;
             r#"<?php namespace Database\Factories; use Illuminate\Database\Eloquent\Factories\Factory; class PostFactory extends Factory { protected $model = \App\Models\Post::class; public function definition() { return ['title' => fake()->sentence(), 'content' => fake()->paragraph(), 'user_id' => \App\Models\User::factory()]; } }"#)?;
 
         std::fs::write(project_dir.join("resources/views/layouts/app.blade.php"),
-            klyron_template::TemplateEngine::render(r#"<!doctype html>
+            klyron_template::TemplateEngine::render_static(r#"<!doctype html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>{{ name }}</title>@vite('resources/css/app.css')</head>
 <body><div id="app">@yield('content')</div></body>
 </html>"#, vars))?;
 
         std::fs::write(project_dir.join("resources/views/welcome.blade.php"),
-            klyron_template::TemplateEngine::render(r#"@extends('layouts.app') @section('content')<h1>Welcome to {{ name }}</h1>@endsection"#, vars))?;
+            klyron_template::TemplateEngine::render_static(r#"@extends('layouts.app') @section('content')<h1>Welcome to {{ name }}</h1>@endsection"#, vars))?;
 
         std::fs::write(project_dir.join("resources/css/app.css"), r#"@tailwind base; @tailwind components; @tailwind utilities;"#)?;
 
@@ -301,7 +312,7 @@ export default defineConfig({
 </phpunit>"#)?;
 
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 Laravel {{ version }} application
 

@@ -5,16 +5,153 @@ pub mod scaffold_inline;
 pub(crate) use commands::helpers::*;
 pub(crate) use scaffold_inline::*;
 
-use clap::{Parser, Subcommand, Args};
-use klyron_core::Runtime;
+use std::path::{Path, PathBuf};
+use clap::{Parser, Subcommand, Args, CommandFactory};
 use klyron_adapter::AdapterRegistry;
 use klyron_adapter::adapters::register_all;
-use std::path::{Path, PathBuf};
+use klyron_core::Runtime;
+use klyron_engine::{JsEngineKind, EngineRuntime, detect_best_engine, benchmark_all_engines};
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use tracing_subscriber::EnvFilter;
 
+// ── Engine helpers ────────────────────────────────────────────────────────
+
+pub fn resolve_engine(name: Option<&str>) -> anyhow::Result<Option<EngineRuntime>> {
+    let name = match name {
+        Some(n) => n,
+        None => return Ok(None),
+    };
+    match name.to_lowercase().as_str() {
+        "auto" => {
+            let kind = detect_best_engine();
+            log_info(format!("Detected best engine: {kind}"));
+            Ok(Some(EngineRuntime::new(kind).map_err(|e| anyhow::anyhow!("Engine {kind}: {e}"))?))
+        }
+        "v8" => Ok(Some(EngineRuntime::new(JsEngineKind::V8).map_err(|e| anyhow::anyhow!("V8 engine: {e}"))?)),
+        "boa" => Ok(Some(EngineRuntime::new(JsEngineKind::Boa).map_err(|e| anyhow::anyhow!("Boa engine: {e}"))?)),
+        "quickjs" => Ok(Some(EngineRuntime::new(JsEngineKind::QuickJS).map_err(|e| anyhow::anyhow!("QuickJS engine: {e}"))?)),
+        "jsc" => Ok(Some(EngineRuntime::new(JsEngineKind::JSC).map_err(|e| anyhow::anyhow!("JSC engine: {e}"))?)),
+        other => anyhow::bail!("Unknown engine '{other}'. Available: v8, boa, quickjs, jsc, auto"),
+    }
+}
+
+pub fn exec_with_engine(engine: &EngineRuntime, code: &str) -> anyhow::Result<String> {
+    engine.eval(code).map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+pub fn exec_file_with_engine(engine: &EngineRuntime, path: &std::path::Path) -> anyhow::Result<String> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("Cannot read {}: {e}", path.display()))?;
+    let filename = path.to_str().unwrap_or("<file>");
+    engine.execute_script(filename, &source).map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+pub fn engine_info_json() -> serde_json::Value {
+    let results = benchmark_all_engines();
+    let engines: Vec<serde_json::Value> = results.iter().map(|(kind, result)| {
+        serde_json::json!({
+            "name": kind.name(),
+            "available": result.success,
+            "eval_time_ns": result.eval_time.as_nanos(),
+            "error": result.error,
+        })
+    }).collect();
+    serde_json::json!({ "js_engines": engines, "best": detect_best_engine().name() })
+}
+
+// ── Verbosity / Output ───────────────────────────────────────────────────
+
+static VERBOSITY: Lazy<Mutex<Verbosity>> = Lazy::new(|| Mutex::new(Verbosity::Normal));
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verbosity {
+    Quiet,
+    Normal,
+    Verbose,
+}
+
+impl Verbosity {
+    #[inline]
+    pub fn is_quiet(&self) -> bool { *self == Verbosity::Quiet }
+    #[inline]
+    pub fn is_verbose(&self) -> bool { *self == Verbosity::Verbose }
+}
+
+pub fn set_verbosity(count: u8) {
+    let mut v = VERBOSITY.lock();
+    *v = match count {
+        0 => Verbosity::Normal,
+        1 => Verbosity::Verbose,
+        _ => Verbosity::Quiet,
+    };
+}
+
+#[inline]
+pub fn log_info(msg: impl AsRef<str>) {
+    if !VERBOSITY.lock().is_quiet() {
+        eprintln!("{}", msg.as_ref());
+    }
+}
+
+#[inline]
+pub fn log_debug(msg: impl AsRef<str>) {
+    if VERBOSITY.lock().is_verbose() {
+        eprintln!("[debug] {}", msg.as_ref());
+    }
+}
+
+// ── Extensions (freshly built each call; Extension is not Clone) ─────────
+
+#[inline]
+pub fn all_extensions() -> Vec<deno_core::Extension> {
+    vec![
+        klyron_ext_console::init(),
+        klyron_ext_timers::init(),
+        klyron_ext_fs::init(),
+        klyron_ext_net::init(),
+        klyron_ext_http::init(),
+        klyron_ext_crypto::init(),
+        klyron_ext_web::init(),
+        klyron_ext_node::init(),
+        klyron_ext_klyron::init(),
+        klyron_ext_html::init(),
+        klyron_ext_ffi::init(),
+        klyron_ext_ws::init(),
+    ]
+}
+
+// ── Adapter Registry (lazy-loaded) ───────────────────────────────────────
+
+static ADAPTER_REGISTRY: Lazy<Mutex<AdapterRegistry>> = Lazy::new(|| {
+    let mut reg = AdapterRegistry::new();
+    register_all(&mut reg);
+    Mutex::new(reg)
+});
+
+// ── CLI Structure ─────────────────────────────────────────────────────────
+
+const STYLES: clap::builder::Styles = clap::builder::Styles::styled()
+    .header(clap::builder::styling::AnsiColor::Green.on_default().bold())
+    .usage(clap::builder::styling::AnsiColor::Green.on_default().bold())
+    .literal(clap::builder::styling::AnsiColor::Cyan.on_default().bold())
+    .placeholder(clap::builder::styling::AnsiColor::White.on_default())
+    .error(clap::builder::styling::AnsiColor::Red.on_default().bold())
+    .valid(clap::builder::styling::AnsiColor::Cyan.on_default().bold())
+    .invalid(clap::builder::styling::AnsiColor::Yellow.on_default().bold());
+
 #[derive(Parser)]
-#[command(name = "klyron", version, about = "Klyron - Universal Polyglot Runtime", long_about = None)]
+#[command(name = "klyron", version, about = "Klyron - Universal Polyglot Runtime", long_about = None, styles = STYLES)]
 pub struct Cli {
+    #[arg(short = 'v', long = "verbose", global = true, action = clap::ArgAction::Count, help = "Increase verbosity (use -q for quiet)")]
+    pub verbose: u8,
+
+    #[arg(short = 'q', long = "quiet", global = true, default_value_t = false, conflicts_with = "verbose")]
+    pub quiet: bool,
+
+    #[arg(long = "engine", global = true, help = "JavaScript engine to use (v8, boa, quickjs, jsc, auto)")]
+    pub engine: Option<String>,
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -35,6 +172,12 @@ pub struct CreateArgs {
     pub external: bool,
     #[arg(long)]
     pub stack: Option<String>,
+}
+
+#[derive(Args)]
+pub struct InfoArgs {
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Subcommand)]
@@ -139,26 +282,110 @@ pub enum Commands {
     Init,
     Upgrade,
     Doctor,
-    Info,
+    Info { #[command(flatten)] args: InfoArgs },
     Version,
     Clean,
     Telemetry { #[command(flatten)] args: commands::utils::TelemetryArgs },
     Config { #[command(flatten)] args: commands::utils::ConfigArgs },
+    Laravel { #[command(subcommand)] action: commands::laravel::LaravelCommand },
     Serve { #[arg(long, default_value = "localhost")] host: String, #[arg(long, default_value_t = 3000)] port: u16, #[arg(long)] dir: Option<PathBuf>, #[arg(long)] watch: bool },
     Completions { shell: clap_complete::Shell },
 }
 
+// ── Dispatch Table ────────────────────────────────────────────────────────
+
+type CmdFn = fn(Commands) -> anyhow::Result<()>;
+
+static COMMAND_TABLE: Lazy<Vec<(&'static str, CmdFn)>> = Lazy::new(|| {
+    vec![
+        ("eval", dispatch_eval as CmdFn),
+        ("info", dispatch_info as CmdFn),
+        ("create", dispatch_create as CmdFn),
+    ]
+});
+
+fn dispatch_eval(cmd: Commands) -> anyhow::Result<()> {
+    if let Commands::Eval { args } = cmd {
+        commands::runtime::run_eval(&args.code, args.module, all_extensions())
+    } else {
+        unreachable!()
+    }
+}
+
+fn dispatch_info(cmd: Commands) -> anyhow::Result<()> {
+    if let Commands::Info { args } = cmd {
+        handle_info(args.json)
+    } else {
+        unreachable!()
+    }
+}
+
+fn dispatch_create(cmd: Commands) -> anyhow::Result<()> {
+    if let Commands::Create { args } = cmd {
+        handle_create(args)
+    } else {
+        unreachable!()
+    }
+}
+
+// ── Info handler ──────────────────────────────────────────────────────────
+
+fn handle_info(json: bool) -> anyhow::Result<()> {
+    let js_engines = engine_info_json();
+    let mut all_engines: Vec<&str> = vec!["c", "cpp", "ts", "js", "py", "rb", "php", "go", "zig", "rs"];
+    // Add available JS runtimes
+    if let Some(engines) = js_engines["js_engines"].as_array() {
+        for e in engines {
+            if e["available"].as_bool().unwrap_or(false) {
+                all_engines.push(e["name"].as_str().unwrap_or("?"));
+            }
+        }
+    }
+
+    let info = serde_json::json!({
+        "name": "klyron",
+        "version": env!("CARGO_PKG_VERSION"),
+        "engines": all_engines,
+        "js_engines": js_engines["js_engines"],
+        "best_engine": js_engines["best"],
+        "adapters": {
+            "count": ADAPTER_REGISTRY.lock().names().len(),
+        }
+    });
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&info)?);
+    } else {
+        println!("Klyron v{}", info["version"]);
+        let engines = info["engines"].as_array().unwrap().iter()
+            .map(|v| v.as_str().unwrap()).collect::<Vec<_>>().join(", ");
+        println!("Engines: {engines}");
+        println!("Best JS engine: {}", info["best_engine"].as_str().unwrap_or("unknown"));
+        if let Some(js_arr) = info["js_engines"].as_array() {
+            for e in js_arr {
+                let name = e["name"].as_str().unwrap_or("?");
+                let avail = if e["available"].as_bool().unwrap_or(false) { "available" } else { "unavailable" };
+                println!("  JS/{name}: {avail}");
+            }
+        }
+        println!("Adapters: {} registered", info["adapters"]["count"]);
+    }
+    Ok(())
+}
+
+// ── Create handler ────────────────────────────────────────────────────────
+
 fn list_frameworks() {
-    let mut registry = AdapterRegistry::new();
-    register_all(&mut registry);
+    let registry = ADAPTER_REGISTRY.lock();
     let mut names: Vec<&str> = registry.names().into_iter().collect();
     names.sort();
-    println!("Available frameworks ({}):", names.len());
-    for name in names {
+    let count = names.len();
+    println!("Available frameworks ({count}):");
+    for name in &names {
         let adapter = registry.get(name).unwrap();
         let versions = adapter.supported_versions();
         let default = adapter.default_version();
-        println!("  {:<12} versions: {:?} (default: {})", name, versions, default);
+        println!("  {name:<12} versions: {versions:?} (default: {default})");
     }
     println!();
     println!("Additional frameworks available via --external:");
@@ -178,14 +405,13 @@ fn handle_create(args: CreateArgs) -> anyhow::Result<()> {
     }
 
     if args.versions {
-        let mut registry = AdapterRegistry::new();
-        register_all(&mut registry);
+        let registry = ADAPTER_REGISTRY.lock();
         if let Some(adapter) = registry.get(framework) {
             let versions = adapter.supported_versions();
             let default = adapter.default_version();
-            println!("{} supported versions: {:?} (default: {})", framework, versions, default);
+            println!("{framework} supported versions: {versions:?} (default: {default})");
         } else {
-            println!("{} is not in the adapter registry. Use --external to scaffold via official CLI.", framework);
+            println!("{framework} is not in the adapter registry. Use --external to scaffold via official CLI.");
         }
         return Ok(());
     }
@@ -210,6 +436,8 @@ fn handle_create(args: CreateArgs) -> anyhow::Result<()> {
     commands::scaffold::scaffold_via_adapter(&scaffold_args, framework)
 }
 
+// ── Run CLI ───────────────────────────────────────────────────────────────
+
 pub fn run_cli() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
@@ -217,26 +445,69 @@ pub fn run_cli() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
-    dispatch_command(cli.command)
+
+    if cli.quiet {
+        set_verbosity(2);
+    } else {
+        set_verbosity(cli.verbose);
+    }
+
+    log_debug("Running klyron command");
+
+    let engine = resolve_engine(cli.engine.as_deref())?;
+
+    dispatch_command(cli.command, engine)
 }
 
-pub fn dispatch_command(cmd: Commands) -> anyhow::Result<()> {
+// ── Dispatch ──────────────────────────────────────────────────────────────
+
+pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>) -> anyhow::Result<()> {
+    if let Some(&handler) = COMMAND_TABLE.iter().find(|(name, _)| variant_name(&cmd) == *name).map(|(_, f)| f) {
+        return handler(cmd);
+    }
+
     match cmd {
-        Commands::Eval { args } => commands::runtime::run_eval(&args.code, args.module, all_extensions()),
-        Commands::Run { args } => commands::runtime::run_file(args, all_extensions()),
-        Commands::Repl => commands::runtime::repl_loop(),
+        Commands::Eval { args } => {
+            if let Some(eng) = engine {
+                let result = exec_with_engine(&eng, &args.code)?;
+                if !result.is_empty() { println!("{result}"); }
+                Ok(())
+            } else {
+                commands::runtime::run_eval(&args.code, args.module, all_extensions())
+            }
+        }
+        Commands::Run { args } => {
+            if let Some(eng) = engine {
+                let result = exec_file_with_engine(&eng, &args.path)?;
+                if !result.is_empty() { println!("{result}"); }
+                Ok(())
+            } else {
+                commands::runtime::run_file(args, all_extensions())
+            }
+        }
+        Commands::Repl => {
+            let eng = engine;
+            commands::runtime::repl_loop_ext(eng)
+        }
         Commands::Shell => commands::runtime::shell_loop(),
         Commands::Bundle { entry, output, minify: _ } => {
-            let source = std::fs::read_to_string(&entry)
-                .map_err(|e| anyhow::anyhow!("Cannot read {}: {e}", entry.display()))?;
-            let runtime = Runtime::builder()
-                .enable_typescript(true)
-                .extensions(all_extensions())
-                .build()?;
-            let js = runtime.execute_script(entry.to_str().unwrap_or("<entry>"), &source)?;
-            std::fs::write(&output, js)
-                .map_err(|e| anyhow::anyhow!("Cannot write {}: {e}", output.display()))?;
-            println!("Bundled {} -> {}", entry.display(), output.display());
+            if let Some(eng) = engine {
+                let result = exec_file_with_engine(&eng, &entry)?;
+                std::fs::write(&output, result)
+                    .map_err(|e| anyhow::anyhow!("Cannot write {}: {e}", output.display()))?;
+                log_info(format!("Bundled {} -> {} (JS engine)", entry.display(), output.display()));
+            } else {
+                let source = std::fs::read_to_string(&entry)
+                    .map_err(|e| anyhow::anyhow!("Cannot read {}: {e}", entry.display()))?;
+                let runtime = Runtime::builder()
+                    .enable_typescript(true)
+                    .extensions(all_extensions())
+                    .build()?;
+                let js = runtime.execute_script(entry.to_str().unwrap_or("<entry>"), &source)?;
+                std::fs::write(&output, js)
+                    .map_err(|e| anyhow::anyhow!("Cannot write {}: {e}", output.display()))?;
+                log_info(format!("Bundled {} -> {}", entry.display(), output.display()));
+            }
             Ok(())
         }
         Commands::Cc { source, args, watch } => run_engine_watch("C", &source, watch, |watch_path| {
@@ -284,11 +555,31 @@ pub fn dispatch_command(cmd: Commands) -> anyhow::Result<()> {
             let mut eng = engines::RsEngine::new()?;
             eng.exec(&code, None)
         }),
-        Commands::Js { source, watch } => run_engine_watch("Js", &source, watch, |watch_path| {
-            let code = std::fs::read_to_string(watch_path).map_err(|e| anyhow::anyhow!("{e}"))?;
-            let mut eng = engines::JsEngine::new()?;
-            eng.exec(&code)
-        }),
+        Commands::Js { source, watch } => {
+            if engine.is_some() {
+                let path = std::path::PathBuf::from(&source);
+                let exec_fn = |p: &std::path::Path| -> anyhow::Result<String> {
+                    let eng = resolve_engine(Some("auto"))?.unwrap();
+                    let code = std::fs::read_to_string(p)?;
+                    eng.execute_script(p.to_str().unwrap_or("<file>"), &code).map_err(|e| anyhow::anyhow!("{e}"))
+                };
+                let result = exec_fn(&path)?;
+                println!("{result}");
+                if watch {
+                    let path_clone = path.clone();
+                    crate::watch_file(&path, move || {
+                        if let Ok(r) = exec_fn(&path_clone) { println!("{r}"); }
+                    });
+                }
+                Ok(())
+            } else {
+                run_engine_watch("Js", &source, watch, |watch_path| {
+                    let code = std::fs::read_to_string(watch_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+                    let mut eng = engines::JsEngine::new()?;
+                    eng.exec(&code)
+                })
+            }
+        }
         Commands::Artisan { args } => commands::artisan::run_artisan(&args.args, args.project.as_deref()),
         Commands::Composer { args } => commands::artisan::run_composer(&args.args, args.project.as_deref()),
         Commands::Blade { args } => commands::artisan::run_blade(&args.view, args.data.as_deref(), args.project.as_deref()),
@@ -363,6 +654,8 @@ pub fn dispatch_command(cmd: Commands) -> anyhow::Result<()> {
         Commands::Whoami => commands::registry::run_whoami(),
         Commands::Search { args } => commands::registry::run_search(&args.query),
         Commands::InfoCmd { args } => commands::registry::run_info(&args.package),
+        Commands::Laravel { action } => commands::laravel::run_laravel(action),
+        Commands::Info { args } => handle_info(args.json),
         Commands::Workspace { action } => commands::workspace::run_workspace(action),
         Commands::Plugin { action } => commands::plugin::run_plugin(action),
         Commands::Cache { action } => commands::cache::run_cache(action),
@@ -374,26 +667,25 @@ pub fn dispatch_command(cmd: Commands) -> anyhow::Result<()> {
         Commands::Init => commands::utils::run_init(),
         Commands::Upgrade => commands::utils::run_upgrade(),
         Commands::Doctor => commands::utils::run_doctor(),
-        Commands::Info => commands::utils::run_info(),
         Commands::Version => commands::utils::run_version(),
         Commands::Clean => commands::utils::run_clean(),
         Commands::Telemetry { args } => commands::utils::run_telemetry(args.enabled),
         Commands::Config { args } => commands::utils::run_config(args.key, args.value),
         Commands::Serve { host, port, dir, watch } => {
             let serve_dir = dir.unwrap_or_else(|| std::env::current_dir().unwrap());
-            println!("Klyron dev server: http://{host}:{port}");
-            println!("Serving: {}", serve_dir.display());
+            log_info(format!("Klyron dev server: http://{host}:{port}"));
+            log_info(format!("Serving: {}", serve_dir.display()));
             if watch {
                 let serve_dir_clone = serve_dir.clone();
                 let host_clone = host.clone();
                 watch_file(&serve_dir_clone, move || {
-                    println!("Directory change detected, server running at http://{host_clone}:{port}");
+                    log_info(format!("Directory change detected, server running at http://{host_clone}:{port}"));
                 });
             }
             start_dev_server(&host, port, &serve_dir)
         }
         Commands::Completions { shell } => {
-            let mut cmd = <Cli as clap::CommandFactory>::command();
+            let mut cmd = <Cli as CommandFactory>::command();
             let name = cmd.get_name().to_string();
             clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
             Ok(())
@@ -401,22 +693,16 @@ pub fn dispatch_command(cmd: Commands) -> anyhow::Result<()> {
     }
 }
 
-fn all_extensions() -> Vec<deno_core::Extension> {
-    vec![
-        klyron_ext_console::init(),
-        klyron_ext_timers::init(),
-        klyron_ext_fs::init(),
-        klyron_ext_net::init(),
-        klyron_ext_http::init(),
-        klyron_ext_crypto::init(),
-        klyron_ext_web::init(),
-        klyron_ext_node::init(),
-        klyron_ext_klyron::init(),
-        klyron_ext_html::init(),
-        klyron_ext_ffi::init(),
-        klyron_ext_ws::init(),
-    ]
+fn variant_name(cmd: &Commands) -> &'static str {
+    match cmd {
+        Commands::Eval { .. } => "eval",
+        Commands::Info { .. } => "info",
+        Commands::Create { .. } => "create",
+        _ => "",
+    }
 }
+
+// ── Engine helpers ────────────────────────────────────────────────────────
 
 fn run_engine_watch<F>(name: &str, source: &str, watch: bool, f: F) -> anyhow::Result<()>
 where

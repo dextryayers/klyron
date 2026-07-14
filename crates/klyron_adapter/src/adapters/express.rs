@@ -56,12 +56,17 @@ impl FrameworkAdapter for ExpressAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("npx".into(), vec!["express-generator@latest".into(), name.into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        if options.template_vars.get("external").map(|s| s == "true").unwrap_or(false) {
-            let status = std::process::Command::new("npx")
-                .args(["express-generator@latest", "--no-view", name]).current_dir(&options.dir).status()?;
-            if !status.success() { anyhow::bail!("External scaffolding failed"); }
-            return Ok(());
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
         }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
@@ -71,7 +76,7 @@ impl FrameworkAdapter for ExpressAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}", "version": "1.0.0", "private": true, "type": "module",
   "scripts": { "dev": "node --watch src/index.js", "start": "node src/index.js", "test": "jest", "lint": "eslint .", "format": "prettier --write ." },
   "dependencies": { "express": "^5.1.0", "cors": "^2.8.5", "morgan": "^1.10.0" },
@@ -79,7 +84,7 @@ impl FrameworkAdapter for ExpressAdapter {
 }"#, vars))?;
 
         std::fs::write(project_dir.join("src/index.js"),
-            klyron_template::TemplateEngine::render(r#"import express from 'express'
+            klyron_template::TemplateEngine::render_static(r#"import express from 'express'
 import cors from 'cors'
 import morgan from 'morgan'
 import routes from './routes/index.js'
@@ -103,7 +108,7 @@ export default router"#)?;
         std::fs::write(project_dir.join(".prettierrc"), r#"{"semi": true, "singleQuote": true, "tabWidth": 2, "trailingComma": "es5", "printWidth": 100}"#)?;
         std::fs::write(project_dir.join("eslint.config.js"), r#"import js from '@eslint/js'\nexport default [js.configs.recommended, { ignores: ['node_modules'] }]"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}\nExpress.js API\nnpm run dev"#, vars))?;
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}\nExpress.js API\nnpm run dev"#, vars))?;
 
         Ok(())
     }

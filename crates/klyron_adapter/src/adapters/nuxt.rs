@@ -47,7 +47,18 @@ impl FrameworkAdapter for NuxtAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("npx".into(), vec!["nuxi@latest".into(), "init".into(), name.into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
+        }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
         std::fs::create_dir_all(project_dir.join("pages"))?;
@@ -60,7 +71,7 @@ impl FrameworkAdapter for NuxtAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "version": "1.0.0",
   "private": true,
@@ -107,7 +118,7 @@ impl FrameworkAdapter for NuxtAdapter {
 }"#)?;
 
         std::fs::write(project_dir.join("app.vue"),
-            klyron_template::TemplateEngine::render(r#"<template>
+            klyron_template::TemplateEngine::render_static(r#"<template>
   <div>
     <NuxtLayout>
       <NuxtPage />
@@ -117,7 +128,7 @@ impl FrameworkAdapter for NuxtAdapter {
 "#, vars))?;
 
         std::fs::write(project_dir.join("pages/index.vue"),
-            klyron_template::TemplateEngine::render(r#"<template>
+            klyron_template::TemplateEngine::render_static(r#"<template>
   <div>
     <h1>Welcome to {{ name }}</h1>
   </div>
@@ -180,7 +191,7 @@ impl FrameworkAdapter for NuxtAdapter {
 export default withNuxt()
 "#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 Nuxt 3 project
 

@@ -54,7 +54,7 @@ impl FrameworkAdapter for GraphqlAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "version": "1.0.0",
   "private": true,
@@ -94,7 +94,7 @@ impl FrameworkAdapter for GraphqlAdapter {
 }"#)?;
 
         std::fs::write(project_dir.join("src/index.ts"),
-            klyron_template::TemplateEngine::render(r#"import { createYoga } from 'graphql-yoga'
+            klyron_template::TemplateEngine::render_static(r#"import { createYoga } from 'graphql-yoga'
 import { createServer } from 'node:http'
 import { schema } from './schema'
 
@@ -130,7 +130,7 @@ export { root }
 import tseslint from 'typescript-eslint'
 export default tseslint.config(js.configs.recommended, ...tseslint.configs.recommended, { ignores: ['node_modules'] })"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 GraphQL Yoga API
 

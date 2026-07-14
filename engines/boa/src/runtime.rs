@@ -1,34 +1,33 @@
-//! Boa runtime implementation
-
-use crate::error::boaError;
+use crate::error::BoaError;
+use boa_engine::{Context, Source};
 
 pub struct BoaRuntime {
-    pub isolate: crate::isolate::BoaIsolate,
-    initialized: bool,
+    context: Context,
 }
 
 impl BoaRuntime {
     pub fn new() -> Self {
         Self {
-            isolate: crate::isolate::BoaIsolate::new(),
-            initialized: false,
+            context: Context::default(),
         }
     }
 
-    pub fn init(&mut self) -> Result<(), boaError> {
-        self.initialized = true;
-        Ok(())
+    pub fn eval(&mut self, code: &str) -> Result<String, BoaError> {
+        let result = self.context.eval(Source::from_bytes(code.as_bytes()))
+            .map_err(|e| BoaError::ExecutionFailed(e.to_string()))?;
+        Ok(result.to_string(&mut self.context).map(|s| s.to_std_string_escaped()).unwrap_or_default())
     }
 
-    pub fn is_initialized(&self) -> bool {
-        self.initialized
+    pub fn execute_script(&mut self, _filename: &str, source: &str) -> Result<String, BoaError> {
+        self.eval(source)
     }
 
-    pub fn execute(&self, _code: &str) -> Result<String, boaError> {
-        if !self.initialized {
-            return Err(boaError::NotInitialized);
-        }
-        Ok(String::new())
+    pub fn execute_module(&mut self, _filename: &str, source: &str) -> Result<String, BoaError> {
+        self.eval(source)
+    }
+
+    pub fn context_mut(&mut self) -> &mut Context {
+        &mut self.context
     }
 }
 

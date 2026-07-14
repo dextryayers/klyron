@@ -46,7 +46,18 @@ impl FrameworkAdapter for DjangoAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("python3".into(), vec!["-m".into(), "django".into(), "startproject".into(), name.into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
+        }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
         std::fs::create_dir_all(project_dir.join("config"))?;
@@ -60,7 +71,7 @@ impl FrameworkAdapter for DjangoAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("manage.py"),
-            klyron_template::TemplateEngine::render(r#"#!/usr/bin/env python3
+            klyron_template::TemplateEngine::render_static(r#"#!/usr/bin/env python3
 import os, sys
 def main():
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
@@ -86,7 +97,7 @@ black>=24.0,<25.0
         std::fs::write(project_dir.join("config/__init__.py"), "")?;
 
         std::fs::write(project_dir.join("config/settings.py"),
-            klyron_template::TemplateEngine::render(r#"import os
+            klyron_template::TemplateEngine::render_static(r#"import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -279,7 +290,7 @@ class UserSerializer(serializers.ModelSerializer):
 "#)?;
 
         std::fs::write(project_dir.join("templates/base.html"),
-            klyron_template::TemplateEngine::render(r#"<!doctype html>
+            klyron_template::TemplateEngine::render_static(r#"<!doctype html>
 <html><head><meta charset="utf-8"><title>{% block title %}{{ name }}{% endblock %}</title></head>
 <body>{% block content %}{% endblock %}</body></html>
 "#, vars))?;
@@ -305,7 +316,7 @@ python_files = tests.py test_*.py
             "node_modules\n*.pyc\n__pycache__\n.DS_Store\n*.sqlite3\nmedia\n")?;
 
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 Django project
 

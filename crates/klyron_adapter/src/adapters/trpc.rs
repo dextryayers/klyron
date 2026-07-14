@@ -54,7 +54,7 @@ impl FrameworkAdapter for TrpcAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "version": "1.0.0",
   "private": true,
@@ -95,7 +95,7 @@ impl FrameworkAdapter for TrpcAdapter {
 }"#)?;
 
         std::fs::write(project_dir.join("src/index.ts"),
-            klyron_template::TemplateEngine::render(r#"import { createHTTPServer } from '@trpc/server/adapters/standalone'
+            klyron_template::TemplateEngine::render_static(r#"import { createHTTPServer } from '@trpc/server/adapters/standalone'
 import { appRouter } from './router'
 import { createContext } from './context'
 
@@ -140,7 +140,7 @@ export type Context = inferAsyncReturnType<typeof createContext>
 import tseslint from 'typescript-eslint'
 export default tseslint.config(js.configs.recommended, ...tseslint.configs.recommended, { ignores: ['node_modules'] })"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 tRPC API
 

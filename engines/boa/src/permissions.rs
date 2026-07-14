@@ -1,5 +1,3 @@
-//! Permission checking for Boa
-
 #[derive(Debug, Clone)]
 pub enum Permission {
     Read,
@@ -35,6 +33,21 @@ impl BoaPermissions {
             Permission::Run => self.allow_run,
             Permission::Ffi => self.allow_ffi,
             Permission::All => true,
+        }
+    }
+
+    pub fn deny_all() -> Self {
+        Self::default()
+    }
+
+    pub fn allow_all() -> Self {
+        Self {
+            allow_read: vec!["/".to_string()],
+            allow_write: vec!["/".to_string()],
+            allow_net: vec!["*".to_string()],
+            allow_env: true,
+            allow_run: true,
+            allow_ffi: true,
         }
     }
 

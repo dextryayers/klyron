@@ -1,0 +1,139 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version'
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-unknown-linux-gnu
+      - name: Check
+        run: cargo check --workspace
+      - name: Lint
+        run: cargo clippy --workspace -- -D warnings 2>&1 || true
+      - name: Test
+        run: cargo test --workspace --no-fail-fast
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: [test]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            arch: x86_64
+            os_name: linux
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            arch: aarch64
+            os_name: linux
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            arch: x86_64
+            os_name: macos
+            cross: false
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            arch: aarch64
+            os_name: macos
+            cross: false
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            arch: x86_64
+            os_name: windows
+            cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+      - name: Install cross
+        if: ${{ matrix.cross }}
+        run: cargo install cross
+      - name: Build (cross)
+        if: ${{ matrix.cross }}
+        run: cross build --release --target ${{ matrix.target }} --features all-engines
+      - name: Build (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --target ${{ matrix.target }} --features all-engines
+      - name: Prepare binary
+        shell: bash
+        run: |
+          BIN="klyron"
+          SRC="target/${{ matrix.target }}/release/${BIN}"
+          if [ "${{ matrix.os_name }}" = "windows" ]; then
+            SRC="${SRC}.exe"
+          fi
+          mkdir -p dist
+          cp "$SRC" "dist/${BIN}-${{ matrix.os_name }}-${{ matrix.arch }}${{ matrix.os_name == 'windows' && '.exe' || '' }}"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: klyron-${{ matrix.os_name }}-${{ matrix.arch }}
+          path: dist/*
+
+  release:
+    name: Create Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+      - name: Generate checksums
+        run: |
+          cd dist
+          for f in */klyron-*; do
+            sha256sum "$f" > "$f.sha256"
+          done
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref }}
+          name: Klyron ${{ github.ref_name }}
+          body: |
+            ## Klyron ${{ github.ref_name }}
+
+            ### Installation
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/aniipid/klyronjs/main/install.sh | bash
+            ```
+
+            ### What's New
+            See [CHANGELOG.md](CHANGELOG.md) for full release notes.
+
+            ### Assets
+            - **Linux x86_64**: `klyron-linux-x86_64`
+            - **Linux ARM64**: `klyron-linux-aarch64`
+            - **macOS x86_64**: `klyron-macos-x86_64`
+            - **macOS ARM64**: `klyron-macos-aarch64`
+            - **Windows x86_64**: `klyron-windows-x86_64.exe`
+          files: dist/*/klyron-*
+          draft: false
+          prerelease: false

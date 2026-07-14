@@ -49,7 +49,18 @@ impl FrameworkAdapter for RailsAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("rails".into(), vec!["new".into(), name.into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
+        }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
         std::fs::create_dir_all(project_dir.join("app/controllers"))?;
@@ -68,7 +79,7 @@ impl FrameworkAdapter for RailsAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("Gemfile"),
-            klyron_template::TemplateEngine::render(r#"source 'https://rubygems.org'
+            klyron_template::TemplateEngine::render_static(r#"source 'https://rubygems.org'
 
 ruby '>= 3.2.0'
 
@@ -117,7 +128,7 @@ run Rails.application
 }"#)?;
 
         std::fs::write(project_dir.join("config/application.rb"),
-            klyron_template::TemplateEngine::render(r#"require_relative 'boot'
+            klyron_template::TemplateEngine::render_static(r#"require_relative 'boot'
 require 'rails/all'
 Bundler.require(*Rails.groups)
 
@@ -211,13 +222,13 @@ end
 "#)?;
 
         std::fs::write(project_dir.join("app/views/layouts/application.html.erb"),
-            klyron_template::TemplateEngine::render(r#"<!DOCTYPE html>
+            klyron_template::TemplateEngine::render_static(r#"<!DOCTYPE html>
 <html><head><title>{{ name }}</title><meta name="viewport" content="width=device-width,initial-scale=1"><%= csrf_meta_tags %><%= csp_meta_tag %><%= stylesheet_link_tag "application", "data-turbo-track": "reload" %></head>
 <body><%= yield %></body></html>
 "#, vars))?;
 
         std::fs::write(project_dir.join("app/views/home/index.html.erb"),
-            klyron_template::TemplateEngine::render(r#"<h1>Welcome to {{ name }}</h1>
+            klyron_template::TemplateEngine::render_static(r#"<h1>Welcome to {{ name }}</h1>
 "#, vars))?;
 
         std::fs::write(project_dir.join("app/helpers/application_helper.rb"),
@@ -321,7 +332,7 @@ end
             "node_modules\ntmp\nlog\n.DS_Store\n*.sqlite3\n")?;
 
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 Rails application
 

@@ -48,12 +48,17 @@ impl FrameworkAdapter for NextAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("npx".into(), vec!["create-next-app@latest".into(), name.into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        if options.template_vars.get("external").map(|s| s == "true").unwrap_or(false) {
-            let status = std::process::Command::new("npx")
-                .args(["create-next-app@latest", name]).current_dir(&options.dir).status()?;
-            if !status.success() { anyhow::bail!("External scaffolding failed"); }
-            return Ok(());
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
         }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
@@ -67,7 +72,7 @@ impl FrameworkAdapter for NextAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}", "version": "1.0.0", "private": true,
   "scripts": { "dev": "next dev", "build": "next build", "start": "next start", "lint": "next lint", "format": "prettier --write .", "test": "vitest run" },
   "dependencies": { "next": "^15.3.0", "react": "^19.1.0", "react-dom": "^19.1.0" },
@@ -99,7 +104,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 }"#)?;
 
         std::fs::write(project_dir.join("app/page.tsx"),
-            klyron_template::TemplateEngine::render(r#"export default function Home() {
+            klyron_template::TemplateEngine::render_static(r#"export default function Home() {
   return <main><h1>Welcome to {{ name }}</h1></main>
 }"#, vars))?;
 
@@ -128,7 +133,7 @@ const eslintConfig = [...compat.extends('next/core-web-vitals')]
 export default eslintConfig"#)?;
 
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}\nNext.js App Router\nnpm run dev"#, vars))?;
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}\nNext.js App Router\nnpm run dev"#, vars))?;
 
         Ok(())
     }

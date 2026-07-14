@@ -61,7 +61,7 @@ impl FrameworkAdapter for SvelteAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "version": "1.0.0",
   "private": true,
@@ -111,7 +111,7 @@ export default defineConfig({
 }"#)?;
 
         std::fs::write(project_dir.join("index.html"),
-            klyron_template::TemplateEngine::render(r#"<!doctype html>
+            klyron_template::TemplateEngine::render_static(r#"<!doctype html>
 <html lang="en">
   <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>{{ name }}</title></head>
   <body><div id="app"></div><script type="module" src="/src/main.js"></script></body>
@@ -127,7 +127,7 @@ export default app
 "#)?;
 
         std::fs::write(project_dir.join("src/App.svelte"),
-            klyron_template::TemplateEngine::render(r#"<script>
+            klyron_template::TemplateEngine::render_static(r#"<script>
   let name = '{{ name }}'
 </script>
 
@@ -159,7 +159,7 @@ export default tseslint.config(
   { ignores: ['dist'] },
 )"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 Svelte project
 

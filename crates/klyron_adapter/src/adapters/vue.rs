@@ -53,12 +53,17 @@ impl FrameworkAdapter for VueAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("npx".into(), vec!["create-vue@latest".into(), name.into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        if options.template_vars.get("external").map(|s| s == "true").unwrap_or(false) {
-            let status = std::process::Command::new("npx")
-                .args(["create-vue@latest", name]).current_dir(&options.dir).status()?;
-            if !status.success() { anyhow::bail!("External scaffolding failed"); }
-            return Ok(());
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
         }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
@@ -71,7 +76,7 @@ impl FrameworkAdapter for VueAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}", "private": true, "version": "1.0.0", "type": "module",
   "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview", "test": "vitest run", "lint": "eslint .", "format": "prettier --write ." },
   "dependencies": { "vue": "^3.6.0", "vue-router": "^4.5.0", "pinia": "^3.0.0" },
@@ -92,7 +97,7 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({ plugins: [vue()], test: { globals: true, environment: 'jsdom' } })"#)?;
 
         std::fs::write(project_dir.join("index.html"),
-            klyron_template::TemplateEngine::render(r#"<!doctype html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>{{ name }}</title></head><body><div id="app"></div><script type="module" src="/src/main.ts"></script></body></html>"#, vars))?;
+            klyron_template::TemplateEngine::render_static(r#"<!doctype html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>{{ name }}</title></head><body><div id="app"></div><script type="module" src="/src/main.ts"></script></body></html>"#, vars))?;
 
         std::fs::write(project_dir.join("src/main.ts"),
             r#"import { createApp } from 'vue'
@@ -106,7 +111,7 @@ app.use(createPinia()); app.use(router); app.mount('#app')"#)?;
         std::fs::write(project_dir.join("src/App.vue"), r#"<template><router-view /></template>"#)?;
 
         std::fs::write(project_dir.join("src/pages/Home.vue"),
-            klyron_template::TemplateEngine::render(r#"<template><div><h1>Welcome to {{ name }}</h1></div></template>"#, vars))?;
+            klyron_template::TemplateEngine::render_static(r#"<template><div><h1>Welcome to {{ name }}</h1></div></template>"#, vars))?;
 
         std::fs::write(project_dir.join("src/router/index.ts"),
             r#"import { createRouter, createWebHistory } from 'vue-router'
@@ -130,7 +135,7 @@ import tseslint from 'typescript-eslint'
 import pluginVue from 'eslint-plugin-vue'
 export default tseslint.config({ ignores: ['dist'] }, js.configs.recommended, ...tseslint.configs.recommended, ...pluginVue.configs['flat/essential'])"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}\nVue 3 + Pinia + Router\nnpm run dev"#, vars))?;
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}\nVue 3 + Pinia + Router\nnpm run dev"#, vars))?;
 
         Ok(())
     }

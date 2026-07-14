@@ -61,7 +61,7 @@ impl FrameworkAdapter for QwikAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "version": "1.0.0",
   "private": true,
@@ -133,7 +133,7 @@ export default component$(() => {
 "#)?;
 
         std::fs::write(project_dir.join("src/routes/index.tsx"),
-            klyron_template::TemplateEngine::render(r#"import { component$ } from '@builder.io/qwik'
+            klyron_template::TemplateEngine::render_static(r#"import { component$ } from '@builder.io/qwik'
 import type { DocumentHead } from '@builder.io/qwik-city'
 
 export default component$(() => {
@@ -177,7 +177,7 @@ export default [
   { plugins: { qwik }, rules: { 'qwik/valid-lexical-scope': 'error' }, ignores: ['dist', 'server'] },
 ]"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 Qwik project
 

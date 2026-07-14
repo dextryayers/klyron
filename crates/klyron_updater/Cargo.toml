@@ -5,3 +5,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+reqwest = { workspace = true, features = ["json", "stream"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tempfile.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+futures.workspace = true

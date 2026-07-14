@@ -15,7 +15,7 @@ pub fn run_lint(args: LintArgs) -> anyhow::Result<()> {
     }
 
     let report = if args.fix {
-        Linter::lint_fix(&dir)?
+        Linter::new().lint_fix(&dir)?
     } else {
         Linter::lint(&dir)?
     };

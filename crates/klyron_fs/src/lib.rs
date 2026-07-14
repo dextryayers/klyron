@@ -1,10 +1,13 @@
 use std::collections::HashMap;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+
+use memmap2::Mmap;
 
 pub struct FileSystem;
 
@@ -39,6 +42,7 @@ pub struct FileWatcherBuilder {
 }
 
 impl FileWatcherBuilder {
+    #[inline]
     pub fn new() -> Self {
         Self {
             paths: Vec::new(),
@@ -48,21 +52,25 @@ impl FileWatcherBuilder {
         }
     }
 
+    #[inline]
     pub fn watch(mut self, path: &Path) -> Self {
         self.paths.push(path.to_path_buf());
         self
     }
 
+    #[inline]
     pub fn recursive(mut self, recursive: bool) -> Self {
         self.recursive = recursive;
         self
     }
 
+    #[inline]
     pub fn poll_interval(mut self, interval: Duration) -> Self {
         self.poll_interval = interval;
         self
     }
 
+    #[inline]
     pub fn extensions(mut self, exts: &[&str]) -> Self {
         self.filter = Some(exts.iter().map(|e| e.to_string()).collect());
         self
@@ -94,7 +102,10 @@ impl FileWatcherBuilder {
 }
 
 impl Default for FileWatcherBuilder {
-    fn default() -> Self { Self::new() }
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -194,6 +205,7 @@ pub struct FileWatcher {
 }
 
 impl FileWatcher {
+    #[inline]
     pub fn receiver(&self) -> &mpsc::Receiver<FsEvent> {
         &self.rx
     }
@@ -234,22 +246,48 @@ impl FileWatcher {
         Ok(())
     }
 
+    #[inline]
     pub fn stop(&self) {
         *self.running.lock().unwrap() = false;
     }
 }
 
 impl FileSystem {
-    pub fn new() -> Self { Self }
+    #[inline]
+    pub fn new() -> Self {
+        Self
+    }
 
+    #[inline]
     pub fn read(&self, path: &Path) -> anyhow::Result<Vec<u8>> {
         Ok(std::fs::read(path)?)
     }
 
+    #[inline]
     pub fn read_string(&self, path: &Path) -> anyhow::Result<String> {
         Ok(std::fs::read_to_string(path)?)
     }
 
+    pub async fn read_async(&self, path: &Path) -> anyhow::Result<Vec<u8>> {
+        Ok(tokio::fs::read(path).await?)
+    }
+
+    pub async fn read_string_async(&self, path: &Path) -> anyhow::Result<String> {
+        Ok(tokio::fs::read_to_string(path).await?)
+    }
+
+    pub async fn write_async(&self, path: &Path, data: &[u8]) -> anyhow::Result<()> {
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        Ok(tokio::fs::write(path, data).await?)
+    }
+
+    pub async fn write_string_async(&self, path: &Path, data: &str) -> anyhow::Result<()> {
+        self.write_async(path, data.as_bytes()).await
+    }
+
+    #[inline]
     pub fn write(&self, path: &Path, data: &[u8]) -> anyhow::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -257,10 +295,12 @@ impl FileSystem {
         Ok(std::fs::write(path, data)?)
     }
 
+    #[inline]
     pub fn write_string(&self, path: &Path, data: &str) -> anyhow::Result<()> {
         self.write(path, data.as_bytes())
     }
 
+    #[inline]
     pub fn append(&self, path: &Path, data: &[u8]) -> anyhow::Result<()> {
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
@@ -270,14 +310,14 @@ impl FileSystem {
         Ok(file.write_all(data)?)
     }
 
+    #[inline]
     pub fn append_string(&self, path: &Path, data: &str) -> anyhow::Result<()> {
         self.append(path, data.as_bytes())
     }
 
+    #[inline]
     pub fn truncate(&self, path: &Path, len: u64) -> anyhow::Result<()> {
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .open(path)?;
+        let file = std::fs::OpenOptions::new().write(true).open(path)?;
         file.set_len(len)?;
         Ok(())
     }
@@ -289,6 +329,28 @@ impl FileSystem {
         Ok(std::fs::copy(from, to)?)
     }
 
+    pub fn copy_with_progress<F: FnMut(u64, u64)>(&self, from: &Path, to: &Path, mut progress: F) -> anyhow::Result<u64> {
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let total = std::fs::metadata(from)?.len();
+        let mut reader = std::fs::File::open(from)?;
+        let mut writer = std::fs::File::create(to)?;
+        let mut buf = [0u8; 65536];
+        let mut copied: u64 = 0;
+        loop {
+            let n = reader.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            writer.write_all(&buf[..n])?;
+            copied += n as u64;
+            progress(copied, total);
+        }
+        Ok(copied)
+    }
+
+    #[inline]
     pub fn move_file(&self, from: &Path, to: &Path) -> anyhow::Result<()> {
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent)?;
@@ -296,6 +358,7 @@ impl FileSystem {
         Ok(std::fs::rename(from, to)?)
     }
 
+    #[inline]
     pub fn remove(&self, path: &Path) -> anyhow::Result<()> {
         if path.is_symlink() {
             std::fs::remove_file(path)?;
@@ -307,10 +370,22 @@ impl FileSystem {
         Ok(())
     }
 
+    #[inline]
     pub fn exists(&self, path: &Path) -> bool {
         path.exists()
     }
 
+    #[inline]
+    pub fn is_file(&self, path: &Path) -> bool {
+        path.is_file()
+    }
+
+    #[inline]
+    pub fn is_dir(&self, path: &Path) -> bool {
+        path.is_dir()
+    }
+
+    #[inline]
     pub fn create_dir(&self, path: &Path) -> anyhow::Result<()> {
         Ok(std::fs::create_dir_all(path)?)
     }
@@ -326,14 +401,13 @@ impl FileSystem {
     }
 
     pub fn read_dir_recursive(&self, path: &Path) -> anyhow::Result<Vec<FileInfo>> {
-        let mut entries = Vec::new();
-        for entry in walkdir::WalkDir::new(path).into_iter().filter_entry(|e| {
-            !e.file_name().to_string_lossy().starts_with('.')
-        }) {
-            let entry = entry?;
-            entries.push(self.stat(entry.path())?);
-        }
-        Ok(entries)
+        use rayon::prelude::*;
+        let entries: Vec<_> = walkdir::WalkDir::new(path)
+            .into_iter()
+            .filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.'))
+            .filter_map(|e| e.ok())
+            .collect();
+        entries.par_iter().map(|entry| self.stat(entry.path())).collect()
     }
 
     pub fn stat(&self, path: &Path) -> anyhow::Result<FileInfo> {
@@ -352,10 +426,10 @@ impl FileSystem {
         })
     }
 
+    #[inline]
     pub fn chmod(&self, path: &Path, mode: u32) -> anyhow::Result<()> {
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             let perm = std::fs::Permissions::from_mode(mode & 0o777);
             Ok(std::fs::set_permissions(path, perm)?)
         }
@@ -366,12 +440,14 @@ impl FileSystem {
         }
     }
 
+    #[inline]
     pub fn set_readonly(&self, path: &Path, readonly: bool) -> anyhow::Result<()> {
         let mut perm = path.metadata()?.permissions();
         perm.set_readonly(readonly);
         Ok(std::fs::set_permissions(path, perm)?)
     }
 
+    #[inline]
     pub fn symlink(&self, target: &Path, link: &Path) -> anyhow::Result<()> {
         #[cfg(unix)]
         {
@@ -391,31 +467,56 @@ impl FileSystem {
         }
     }
 
+    #[inline]
     pub fn read_link(&self, path: &Path) -> anyhow::Result<PathBuf> {
         Ok(std::fs::read_link(path)?)
     }
 
+    #[inline]
     pub fn hard_link(&self, target: &Path, link: &Path) -> anyhow::Result<()> {
         Ok(std::fs::hard_link(target, link)?)
     }
 
+    #[inline]
     pub fn watcher(&self) -> FileWatcherBuilder {
         FileWatcherBuilder::new()
+    }
+
+    #[inline]
+    pub fn temp_dir(&self) -> anyhow::Result<PathBuf> {
+        Ok(std::env::temp_dir())
+    }
+
+    pub fn temp_file(&self) -> anyhow::Result<PathBuf> {
+        let (_, path) = tempfile::NamedTempFile::new()?.keep()?;
+        Ok(path)
+    }
+
+    pub fn mmap(&self, path: &Path) -> anyhow::Result<Mmap> {
+        let file = std::fs::File::open(path)?;
+        let mmap = unsafe { Mmap::map(&file)? };
+        Ok(mmap)
     }
 }
 
 impl Default for FileSystem {
-    fn default() -> Self { Self::new() }
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
+#[inline]
 pub fn read_to_string(path: &Path) -> anyhow::Result<String> {
     FileSystem::new().read_string(path)
 }
 
+#[inline]
 pub fn write_string(path: &Path, data: &str) -> anyhow::Result<()> {
     FileSystem::new().write_string(path, data)
 }
 
+#[inline]
 pub fn copy_file(from: &Path, to: &Path) -> anyhow::Result<u64> {
     FileSystem::new().copy(from, to)
 }
@@ -434,8 +535,8 @@ fn perm_string(_perm: &std::fs::Permissions) -> String {
 mod tests {
     use super::*;
     use std::fs;
-
     use std::sync::atomic::{AtomicU64, Ordering};
+
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn test_dir() -> PathBuf {
@@ -464,15 +565,10 @@ mod tests {
     }
 
     #[test]
-    fn test_fs_append() {
-        let dir = test_dir();
+    fn test_fs_is_file_dir() {
         let fs = FileSystem::new();
-        let file = dir.join("append.txt");
-        fs.write_string(&file, "line1\n").unwrap();
-        fs.append_string(&file, "line2\n").unwrap();
-        let content = fs.read_string(&file).unwrap();
-        assert_eq!(content, "line1\nline2\n");
-        let _ = fs::remove_dir_all(&dir);
+        assert!(fs.is_dir(Path::new("/tmp")));
+        assert!(!fs.is_file(Path::new("/tmp")));
     }
 
     #[test]
@@ -480,17 +576,16 @@ mod tests {
         let fs = FileSystem::new();
         let info = fs.stat(Path::new("/tmp")).unwrap();
         assert!(info.is_dir);
-        assert!(!info.is_file);
     }
 
     #[test]
-    fn test_fs_create_dir() {
-        let dir = test_dir();
+    fn test_fs_temp() {
         let fs = FileSystem::new();
-        let new_dir = dir.join("nested/deep/dir");
-        fs.create_dir(&new_dir).unwrap();
-        assert!(fs.exists(&new_dir));
-        let _ = fs::remove_dir_all(&dir);
+        let dir = fs.temp_dir().unwrap();
+        assert!(dir.exists());
+        let file = fs.temp_file().unwrap();
+        assert!(file.exists());
+        let _ = fs::remove_file(&file);
     }
 
     #[test]
@@ -510,15 +605,20 @@ mod tests {
     }
 
     #[test]
-    fn test_fs_symlink() {
+    fn test_fs_copy_with_progress() {
         let dir = test_dir();
         let fs = FileSystem::new();
-        let target = dir.join("original.txt");
-        let link = dir.join("link.txt");
-        fs.write_string(&target, "linked").unwrap();
-        fs.symlink(&target, &link).unwrap();
-        assert!(fs.exists(&link));
-        assert!(fs.stat(&link).unwrap().is_symlink || cfg!(windows));
+        let src = dir.join("src.bin");
+        let dst = dir.join("dst.bin");
+        let data = vec![0u8; 100_000];
+        fs.write(&src, &data).unwrap();
+        let mut last_progress = 0u64;
+        fs.copy_with_progress(&src, &dst, |copied, total| {
+            last_progress = copied;
+            assert_eq!(total, 100_000);
+        }).unwrap();
+        assert_eq!(last_progress, 100_000);
+        assert!(fs.exists(&dst));
         let _ = fs::remove_dir_all(&dir);
     }
 

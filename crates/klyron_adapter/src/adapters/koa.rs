@@ -55,7 +55,7 @@ impl FrameworkAdapter for KoaAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "version": "1.0.0",
   "private": true,
@@ -72,7 +72,7 @@ impl FrameworkAdapter for KoaAdapter {
 }"#, vars))?;
 
         std::fs::write(project_dir.join("src/index.js"),
-            klyron_template::TemplateEngine::render(r#"import Koa from 'koa'
+            klyron_template::TemplateEngine::render_static(r#"import Koa from 'koa'
 import bodyParser from 'koa-bodyparser'
 import router from './routes/index.js'
 
@@ -109,7 +109,7 @@ export default router
             r#"import js from '@eslint/js'
 export default [js.configs.recommended, { ignores: ['node_modules'] }]"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 Koa API
 

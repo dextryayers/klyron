@@ -1,10 +1,9 @@
-//! Error types for Boa
-
 use std::fmt;
 
 #[derive(Debug)]
 pub enum BoaError {
     NotInitialized,
+    InitFailed(String),
     ExecutionFailed(String),
     CompileError(String),
     SyntaxError(String),
@@ -15,10 +14,23 @@ pub enum BoaError {
     OutOfMemory,
 }
 
+impl BoaError {
+    pub fn catch_error(_context: &mut boa_engine::Context) -> Option<Self> {
+        None
+    }
+
+    pub fn format_stack_trace(error: &boa_engine::JsValue, context: &mut boa_engine::Context) -> String {
+        error.to_string(context)
+            .map(|s| s.to_std_string_escaped())
+            .unwrap_or_else(|_| "No stack trace".to_string())
+    }
+}
+
 impl fmt::Display for BoaError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotInitialized => write!(f, "Boa not initialized"),
+            Self::InitFailed(msg) => write!(f, "Boa initialization failed: {msg}"),
             Self::ExecutionFailed(msg) => write!(f, "Execution failed: {msg}"),
             Self::CompileError(msg) => write!(f, "Compile error: {msg}"),
             Self::SyntaxError(msg) => write!(f, "Syntax error: {msg}"),

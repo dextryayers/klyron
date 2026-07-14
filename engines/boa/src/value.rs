@@ -1,6 +1,5 @@
-//! JS value conversion for Boa
-
-use crate::error::boaError;
+use std::collections::HashMap;
+use boa_engine::{Context, JsValue, js_string};
 
 #[derive(Debug, Clone)]
 pub enum BoaValue {
@@ -11,7 +10,7 @@ pub enum BoaValue {
     Number(f64),
     String(String),
     Array(Vec<BoaValue>),
-    Object(std::collections::HashMap<String, BoaValue>),
+    Object(HashMap<String, BoaValue>),
 }
 
 impl BoaValue {
@@ -56,28 +55,52 @@ impl BoaValue {
             Self::Object(_) => true,
         }
     }
+
+    pub fn from_js(js_value: &JsValue, _context: &mut Context) -> Self {
+        if js_value.is_null() { return Self::Null; }
+        if js_value.is_undefined() { return Self::Undefined; }
+        if let Some(b) = js_value.as_boolean() { return Self::Boolean(b); }
+        if let Some(n) = js_value.as_number() {
+            if n.fract() == 0.0 && n.is_finite() && n.abs() <= i64::MAX as f64 {
+                return Self::Integer(n as i64);
+            }
+            return Self::Number(n);
+        }
+        if let Some(s) = js_value.as_string() {
+            return Self::String(s.to_std_string_escaped());
+        }
+        Self::String(
+            js_value.to_string(_context)
+                .map(|s| s.to_std_string_escaped())
+                .unwrap_or_default()
+        )
+    }
+
+    pub fn to_js(&self, _context: &mut Context) -> JsValue {
+        match self {
+            Self::Null => JsValue::null(),
+            Self::Undefined => JsValue::undefined(),
+            Self::Boolean(b) => JsValue::new(*b),
+            Self::Integer(i) => JsValue::new(*i),
+            Self::Number(n) => JsValue::new(*n),
+            Self::String(s) => JsValue::new(js_string!(s.as_str())),
+            _ => JsValue::new(js_string!(self.to_json().to_string().as_str())),
+        }
+    }
 }
 
 impl From<String> for BoaValue {
-    fn from(s: String) -> Self {
-        Self::String(s)
-    }
+    fn from(s: String) -> Self { Self::String(s) }
 }
 
 impl From<i64> for BoaValue {
-    fn from(i: i64) -> Self {
-        Self::Integer(i)
-    }
+    fn from(i: i64) -> Self { Self::Integer(i) }
 }
 
 impl From<f64> for BoaValue {
-    fn from(n: f64) -> Self {
-        Self::Number(n)
-    }
+    fn from(n: f64) -> Self { Self::Number(n) }
 }
 
 impl From<bool> for BoaValue {
-    fn from(b: bool) -> Self {
-        Self::Boolean(b)
-    }
+    fn from(b: bool) -> Self { Self::Boolean(b) }
 }

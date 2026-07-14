@@ -61,8 +61,26 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 authors = ["Klyron Contributors"]
+description = "Klyron - Universal Polyglot Runtime for JavaScript, TypeScript, PHP, Python, Ruby, Go, Zig, Rust, C, C++"
+homepage = "https://klyron.dev"
+repository = "https://github.com/aniipid/klyronjs"
+readme = "README.md"
 
 [workspace.dependencies]
 deno_error = "0.7"
 wasmtime = "28"
 wasmtime-wasi = "28"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tokio = { version = "1", features = ["full"] }
+sha2 = "0.10"
+futures = "0.3"
+lru = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+toml = "0.8"
+notify = "6"
+tempfile = "3"
+rustyline = "14"
+rustyline-derive = "0.10"

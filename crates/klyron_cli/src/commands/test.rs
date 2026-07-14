@@ -45,17 +45,15 @@ pub fn run_test(args: TestArgs) -> anyhow::Result<()> {
         println!("Running tests with coverage...");
         return TestRunner::run_coverage(dir);
     }
-    if args.ui {
-        return TestRunner::run_ui(dir);
-    }
-    if args.e2e {
-        return TestRunner::run_e2e(dir);
-    }
-    if args.unit {
-        return TestRunner::run_unit(dir);
-    }
-    if args.integration {
-        return TestRunner::run_integration(dir);
+    if args.ui || args.e2e || args.unit || args.integration {
+        let category = if args.ui { "ui" } else if args.e2e { "e2e" } else if args.unit { "unit" } else { "integration" };
+        println!("Running {category} tests...");
+        let result = TestRunner::run(dir, Some(category))?;
+        println!(
+            "Tests: {} passed, {} failed, {} skipped in {:.2}s",
+            result.passed, result.failed, result.skipped, result.time
+        );
+        return Ok(());
     }
 
     let result = TestRunner::run(dir, args.filter.as_deref())?;

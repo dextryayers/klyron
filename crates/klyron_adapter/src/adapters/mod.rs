@@ -24,6 +24,16 @@ mod laravel;
 mod django;
 mod rails;
 mod gatsby;
+mod svelte5;
+mod solidstart;
+mod analog;
+mod tanstack_start;
+mod zodios;
+mod trpc_next;
+mod wintersmith;
+mod docpad;
+mod metalsmith;
+mod hexo;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -55,6 +65,16 @@ pub use laravel::LaravelAdapter;
 pub use django::DjangoAdapter;
 pub use rails::RailsAdapter;
 pub use gatsby::GatsbyAdapter;
+pub use svelte5::Svelte5Adapter;
+pub use solidstart::SolidStartAdapter;
+pub use analog::AnalogAdapter;
+pub use tanstack_start::TanStackStartAdapter;
+pub use zodios::ZodiosAdapter;
+pub use trpc_next::TrpcNextAdapter;
+pub use wintersmith::WintersmithAdapter;
+pub use docpad::DocPadAdapter;
+pub use metalsmith::MetalsmithAdapter;
+pub use hexo::HexoAdapter;
 
 pub fn register_all(registry: &mut AdapterRegistry) {
     registry.register(Arc::new(ReactAdapter));
@@ -83,10 +103,20 @@ pub fn register_all(registry: &mut AdapterRegistry) {
     registry.register(Arc::new(DjangoAdapter));
     registry.register(Arc::new(RailsAdapter));
     registry.register(Arc::new(GatsbyAdapter));
+    registry.register(Arc::new(Svelte5Adapter));
+    registry.register(Arc::new(SolidStartAdapter));
+    registry.register(Arc::new(AnalogAdapter));
+    registry.register(Arc::new(TanStackStartAdapter));
+    registry.register(Arc::new(ZodiosAdapter));
+    registry.register(Arc::new(TrpcNextAdapter));
+    registry.register(Arc::new(WintersmithAdapter));
+    registry.register(Arc::new(DocPadAdapter));
+    registry.register(Arc::new(MetalsmithAdapter));
+    registry.register(Arc::new(HexoAdapter));
 }
 
 pub fn detect_adapter(dir: &Path) -> Option<&'static str> {
-    let adapters: [&dyn crate::FrameworkAdapter; 26] = [
+    let adapters: [&dyn crate::FrameworkAdapter; 36] = [
         &ReactAdapter,
         &VueAdapter,
         &NextAdapter,
@@ -113,6 +143,16 @@ pub fn detect_adapter(dir: &Path) -> Option<&'static str> {
         &DjangoAdapter,
         &RailsAdapter,
         &GatsbyAdapter,
+        &Svelte5Adapter,
+        &SolidStartAdapter,
+        &AnalogAdapter,
+        &TanStackStartAdapter,
+        &ZodiosAdapter,
+        &TrpcNextAdapter,
+        &WintersmithAdapter,
+        &DocPadAdapter,
+        &MetalsmithAdapter,
+        &HexoAdapter,
     ];
     for adapter in &adapters {
         if adapter.detect(dir) {

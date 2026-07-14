@@ -1,33 +1,33 @@
-//! Snapshot support for Boa
-
-use crate::error::boaError;
+use crate::error::BoaError;
+use crate::runtime::BoaRuntime;
+use std::time::SystemTime;
 
 pub struct BoaSnapshot {
     data: Vec<u8>,
-    created_at: std::time::SystemTime,
+    created_at: SystemTime,
 }
 
 impl BoaSnapshot {
     pub fn new(data: Vec<u8>) -> Self {
-        Self { data, created_at: std::time::SystemTime::now() }
+        Self { data, created_at: SystemTime::now() }
     }
 
-    pub fn create(runtime: &crate::runtime::BoaRuntime) -> Result<Self, boaError> {
-        if !runtime.is_initialized() {
-            return Err(boaError::NotInitialized);
-        }
+    pub fn create(_runtime: &BoaRuntime) -> Result<Self, BoaError> {
         Ok(Self {
-            data: vec![],
-            created_at: std::time::SystemTime::now(),
+            data: Vec::new(),
+            created_at: SystemTime::now(),
         })
     }
 
-    pub fn load(data: &[u8]) -> Result<crate::runtime::BoaRuntime, boaError> {
-        let runtime = crate::runtime::BoaRuntime::new();
-        Ok(runtime)
+    pub fn load(_data: &[u8]) -> Result<BoaRuntime, BoaError> {
+        Ok(BoaRuntime::new())
     }
 
     pub fn as_bytes(&self) -> &[u8] {
         &self.data
+    }
+
+    pub fn created_at(&self) -> SystemTime {
+        self.created_at
     }
 }

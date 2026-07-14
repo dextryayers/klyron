@@ -57,7 +57,7 @@ impl FrameworkAdapter for GatsbyAdapter {
         let vars = &options.template_vars;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "version": "1.0.0",
   "private": true,
@@ -125,7 +125,7 @@ export const onCreatePage: GatsbyNode['onCreatePage'] = async ({ page, actions }
 }"#)?;
 
         std::fs::write(project_dir.join("src/pages/index.tsx"),
-            klyron_template::TemplateEngine::render(r#"import * as React from 'react'
+            klyron_template::TemplateEngine::render_static(r#"import * as React from 'react'
 import Layout from '../components/layout'
 import Seo from '../components/seo'
 
@@ -204,7 +204,7 @@ export default tseslint.config(
   { ignores: ['.cache', 'public'] },
 )"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 Gatsby project
 

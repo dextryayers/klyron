@@ -1,33 +1,33 @@
-//! Snapshot support for Jsc
+use crate::error::JSCError;
+use crate::runtime::JSCRuntime;
+use std::time::SystemTime;
 
-use crate::error::jscError;
-
-pub struct JscSnapshot {
+pub struct JSCSnapshot {
     data: Vec<u8>,
-    created_at: std::time::SystemTime,
+    created_at: SystemTime,
 }
 
-impl JscSnapshot {
+impl JSCSnapshot {
     pub fn new(data: Vec<u8>) -> Self {
-        Self { data, created_at: std::time::SystemTime::now() }
+        Self { data, created_at: SystemTime::now() }
     }
 
-    pub fn create(runtime: &crate::runtime::JscRuntime) -> Result<Self, jscError> {
-        if !runtime.is_initialized() {
-            return Err(jscError::NotInitialized);
-        }
+    pub fn create(_runtime: &JSCRuntime) -> Result<Self, JSCError> {
         Ok(Self {
-            data: vec![],
-            created_at: std::time::SystemTime::now(),
+            data: Vec::new(),
+            created_at: SystemTime::now(),
         })
     }
 
-    pub fn load(data: &[u8]) -> Result<crate::runtime::JscRuntime, jscError> {
-        let runtime = crate::runtime::JscRuntime::new();
-        Ok(runtime)
+    pub fn load(_data: &[u8]) -> Result<JSCRuntime, JSCError> {
+        Ok(JSCRuntime::new())
     }
 
     pub fn as_bytes(&self) -> &[u8] {
         &self.data
+    }
+
+    pub fn created_at(&self) -> SystemTime {
+        self.created_at
     }
 }

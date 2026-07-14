@@ -1,39 +1,48 @@
-//! Quickjs runtime implementation
+use crate::error::QuickJSError;
 
-use crate::error::quickjsError;
-
-pub struct QuickjsRuntime {
-    pub isolate: crate::isolate::QuickjsIsolate,
-    initialized: bool,
+pub struct QuickJSRuntime {
+    rt: *mut std::ffi::c_void,
+    ctx: *mut std::ffi::c_void,
 }
 
-impl QuickjsRuntime {
-    pub fn new() -> Self {
-        Self {
-            isolate: crate::isolate::QuickjsIsolate::new(),
-            initialized: false,
+unsafe impl Send for QuickJSRuntime {}
+unsafe impl Sync for QuickJSRuntime {}
+
+impl QuickJSRuntime {
+    pub fn new() -> Result<Self, QuickJSError> {
+        Ok(Self {
+            rt: std::ptr::null_mut(),
+            ctx: std::ptr::null_mut(),
+        })
+    }
+
+    pub fn eval(&self, code: &str) -> Result<String, QuickJSError> {
+        if code.trim().is_empty() {
+            return Ok(String::new());
         }
+        Err(QuickJSError::ExecutionFailed(
+            "QuickJS native engine not linked; enable the 'quickjs_native' feature".into()
+        ))
     }
 
-    pub fn init(&mut self) -> Result<(), quickjsError> {
-        self.initialized = true;
-        Ok(())
+    pub fn execute_script(&self, _filename: &str, source: &str) -> Result<String, QuickJSError> {
+        self.eval(source)
     }
 
-    pub fn is_initialized(&self) -> bool {
-        self.initialized
+    pub fn execute_module(&self, _filename: &str, source: &str) -> Result<String, QuickJSError> {
+        self.eval(source)
     }
 
-    pub fn execute(&self, _code: &str) -> Result<String, quickjsError> {
-        if !self.initialized {
-            return Err(quickjsError::NotInitialized);
-        }
-        Ok(String::new())
+    pub fn ctx(&self) -> *mut std::ffi::c_void {
+        self.ctx
+    }
+
+    pub fn rt(&self) -> *mut std::ffi::c_void {
+        self.rt
     }
 }
 
-impl Default for QuickjsRuntime {
-    fn default() -> Self {
-        Self::new()
+impl Drop for QuickJSRuntime {
+    fn drop(&mut self) {
     }
 }

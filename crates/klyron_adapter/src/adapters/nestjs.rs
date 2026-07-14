@@ -47,7 +47,18 @@ impl FrameworkAdapter for NestJsAdapter {
         Ok(())
     }
 
+    fn external_scaffold_command(&self, name: &str, _version: Option<&str>) -> Option<(String, Vec<String>)> {
+        Some(("npx".into(), vec!["@nestjs/cli@latest".into(), "new".into(), name.into()]))
+    }
+
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
+        if options.external {
+            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+                if !status.success() { anyhow::bail!("External scaffolding failed"); }
+                return Ok(());
+            }
+        }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
         std::fs::create_dir_all(project_dir.join("src"))?;
@@ -67,7 +78,7 @@ impl FrameworkAdapter for NestJsAdapter {
 }"#)?;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "version": "1.0.0",
   "private": true,
@@ -129,7 +140,7 @@ impl FrameworkAdapter for NestJsAdapter {
 }"#)?;
 
         std::fs::write(project_dir.join("src/main.ts"),
-            klyron_template::TemplateEngine::render(r#"import { NestFactory } from '@nestjs/core'
+            klyron_template::TemplateEngine::render_static(r#"import { NestFactory } from '@nestjs/core'
 import { AppModule } from './app.module'
 
 async function bootstrap() {
@@ -235,7 +246,7 @@ describe('AppController', () => {
             r#"import nest from '@nestjs/eslint-config'
 export default [...nest.configs.recommended, { ignores: ['dist'] }]"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 NestJS project
 

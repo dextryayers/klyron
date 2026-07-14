@@ -1,13 +1,14 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::Method;
 use axum::response::Json;
 use axum::routing::{any, delete, get, head, options, patch, post, put};
 use axum::Router;
-
 use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
@@ -39,9 +40,13 @@ pub struct ServerConfig {
     pub tls: Option<TlsConfig>,
     pub cors_enabled: bool,
     pub max_body_size: usize,
+    pub max_connections: usize,
+    pub keep_alive_timeout: Duration,
+    pub enable_http2: bool,
 }
 
 impl Default for ServerConfig {
+    #[inline]
     fn default() -> Self {
         Self {
             host: "0.0.0.0".to_string(),
@@ -50,7 +55,44 @@ impl Default for ServerConfig {
             tls: None,
             cors_enabled: true,
             max_body_size: 10 * 1024 * 1024,
+            max_connections: 1024,
+            keep_alive_timeout: Duration::from_secs(30),
+            enable_http2: true,
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct ConnectionPool {
+    connections: Arc<AtomicUsize>,
+    max: usize,
+}
+
+impl ConnectionPool {
+    #[inline]
+    pub fn new(max: usize) -> Self {
+        Self { connections: Arc::new(AtomicUsize::new(0)), max }
+    }
+
+    #[inline]
+    pub fn try_acquire(&self) -> bool {
+        let current = self.connections.fetch_add(1, Ordering::SeqCst);
+        if current < self.max {
+            true
+        } else {
+            self.connections.fetch_sub(1, Ordering::SeqCst);
+            false
+        }
+    }
+
+    #[inline]
+    pub fn release(&self) {
+        self.connections.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    #[inline]
+    pub fn active(&self) -> usize {
+        self.connections.load(Ordering::SeqCst)
     }
 }
 
@@ -59,6 +101,7 @@ pub struct HttpServer {
     addr: SocketAddr,
     config: ServerConfig,
     routes: Vec<RouteConfig>,
+    pool: ConnectionPool,
 }
 
 impl HttpServer {
@@ -85,6 +128,7 @@ impl HttpServer {
                 RouteConfig { method: "GET".to_string(), path: "/health".to_string() },
                 RouteConfig { method: "POST".to_string(), path: "/api/echo".to_string() },
             ],
+            pool: ConnectionPool::new(1024),
         }
     }
 
@@ -107,9 +151,12 @@ impl HttpServer {
 
         app = app.layer(TraceLayer::new_for_http());
 
-        Self { app, addr, config, routes: Vec::new() }
+        let pool = ConnectionPool::new(config.max_connections);
+
+        Self { app, addr, config, routes: Vec::new(), pool }
     }
 
+    #[inline]
     pub fn route(mut self, method: &str, path: &str) -> Self {
         let path = path.to_string();
         let app = match method.to_uppercase().as_str() {
@@ -130,6 +177,7 @@ impl HttpServer {
         self
     }
 
+    #[inline]
     pub fn ws_route(mut self, path: &str) -> Self {
         let path = path.to_string();
         let state = Arc::new(());
@@ -144,23 +192,64 @@ impl HttpServer {
         self
     }
 
+    #[inline]
     pub fn get_routes(&self) -> &[RouteConfig] {
         &self.routes
     }
 
+    #[inline]
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }
 
+    #[inline]
     pub fn config(&self) -> &ServerConfig {
         &self.config
+    }
+
+    #[inline]
+    pub fn pool(&self) -> &ConnectionPool {
+        &self.pool
     }
 
     pub async fn serve(self) -> anyhow::Result<()> {
         let listener = tokio::net::TcpListener::bind(self.addr).await?;
         println!("Klyron HTTP server listening on http://{}", self.addr);
-        axum::serve(listener, self.app).await?;
-        Ok(())
+
+        if self.config.enable_http2 {
+            self.serve_h2(listener).await
+        } else {
+            axum::serve(listener, self.app).await?;
+            Ok(())
+        }
+    }
+
+    async fn serve_h2(self, listener: tokio::net::TcpListener) -> anyhow::Result<()> {
+        loop {
+            let (stream, peer) = listener.accept().await?;
+            if !self.pool.try_acquire() {
+                eprintln!("Connection limit reached, dropping {peer}");
+                continue;
+            }
+            let app = self.app.clone();
+            let pool = self.pool.clone();
+
+            tokio::spawn(async move {
+                let io = hyper_util::rt::TokioIo::new(stream);
+                let svc = hyper_util::service::TowerToHyperService::new(app.into_service());
+
+                if let Err(e) = hyper::server::conn::http1::Builder::new()
+                    .keep_alive(true)
+                    .serve_connection(io, svc)
+                    .await
+                {
+                    if !e.is_incomplete_message() {
+                        eprintln!("Connection error from {peer}: {e}");
+                    }
+                }
+                pool.release();
+            });
+        }
     }
 
     pub async fn serve_tls(self, cert_path: &str, key_path: &str) -> anyhow::Result<()> {
@@ -184,6 +273,7 @@ impl HttpServer {
             let (stream, _) = listener.accept().await?;
             let acceptor = acceptor.clone();
             let app = self.app.clone();
+            let pool = self.pool.clone();
 
             tokio::spawn(async move {
                 let tls_stream = match acceptor.accept(stream).await {
@@ -193,10 +283,12 @@ impl HttpServer {
                 let io = hyper_util::rt::TokioIo::new(tls_stream);
                 let svc = hyper_util::service::TowerToHyperService::new(app.into_service());
                 let conn = hyper::server::conn::http1::Builder::new()
+                    .keep_alive(true)
                     .serve_connection(io, svc);
                 if let Err(e) = conn.await {
                     eprintln!("TLS connection error: {e}");
                 }
+                pool.release();
             });
         }
     }
@@ -226,6 +318,42 @@ async fn handle_ws(mut socket: WebSocket, _state: Arc<()>) {
             Some(Ok(Message::Close(_))) | None => break,
             _ => {}
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct HttpClient {
+    client: reqwest::Client,
+}
+
+impl HttpClient {
+    #[inline]
+    pub fn new() -> anyhow::Result<Self> {
+        let client = reqwest::Client::builder()
+            .pool_max_idle_per_host(32)
+            .timeout(Duration::from_secs(30))
+            .build()?;
+        Ok(Self { client })
+    }
+
+    pub async fn get(&self, url: &str) -> anyhow::Result<String> {
+        let resp = self.client.get(url).send().await?;
+        Ok(resp.text().await?)
+    }
+
+    pub async fn post(&self, url: &str, body: &str) -> anyhow::Result<String> {
+        let resp = self.client.post(url).body(body.to_string()).send().await?;
+        Ok(resp.text().await?)
+    }
+
+    pub async fn post_json<T: Serialize>(&self, url: &str, data: &T) -> anyhow::Result<String> {
+        let resp = self.client.post(url).json(data).send().await?;
+        Ok(resp.text().await?)
+    }
+
+    #[inline]
+    pub fn inner(&self) -> &reqwest::Client {
+        &self.client
     }
 }
 
@@ -273,6 +401,9 @@ mod tests {
             tls: None,
             cors_enabled: true,
             max_body_size: 5 * 1024 * 1024,
+            max_connections: 512,
+            keep_alive_timeout: Duration::from_secs(60),
+            enable_http2: true,
         };
         let server = HttpServer::with_config(config);
         assert_eq!(server.addr().port(), 8080);
@@ -296,10 +427,12 @@ mod tests {
     }
 
     #[test]
-    fn test_server_config_default() {
-        let config = ServerConfig::default();
-        assert_eq!(config.host, "0.0.0.0");
-        assert_eq!(config.port, 3000);
-        assert!(config.cors_enabled);
+    fn test_connection_pool() {
+        let pool = ConnectionPool::new(2);
+        assert!(pool.try_acquire());
+        assert!(pool.try_acquire());
+        assert!(!pool.try_acquire());
+        pool.release();
+        assert!(pool.try_acquire());
     }
 }

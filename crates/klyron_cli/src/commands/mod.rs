@@ -23,3 +23,4 @@ pub mod deploy;
 pub mod ai;
 pub mod utils;
 pub mod artisan;
+pub mod laravel;

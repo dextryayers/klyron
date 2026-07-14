@@ -65,7 +65,7 @@ impl FrameworkAdapter for AdonisAdapter {
 }"#)?;
 
         std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render(r#"{
+            klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}",
   "version": "1.0.0",
   "private": true,
@@ -164,7 +164,7 @@ export default class AuthMiddleware {
 export default adonis.configs.recommended
 "#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
+            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
 
 AdonisJS project
 
