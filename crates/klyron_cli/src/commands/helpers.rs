@@ -1,5 +1,8 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
 pub fn detect_project_type(dir: &Path) -> &'static str {
     if dir.join("composer.json").exists() { return "laravel"; }
@@ -167,6 +170,354 @@ pub fn start_dev_server(host: &str, port: u16, dir: &Path) -> anyhow::Result<()>
             .map_err(|e| anyhow::anyhow!("Server error: {e}"))?;
         Ok(())
     })
+}
+
+// ── .env file auto-loading ───────────────────────────────────────────────
+
+pub fn load_dotenv(dir: &Path) {
+    let files = get_dotenv_files(dir);
+    for path in files {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            for line in content.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if let Some(eq_idx) = line.find('=') {
+                    let key = line[..eq_idx].trim();
+                    let value = line[eq_idx + 1..].trim();
+                    if !key.is_empty() && std::env::var(key).is_err() {
+                        std::env::set_var(key, value);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn get_dotenv_files(dir: &Path) -> Vec<PathBuf> {
+    let node_env = std::env::var("NODE_ENV").unwrap_or_default();
+    let mut files = Vec::new();
+    let local = dir.join(".env.local");
+    if local.exists() { files.push(local); }
+    if !node_env.is_empty() {
+        let specific = dir.join(format!(".env.{}", node_env));
+        if specific.exists() { files.push(specific); }
+    }
+    let env = dir.join(".env");
+    if env.exists() { files.push(env); }
+    files
+}
+
+// ── tsconfig.json auto-detection ────────────────────────────────────────
+
+pub fn detect_tsconfig(dir: &Path) -> Option<serde_json::Value> {
+    for name in &["tsconfig.json", "tsconfig.ts", "jsconfig.json"] {
+        let path = dir.join(name);
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    return Some(json);
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn apply_tsconfig_compiler_options(tsconfig: &serde_json::Value) -> Vec<String> {
+    let mut opts = Vec::new();
+    if let Some(compiler) = tsconfig.get("compilerOptions").and_then(|v| v.as_object()) {
+        if let Some(target) = compiler.get("target").and_then(|v| v.as_str()) {
+            opts.push(format!("--target={}", target));
+        }
+        if let Some(module) = compiler.get("module").and_then(|v| v.as_str()) {
+            opts.push(format!("--module={}", module));
+        }
+        if let Some(jsx) = compiler.get("jsx").and_then(|v| v.as_str()) {
+            opts.push(format!("--jsx={}", jsx));
+        }
+        if compiler.get("strict").and_then(|v| v.as_bool()).unwrap_or(false) {
+            opts.push("--strict".into());
+        }
+        if let Some(paths) = compiler.get("paths").and_then(|v| v.as_object()) {
+            for (alias, _targets) in paths {
+                opts.push(format!("--alias={}", alias));
+            }
+        }
+    }
+    opts
+}
+
+// ── Framework detection ─────────────────────────────────────────────────
+
+pub fn detect_framework_from_pkg(dir: &Path) -> (String, Option<String>) {
+    let pkg_path = dir.join("package.json");
+    if !pkg_path.exists() {
+        return ("Unknown".into(), None);
+    }
+    let content = match std::fs::read_to_string(&pkg_path) {
+        Ok(c) => c,
+        Err(_) => return ("Unknown".into(), None),
+    };
+    let pkg: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return ("Unknown".into(), None),
+    };
+    let mut deps = HashMap::new();
+    if let Some(d) = pkg.get("dependencies").and_then(|v| v.as_object()) {
+        for (k, v) in d { deps.insert(k.clone(), v.as_str().unwrap_or("").to_string()); }
+    }
+    if let Some(d) = pkg.get("devDependencies").and_then(|v| v.as_object()) {
+        for (k, v) in d { deps.insert(k.clone(), v.as_str().unwrap_or("").to_string()); }
+    }
+
+    let checks: &[(&str, &[&str])] = &[
+        ("Next.js", &["next"]),
+        ("React", &["react"]),
+        ("Vue", &["vue", "nuxt"]),
+        ("Svelte", &["svelte", "@sveltejs/kit"]),
+        ("Angular", &["@angular/core"]),
+        ("Astro", &["astro"]),
+        ("NestJS", &["@nestjs/core"]),
+        ("Express", &["express"]),
+        ("Fastify", &["fastify"]),
+        ("Hono", &["hono"]),
+        ("Solid", &["solid-js"]),
+        ("Gatsby", &["gatsby"]),
+        ("Remix", &["@remix-run/react"]),
+        ("Preact", &["preact"]),
+        ("Lit", &["lit"]),
+        ("Node", &[]),
+    ];
+
+    for (name, packages) in checks {
+        for pkg_name in *packages {
+            if let Some(ver) = deps.get(*pkg_name) {
+                return (name.to_string(), Some(ver.clone()));
+            }
+        }
+    }
+    ("Node".into(), None)
+}
+
+// ── klyron.json config auto-create ──────────────────────────────────────
+
+pub fn auto_create_klyron_config(dir: &Path) -> anyhow::Result<()> {
+    let config_path = dir.join("klyron.json");
+    if config_path.exists() {
+        return Ok(());
+    }
+
+    let project_type = detect_project_type(dir);
+    let (framework, _version) = detect_framework_from_pkg(dir);
+    let project_name = dir.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("my-app")
+        .to_string();
+
+    let mut config = serde_json::json!({
+        "name": project_name,
+        "version": "0.1.0",
+        "type": project_type,
+        "framework": framework,
+        "compiler": {
+            "target": "esnext",
+            "module": "esnext",
+            "minify": false,
+            "sourcemap": false
+        },
+        "dev": {
+            "port": 3000,
+            "hmr": true
+        },
+        "build": {
+            "outDir": "dist",
+            "minify": true
+        }
+    });
+
+    if project_type == "node" || project_type == "unknown" {
+        config["type"] = serde_json::json!("node");
+    }
+
+    if let Some(tsconfig) = detect_tsconfig(dir) {
+        if let Some(compiler) = tsconfig.get("compilerOptions") {
+            config["compiler"] = compiler.clone();
+        }
+    }
+
+    eprint!("No klyron.json found. Create one? [Y/n] ");
+    std::io::Write::flush(&mut std::io::stderr())?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let input = input.trim().to_lowercase();
+    if input == "n" || input == "no" {
+        println!("Skipping config creation.");
+        return Ok(());
+    }
+
+    let content = serde_json::to_string_pretty(&config)?;
+    std::fs::write(&config_path, content)?;
+    println!("Created {}", config_path.display());
+    Ok(())
+}
+
+pub fn detect_project_language(dir: &Path) -> &'static str {
+    if dir.join("tsconfig.json").exists() { return "typescript"; }
+    if dir.join("jsconfig.json").exists() { return "javascript"; }
+    let pkg = dir.join("package.json");
+    if let Ok(content) = std::fs::read_to_string(&pkg) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(dev_deps) = json.get("devDependencies").and_then(|v| v.as_object()) {
+                if dev_deps.contains_key("typescript") { return "typescript"; }
+            }
+            if let Some(deps) = json.get("dependencies").and_then(|v| v.as_object()) {
+                if deps.contains_key("typescript") { return "typescript"; }
+            }
+        }
+    }
+    if dir.join("*.ts").exists() || glob_some(dir, "*.ts") { return "typescript"; }
+    "javascript"
+}
+
+fn glob_some(_dir: &Path, _pattern: &str) -> bool {
+    false
+}
+
+// ── Module Resolution with Caching ──────────────────────────────────────
+
+static RESOLVE_CACHE: Lazy<Mutex<HashMap<String, Option<PathBuf>>>> = Lazy::new(|| {
+    Mutex::new(HashMap::new())
+});
+
+pub fn clear_resolve_cache() {
+    if let Ok(mut cache) = RESOLVE_CACHE.lock() {
+        cache.clear();
+    }
+}
+
+pub fn resolve_module(specifier: &str, base_path: &Path) -> Option<PathBuf> {
+    let cache_key = format!("{}:{}", specifier, base_path.display());
+    if let Ok(cache) = RESOLVE_CACHE.lock() {
+        if let Some(cached) = cache.get(&cache_key) {
+            return cached.clone();
+        }
+    }
+
+    let result = resolve_module_inner(specifier, base_path);
+
+    if let Ok(mut cache) = RESOLVE_CACHE.lock() {
+        cache.insert(cache_key, result.clone());
+    }
+
+    result
+}
+
+fn resolve_module_inner(specifier: &str, base_path: &Path) -> Option<PathBuf> {
+    let base_dir = if base_path.is_file() {
+        base_path.parent().unwrap_or(base_path)
+    } else {
+        base_path
+    };
+
+    let candidate = base_dir.join(specifier);
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+
+    for ext in &[".js", ".ts", ".json", ".jsx", ".tsx", ".mjs", ".cjs"] {
+        let with_ext = candidate.with_extension(ext.trim_start_matches('.'));
+        if with_ext.is_file() {
+            return Some(with_ext);
+        }
+    }
+
+    for name in &["index.js", "index.ts", "index.json", "index.jsx", "index.tsx", "index.mjs", "index.cjs"] {
+        let idx = candidate.join(name);
+        if idx.is_file() {
+            return Some(idx);
+        }
+    }
+
+    let mut dir = Some(base_dir);
+    while let Some(d) = dir {
+        let nm_pkg = d.join("node_modules").join(specifier);
+        if let Some(resolved) = resolve_package_entry(&nm_pkg) {
+            return Some(resolved);
+        }
+        dir = d.parent();
+    }
+
+    None
+}
+
+fn resolve_package_entry(pkg_dir: &Path) -> Option<PathBuf> {
+    if !pkg_dir.exists() {
+        return None;
+    }
+    if pkg_dir.is_file() {
+        return Some(pkg_dir.to_path_buf());
+    }
+
+    let pkg_json = pkg_dir.join("package.json");
+    if pkg_json.exists() {
+        if let Ok(content) = std::fs::read_to_string(&pkg_json) {
+            if let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(exports) = pkg.get("exports") {
+                    if let Some(s) = exports.as_str() {
+                        let entry = pkg_dir.join(s);
+                        if entry.is_file() { return Some(entry); }
+                    }
+                    if let Some(obj) = exports.as_object() {
+                        if let Some(dot) = obj.get(".") {
+                            if let Some(s) = dot.as_str() {
+                                let entry = pkg_dir.join(s);
+                                if entry.is_file() { return Some(entry); }
+                            }
+                            if let Some(sub_obj) = dot.as_object() {
+                                for key in &["import", "require", "default"] {
+                                    if let Some(val) = sub_obj.get(*key).and_then(|v| v.as_str()) {
+                                        let entry = pkg_dir.join(val);
+                                        if entry.is_file() { return Some(entry); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(imports) = pkg.get("imports").and_then(|v| v.as_object()) {
+                    for (_key, val) in imports {
+                        if let Some(s) = val.as_str() {
+                            let entry = pkg_dir.join(s);
+                            if entry.is_file() { return Some(entry); }
+                        }
+                    }
+                }
+                if let Some(main) = pkg.get("main").and_then(|m| m.as_str()) {
+                    let entry = pkg_dir.join(main);
+                    if entry.is_file() { return Some(entry); }
+                    for ext in &[".js", ".mjs", ".cjs", ".json", ".ts"] {
+                        let with_ext = entry.with_extension(ext.trim_start_matches('.'));
+                        if with_ext.is_file() { return Some(with_ext); }
+                    }
+                }
+                if let Some(module) = pkg.get("module").and_then(|m| m.as_str()) {
+                    let entry = pkg_dir.join(module);
+                    if entry.is_file() { return Some(entry); }
+                }
+            }
+        }
+    }
+
+    for name in &["index.js", "index.mjs", "index.cjs", "index.json", "index.ts", "index.jsx", "index.tsx"] {
+        let idx = pkg_dir.join(name);
+        if idx.is_file() {
+            return Some(idx);
+        }
+    }
+
+    None
 }
 
 

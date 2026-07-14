@@ -111,37 +111,137 @@ pub fn run_telemetry(action: Option<TelemetryAction>) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn ensure_gitignore_has_klyron_lock(dir: &std::path::Path) -> anyhow::Result<()> {
+    let gitignore = dir.join(".gitignore");
+    if gitignore.exists() {
+        let content = std::fs::read_to_string(&gitignore)?;
+        if !content.lines().any(|l| l.trim() == "/klyron.lock") {
+            let mut new_content = content;
+            if !new_content.ends_with('\n') {
+                new_content.push('\n');
+            }
+            new_content.push_str("/klyron.lock\n");
+            std::fs::write(&gitignore, new_content)?;
+            println!("Added /klyron.lock to .gitignore");
+        }
+    } else {
+        std::fs::write(&gitignore, "/klyron.lock\n")?;
+        println!("Created .gitignore with /klyron.lock");
+    }
+    Ok(())
+}
+
 pub fn run_init() -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
-    let config_path = dir.join("klyron.toml");
+    let config_path = dir.join("klyron.json");
     if config_path.exists() {
-        anyhow::bail!("klyron.toml already exists");
+        anyhow::bail!("klyron.json already exists");
     }
-    let config = r#"[project]
-name = "my-app"
-version = "0.1.0"
-description = ""
-type = "auto"
 
-[dev]
-port = 3000
-hmr = true
+    let project_type = crate::detect_project_type(&dir);
+    let (framework, version) = crate::detect_framework_from_pkg(&dir);
+    let language = crate::detect_project_language(&dir);
+    let project_name = dir.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("my-app")
+        .to_string();
 
-[build]
-out_dir = "dist"
-minify = true
+    let config = serde_json::json!({
+        "name": project_name,
+        "version": "0.1.0",
+        "type": project_type,
+        "framework": framework,
+        "language": language,
+        "compiler": {
+            "target": "esnext",
+            "module": "esnext",
+            "minify": false,
+            "sourcemap": false
+        },
+        "dev": {
+            "port": 3000,
+            "hmr": true
+        },
+        "build": {
+            "outDir": "dist",
+            "minify": true
+        }
+    });
 
-[test]
-runner = "auto"
-coverage = false
+    let content = serde_json::to_string_pretty(&config)?;
+    std::fs::write(&config_path, content)?;
 
-[format]
-runner = "auto"
-indent_size = 2
-"#;
-    std::fs::write(&config_path, config)?;
-    println!("klyron.toml created");
+    println!("{}", crate::style_success(format!(
+        "Created klyron.json for {} project ({framework} {})",
+        project_type,
+        version.as_deref().unwrap_or(""),
+    )));
+
+    let lock_path = dir.join("klyron.lock");
+    let lock = serde_json::json!({
+        "name": project_name,
+        "framework": framework,
+        "language": language,
+        "frameworkVersion": version,
+        "createdAt": chrono_now_iso(),
+        "projectType": project_type
+    });
+    if let Ok(content) = serde_json::to_string_pretty(&lock) {
+        std::fs::write(&lock_path, content)?;
+        println!("{} Created {}", crate::style_success(""), lock_path.display());
+    }
+
+    ensure_gitignore_has_klyron_lock(&dir)?;
     Ok(())
+}
+
+fn chrono_now_iso() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = duration.as_secs();
+    let millis = duration.subsec_millis();
+    let secs_per_day = 86400;
+    let days = secs / secs_per_day;
+    let time_secs = secs % secs_per_day;
+    let hours = time_secs / 3600;
+    let minutes = (time_secs % 3600) / 60;
+    let seconds = time_secs % 60;
+
+    let mut year = 1970i64;
+    let mut remaining_days = days as i64;
+    loop {
+        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
+        if remaining_days < days_in_year {
+            break;
+        }
+        remaining_days -= days_in_year;
+        year += 1;
+    }
+    let month_days = if is_leap_year(year) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    let mut month = 1;
+    for &md in &month_days {
+        if remaining_days < md {
+            break;
+        }
+        remaining_days -= md;
+        month += 1;
+    }
+    let day = remaining_days + 1;
+
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        year, month, day, hours, minutes, seconds, millis
+    )
+}
+
+fn is_leap_year(year: i64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 pub fn run_upgrade() -> anyhow::Result<()> {

@@ -1,6 +1,6 @@
-use crate::PmError;
+use crate::{PmError, KlyronLockfile as MainKlyronLockfile, KlyronLockPackage, LockfileV3};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 const KLYRON_MAGIC: &[u8] = b"KLYR";
@@ -196,6 +196,198 @@ impl KlyronLockfile {
       }
     }
     Ok(resolved)
+  }
+}
+
+// ── Diffing ──────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiffKind {
+  Added,
+  Removed,
+  Changed,
+  Upgraded,
+  Downgraded,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiffEntry {
+  pub kind: DiffKind,
+  pub name: String,
+  pub old_version: Option<String>,
+  pub new_version: Option<String>,
+}
+
+pub fn lockfile_diff(a: &KlyronLockfile, b: &KlyronLockfile) -> Vec<DiffEntry> {
+  let mut entries = Vec::new();
+  let a_keys: HashSet<&str> = a.packages.keys().map(|s| s.as_str()).collect();
+  let b_keys: HashSet<&str> = b.packages.keys().map(|s| s.as_str()).collect();
+
+  for key in b_keys.difference(&a_keys) {
+    if let Some(pkg) = b.packages.get(*key) {
+      entries.push(DiffEntry {
+        kind: DiffKind::Added,
+        name: format!("{}@{}", pkg.name, pkg.version),
+        old_version: None,
+        new_version: Some(pkg.version.clone()),
+      });
+    }
+  }
+
+  for key in a_keys.difference(&b_keys) {
+    if let Some(pkg) = a.packages.get(*key) {
+      entries.push(DiffEntry {
+        kind: DiffKind::Removed,
+        name: format!("{}@{}", pkg.name, pkg.version),
+        old_version: Some(pkg.version.clone()),
+        new_version: None,
+      });
+    }
+  }
+
+  for key in a_keys.intersection(&b_keys) {
+    let a_pkg = &a.packages[*key];
+    let b_pkg = &b.packages[*key];
+    if a_pkg.version != b_pkg.version {
+      let kind = if semver::Version::parse(&b_pkg.version).ok()
+        .zip(semver::Version::parse(&a_pkg.version).ok())
+        .map(|(b_ver, a_ver)| b_ver > a_ver)
+        .unwrap_or(false)
+      {
+        DiffKind::Upgraded
+      } else if a_pkg.version != b_pkg.version {
+        DiffKind::Downgraded
+      } else {
+        DiffKind::Changed
+      };
+      entries.push(DiffEntry {
+        kind,
+        name: format!("{}@{}", a_pkg.name, a_pkg.version),
+        old_version: Some(a_pkg.version.clone()),
+        new_version: Some(b_pkg.version.clone()),
+      });
+    }
+  }
+
+  entries
+}
+
+pub fn print_diff(entries: &[DiffEntry]) {
+  if entries.is_empty() {
+    println!("No differences between lockfiles");
+    return;
+  }
+  for entry in entries {
+    let symbol = match entry.kind {
+      DiffKind::Added => '+',
+      DiffKind::Removed => '-',
+      DiffKind::Changed => '~',
+      DiffKind::Upgraded => '^',
+      DiffKind::Downgraded => 'v',
+    };
+    match entry.kind {
+      DiffKind::Added => println!(" {} {} (new)", symbol, entry.name),
+      DiffKind::Removed => println!(" {} {} (removed)", symbol, entry.name),
+      _ => println!(" {} {} ({} -> {})", symbol, entry.name, entry.old_version.as_deref().unwrap_or("?"), entry.new_version.as_deref().unwrap_or("?")),
+    }
+  }
+}
+
+// ── Auto-repair ──────────────────────────────────────────────────────────────
+
+impl KlyronLockfile {
+  pub fn try_repair(&mut self, dir: &Path) -> Result<Vec<String>, PmError> {
+    let mut repairs = Vec::new();
+
+    // Repair 1: remove duplicate entries
+    let mut seen: HashSet<String> = HashSet::new();
+    let dupes: Vec<String> = self.packages.keys()
+      .filter(|k| !seen.insert(k.to_string()))
+      .cloned()
+      .collect();
+    for key in &dupes {
+      self.packages.remove(key);
+      repairs.push(format!("Removed duplicate: {key}"));
+    }
+
+    // Repair 2: fix missing resolved URLs
+    for (key, pkg) in &self.packages.clone() {
+      if pkg.resolved.is_empty() {
+        if let Some(pkg_mut) = self.packages.get_mut(key) {
+          pkg_mut.resolved = format!("https://registry.npmjs.org/{}/-/{}-{}.tgz", pkg.name, pkg.name, pkg.version);
+          repairs.push(format!("Added missing resolved URL for {key}"));
+        }
+      }
+    }
+
+    // Repair 3: fix negative/zero install times
+    for (key, pkg) in &self.packages.clone() {
+      if pkg.install_time_ms == 0 || pkg.install_time_ms == u64::MAX {
+        if let Some(pkg_mut) = self.packages.get_mut(key) {
+          pkg_mut.install_time_ms = 1;
+          repairs.push(format!("Fixed install_time for {key}"));
+        }
+      }
+    }
+
+    // Repair 4: regenerate integrity from node_modules if available
+    let nm_dir = dir.join("node_modules");
+    if nm_dir.exists() {
+      for (key, pkg) in &self.packages.clone() {
+        let pkg_dir = nm_dir.join(&pkg.name);
+        let pkg_json_path = pkg_dir.join("package.json");
+        if pkg_json_path.exists() {
+          if let Ok(data) = std::fs::read(&pkg_json_path) {
+            let actual = crate::compute_integrity(&data);
+            if actual != pkg.integrity {
+              if let Some(pkg_mut) = self.packages.get_mut(key) {
+                pkg_mut.integrity = actual;
+                repairs.push(format!("Regenerated integrity for {key} from node_modules"));
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Repair 5: try JSON fallback if binary data was corrupted
+    // (handled by caller)
+
+    // Repair 6: normalize metadata
+    self.metadata.install_count = self.packages.len() as u64;
+
+    repairs.sort();
+    repairs.dedup();
+    Ok(repairs)
+  }
+
+  pub fn from_bytes_with_repair(bytes: &[u8], dir: &Path) -> (Result<Self, PmError>, Vec<String>) {
+    match Self::from_bytes(bytes) {
+      Ok(lock) => {
+        let mut l = lock;
+        match l.try_repair(dir) {
+          Ok(repairs) => (Ok(l), repairs),
+          Err(e) => (Err(e), Vec::new()),
+        }
+      }
+      Err(bin_err) => {
+        // Try JSON fallback
+        if let Ok(text) = std::str::from_utf8(bytes) {
+          match Self::from_json(text) {
+            Ok(json_lock) => {
+              let mut l = json_lock;
+              let repairs = l.try_repair(dir).unwrap_or_default();
+              let mut all = vec!["Recovered from JSON fallback after binary parse error".to_string()];
+              all.extend(repairs);
+              (Ok(l), all)
+            }
+            Err(_) => (Err(bin_err), Vec::new()),
+          }
+        } else {
+          (Err(bin_err), Vec::new())
+        }
+      }
+    }
   }
 }
 

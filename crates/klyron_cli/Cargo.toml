@@ -56,3 +56,8 @@ toml = { workspace = true }
 dirs = "5"
 ureq = "2"
 reqwest = { workspace = true, features = ["blocking", "json"] }
+ctrlc = "3"
+tokio-stream = "0.1"
+klyron_config = { path = "../klyron_config" }
+klyron_loader = { path = "../klyron_loader" }
+mime_guess = "2"

@@ -1,4 +1,5 @@
 use std::{
+  collections::HashMap,
   path::{Path, PathBuf},
   sync::{Arc, LazyLock, Mutex},
 };
@@ -11,6 +12,122 @@ use deno_error::JsErrorBox;
 
 use crate::permissions::Permissions;
 use crate::transpiler::Transpiler;
+
+// ── Import Map ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default)]
+struct ImportMap {
+  imports: HashMap<String, String>,
+  scopes: HashMap<String, HashMap<String, String>>,
+}
+
+impl ImportMap {
+  fn auto_detect(start_dir: &Path) -> Self {
+    let names = &["import_map.json", "import_map.jsonc"];
+    let mut dir = Some(start_dir);
+    while let Some(d) = dir {
+      for name in names {
+        let path = d.join(name);
+        if path.exists() {
+          if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+              return Self::from_json(&json);
+            }
+          }
+        }
+      }
+      dir = d.parent();
+    }
+    // Check klyron.json for importMap field
+    let klyron_json = start_dir.join("klyron.json");
+    if klyron_json.exists() {
+      if let Ok(content) = std::fs::read_to_string(&klyron_json) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+          if let Some(import_map) = json.get("importMap").and_then(|v| v.as_str()) {
+            let imp_path = start_dir.join(import_map);
+            if imp_path.exists() {
+              if let Ok(imp_content) = std::fs::read_to_string(&imp_path) {
+                if let Ok(imp_json) = serde_json::from_str::<serde_json::Value>(&imp_content) {
+                  return Self::from_json(&imp_json);
+                }
+              }
+            }
+          }
+          if let Some(imports) = json.get("imports").and_then(|v| v.as_object()) {
+            let mut map = ImportMap::default();
+            for (k, v) in imports {
+              if let Some(s) = v.as_str() {
+                map.imports.insert(k.clone(), s.to_string());
+              }
+            }
+            return map;
+          }
+        }
+      }
+    }
+    Self::default()
+  }
+
+  fn from_json(value: &serde_json::Value) -> Self {
+    let mut map = ImportMap::default();
+    if let Some(imports) = value.get("imports").and_then(|v| v.as_object()) {
+      for (k, v) in imports {
+        if let Some(s) = v.as_str() {
+          map.imports.insert(k.clone(), s.to_string());
+        }
+      }
+    }
+    if let Some(scopes) = value.get("scopes").and_then(|v| v.as_object()) {
+      for (scope_key, scope_val) in scopes {
+        if let Some(scope_obj) = scope_val.as_object() {
+          let mut scope_map = HashMap::new();
+          for (k, v) in scope_obj {
+            if let Some(s) = v.as_str() {
+              scope_map.insert(k.clone(), s.to_string());
+            }
+          }
+          map.scopes.insert(scope_key.clone(), scope_map);
+        }
+      }
+    }
+    map
+  }
+
+  fn resolve(&self, specifier: &str, referrer: Option<&str>) -> Option<String> {
+    if let Some(referrer_str) = referrer {
+      for (scope_prefix, scope_imports) in &self.scopes {
+        if referrer_str.starts_with(scope_prefix) {
+          if let Some(result) = Self::match_imports(scope_imports, specifier) {
+            return Some(result);
+          }
+        }
+      }
+    }
+    Self::match_imports(&self.imports, specifier)
+  }
+
+  fn match_imports(imports: &HashMap<String, String>, specifier: &str) -> Option<String> {
+    if let Some(value) = imports.get(specifier) {
+      return Some(value.clone());
+    }
+    for (key, value) in imports {
+      if let Some(prefix) = key.strip_suffix('/') {
+        if specifier.starts_with(prefix) {
+          let suffix = specifier.strip_prefix(prefix)?;
+          let mapped = value.trim_end_matches('/').to_string() + suffix;
+          return Some(mapped);
+        }
+      }
+      if let Some(prefix) = key.strip_suffix('*') {
+        if let Some(suffix) = specifier.strip_prefix(prefix) {
+          let mapped = value.replace('*', suffix);
+          return Some(mapped);
+        }
+      }
+    }
+    None
+  }
+}
 
 static NODE_BUILTINS: LazyLock<Vec<(&'static str, &'static str)>> = LazyLock::new(|| {
   vec![

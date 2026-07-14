@@ -83,6 +83,20 @@ pub fn run_file(args: RunArgs, extensions: Vec<deno_core::Extension>) -> anyhow:
     let watch = args.watch;
     let path = args.path.clone();
 
+    let dir = std::env::current_dir()?;
+    crate::load_dotenv(&dir);
+
+    if let Some(tsconfig) = crate::detect_tsconfig(&dir) {
+        let opts = crate::apply_tsconfig_compiler_options(&tsconfig);
+        if !opts.is_empty() {
+            crate::log_debug(format!("tsconfig.json options: {}", opts.join(" ")));
+        }
+    }
+
+    if !dir.join("klyron.json").exists() {
+        let _ = crate::auto_create_klyron_config(&dir);
+    }
+
     if watch {
         return run_file_watch(path);
     }

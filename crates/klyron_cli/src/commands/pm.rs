@@ -27,6 +27,10 @@ pub enum LockAction {
         #[arg(long)]
         force: bool,
     },
+    Migrate {
+        #[arg(long)]
+        keep: bool,
+    },
 }
 
 #[derive(Args)]
@@ -110,9 +114,95 @@ pub fn run_add(packages: &[String], dev: bool) -> anyhow::Result<()> {
     }
 }
 
+fn ensure_gitignore_has_klyron_lock(dir: &std::path::Path) -> anyhow::Result<()> {
+    let gitignore = dir.join(".gitignore");
+    if gitignore.exists() {
+        let content = std::fs::read_to_string(&gitignore)?;
+        if !content.lines().any(|l| l.trim() == "/klyron.lock") {
+            let mut new_content = content;
+            if !new_content.ends_with('\n') {
+                new_content.push('\n');
+            }
+            new_content.push_str("/klyron.lock\n");
+            std::fs::write(&gitignore, new_content)?;
+            println!("Added /klyron.lock to .gitignore");
+        }
+    }
+    Ok(())
+}
+
 pub fn run_install(frozen: bool) -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     let project = crate::detect_project_type(&dir);
+
+    let _ = ensure_gitignore_has_klyron_lock(&dir);
+
+    if project == "node" {
+        let (framework, version) = crate::detect_framework_from_pkg(&dir);
+        crate::log_info(format!(
+            "{} {} {}",
+            crate::Color::MAGENTA.paint("\u{2699}"),
+            crate::Color::BOLD.paint("Detected framework:"),
+            crate::Color::CYAN.paint(format!("{} {}", framework, version.as_deref().unwrap_or("")))
+        ));
+
+        let config_path = dir.join("klyron.json");
+        if !config_path.exists() {
+            let language = crate::detect_project_language(&dir);
+            let project_name = dir.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("my-app")
+                .to_string();
+            let config = serde_json::json!({
+                "name": project_name,
+                "version": "0.1.0",
+                "type": "node",
+                "framework": framework,
+                "language": language,
+                "compiler": {
+                    "target": "esnext",
+                    "module": "esnext",
+                    "minify": false,
+                    "sourcemap": false
+                },
+                "dev": {
+                    "port": 3000,
+                    "hmr": true
+                },
+                "build": {
+                    "outDir": "dist",
+                    "minify": true
+                }
+            });
+            let content = serde_json::to_string_pretty(&config)?;
+            std::fs::write(&config_path, content)?;
+            crate::log_info(format!(
+                "{} {}",
+                crate::Color::GREEN.paint("\u{2713}"),
+                format!("Generated {}", config_path.display())
+            ));
+        }
+
+        let lock_path = dir.join("klyron.lock");
+        if !lock_path.exists() {
+            let lock = serde_json::json!({
+                "name": dir.file_name().and_then(|n| n.to_str()).unwrap_or("my-app"),
+                "framework": framework,
+                "frameworkVersion": version,
+                "installTime": chrono_now_iso(),
+                "packageManager": crate::detect_package_runner(&dir),
+                "nodeModulesCount": count_node_modules(&dir),
+            });
+            if let Ok(content) = serde_json::to_string_pretty(&lock) {
+                let _ = std::fs::write(&lock_path, content);
+                crate::log_info(format!(
+                    "{} {}",
+                    crate::Color::GREEN.paint("\u{2713}"),
+                    format!("Generated {}", lock_path.display())
+                ));
+            }
+        }
+    }
 
     match project {
         "node" => {
@@ -238,6 +328,47 @@ pub fn run_update(force: bool) -> anyhow::Result<()> {
 
 pub fn run_outdated() -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
+    let klyron_lock = dir.join("klyron.lock");
+    if klyron_lock.exists() {
+        let data = std::fs::read(&klyron_lock)?;
+        let lock = klyron_pm::lockfile::KlyronLockfile::from_bytes(&data)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut outdated = Vec::new();
+        let mut current: Vec<String> = Vec::new();
+        for key in lock.packages.keys() {
+            if let Some(at) = key.rfind('@') {
+                current.push(key[..at].to_string());
+            }
+        }
+        current.sort();
+        current.dedup();
+        for name in &current {
+            if let Some(pkg) = lock.get_package(name) {
+                let wanted = klyron_pm::resolve_version(name, &format!("^{}", pkg.version))
+                    .unwrap_or_else(|_| pkg.version.clone());
+                let latest = klyron_pm::resolve_version(name, ">=0.0.0")
+                    .unwrap_or_else(|_| pkg.version.clone());
+                if wanted != latest || pkg.version != latest {
+                    outdated.push(klyron_pm::OutdatedPackage {
+                        name: name.clone(),
+                        current: pkg.version.clone(),
+                        wanted,
+                        latest,
+                    });
+                }
+            }
+        }
+        if outdated.is_empty() {
+            println!("All packages are up to date");
+        } else {
+            println!("{:<30} Current   Wanted    Latest", "Package");
+            println!("{}", "-".repeat(70));
+            for p in &outdated {
+                println!("{:<30} {:<9} {:<9} {:<9}", p.name, p.current, p.wanted, p.latest);
+            }
+        }
+        return Ok(());
+    }
     let project = crate::detect_project_type(&dir);
     let pm = detect_package_manager(&dir);
     match project {
@@ -305,6 +436,53 @@ pub fn run_lock_update(force: bool) -> anyhow::Result<()> {
     } else {
         run_update(false)?;
     }
+    Ok(())
+}
+
+pub fn run_lock_migrate(keep: bool) -> anyhow::Result<()> {
+    let dir = std::env::current_dir()?;
+    let npm_lock = dir.join("package-lock.json");
+    let yarn_lock = dir.join("yarn.lock");
+    let klyron_lock = dir.join("klyron.lock");
+
+    if klyron_lock.exists() {
+        println!("klyron.lock already exists, nothing to migrate");
+        return Ok(());
+    }
+
+    let source = if npm_lock.exists() {
+        Some((npm_lock.as_path(), "package-lock.json"))
+    } else if yarn_lock.exists() {
+        Some((yarn_lock.as_path(), "yarn.lock"))
+    } else {
+        None
+    };
+
+    let (source_path, source_name) = match source {
+        Some(pair) => pair,
+        None => anyhow::bail!("No package-lock.json or yarn.lock found in {}", dir.display()),
+    };
+
+    let klock = if source_name == "package-lock.json" {
+        klyron_pm::migrate_from_npm_lockfile(source_path)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+    } else {
+        klyron_pm::migrate_from_yarn_lockfile(source_path)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+    };
+
+    let bytes = klock.to_bytes()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    std::fs::write(&klyron_lock, &bytes)?;
+
+    let count = klock.packages.len();
+    println!("Migrated {count} packages from {source_name} to klyron.lock");
+
+    if !keep {
+        std::fs::remove_file(source_path)?;
+        println!("Removed {source_name} (use --keep to keep it)");
+    }
+
     Ok(())
 }
 
@@ -455,4 +633,74 @@ pub fn run_why(package_name: &str) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+// ── Framework detection helpers ──────────────────────────────────────────
+
+fn chrono_now_iso() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = duration.as_secs();
+    let millis = duration.subsec_millis();
+    let secs_per_day = 86400;
+    let days = secs / secs_per_day;
+    let time_secs = secs % secs_per_day;
+    let hours = time_secs / 3600;
+    let minutes = (time_secs % 3600) / 60;
+    let seconds = time_secs % 60;
+
+    let mut year = 1970i64;
+    let mut remaining_days = days as i64;
+    loop {
+        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
+        if remaining_days < days_in_year {
+            break;
+        }
+        remaining_days -= days_in_year;
+        year += 1;
+    }
+    let month_days = if is_leap_year(year) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    let mut month = 1;
+    for &md in &month_days {
+        if remaining_days < md {
+            break;
+        }
+        remaining_days -= md;
+        month += 1;
+    }
+    let day = remaining_days + 1;
+
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        year, month, day, hours, minutes, seconds, millis
+    )
+}
+
+fn is_leap_year(year: i64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+fn count_node_modules(dir: &std::path::Path) -> usize {
+    let nm = dir.join("node_modules");
+    if !nm.exists() {
+        return 0;
+    }
+    let mut count = 0;
+    if let Ok(entries) = std::fs::read_dir(&nm) {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !name.starts_with('.') && name != "package-lock.json" {
+                    count += 1;
+                }
+            }
+        }
+    }
+    count
 }

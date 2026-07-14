@@ -33,6 +33,12 @@ pub fn run_test(args: TestArgs) -> anyhow::Result<()> {
         anyhow::bail!("Directory not found: {}", dir.display());
     }
 
+    crate::load_dotenv(dir);
+
+    if let Some(tsconfig) = crate::detect_tsconfig(dir) {
+        let _opts = crate::apply_tsconfig_compiler_options(&tsconfig);
+    }
+
     let project_type = crate::detect_project_type(dir);
     let runner = detect_test_runner(dir);
     println!("Detected project type: {project_type}, test runner: {runner}");

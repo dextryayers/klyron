@@ -311,6 +311,7 @@ pub enum Commands {
     Deploy { #[command(flatten)] args: commands::deploy::DeployArgs },
     Compat { #[command(flatten)] args: commands::compat::CompatArgs },
     Ai { #[command(flatten)] args: commands::ai::AiArgs },
+    Watch { #[command(flatten)] args: commands::watch::WatchArgs },
     Init,
     Upgrade,
     Doctor,
@@ -662,6 +663,7 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>, json_outpu
         Commands::CreateSymfony { args } => commands::scaffold::scaffold_symfony(&args),
         Commands::CreateCodeIgniter { args } => commands::scaffold::scaffold_codeigniter(&args),
         Commands::CreateWordPress { args } => commands::scaffold::scaffold_wordpress(&args),
+        Commands::Watch { args } => commands::watch::run_watch(args),
         Commands::Dev { args } => commands::dev::run_dev(args),
         Commands::Build { args } => commands::build::run_build(args),
         Commands::Test { args } => commands::test::run_test(args),
@@ -692,6 +694,7 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>, json_outpu
         Commands::Lock { args } => match args.action {
             commands::pm::LockAction::Verify => commands::pm::run_lock_verify(),
             commands::pm::LockAction::Update { force } => commands::pm::run_lock_update(force),
+            commands::pm::LockAction::Migrate { keep } => commands::pm::run_lock_migrate(keep),
         },
         Commands::Publish { args } => commands::registry::run_publish(&args),
         Commands::Unpublish { args } => commands::registry::run_unpublish(&args.name),
