@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand, Args, CommandFactory};
 use klyron_adapter::AdapterRegistry;
 use klyron_adapter::adapters::register_all;
 use klyron_core::Runtime;
-use klyron_engine::{JsEngineKind, EngineRuntime, detect_best_engine, benchmark_all_engines, EnginePool, EnginePreWarmer, profile_engine, profile_all_engines};
+use klyron_engine::{JsEngineKind, EngineRuntime, detect_best_engine, benchmark_all_engines, EnginePreWarmer, profile_all_engines};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use tracing_subscriber::EnvFilter;
@@ -318,7 +318,7 @@ pub enum Commands {
     Version,
     Clean { #[arg(long)] yes: bool },
     Coverage { #[command(flatten)] args: commands::coverage::CoverageArgs },
-    Telemetry { #[command(subcommand)] action: commands::utils::TelemetryAction },
+    Telemetry { #[command(subcommand)] action: Option<commands::utils::TelemetryAction> },
     Config { #[command(flatten)] args: commands::utils::ConfigArgs },
     Laravel { #[command(subcommand)] action: commands::laravel::LaravelCommand },
     Serve { #[arg(long, default_value = "localhost")] host: String, #[arg(long, default_value_t = 3000)] port: u16, #[arg(long)] dir: Option<PathBuf>, #[arg(long)] watch: bool },
@@ -478,7 +478,7 @@ pub fn run_cli() -> anyhow::Result<()> {
         log_info(format!("Pre-warming {} engines (pool size: {})", kind, cli.engine_pool_size));
     }
 
-    let result = dispatch_command(cli.command, engine);
+    let result = dispatch_command(cli.command, engine, cli.json);
 
     if cli.json {
         match &result {
@@ -496,7 +496,7 @@ pub fn run_cli() -> anyhow::Result<()> {
 
 // ── Dispatch ──────────────────────────────────────────────────────────────
 
-pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>) -> anyhow::Result<()> {
+pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>, json_output: bool) -> anyhow::Result<()> {
     match cmd {
         Commands::Eval { args } => {
             if let Some(eng) = engine {
@@ -699,7 +699,7 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>) -> anyhow:
         Commands::Logout { args } => commands::registry::run_logout(args.registry.as_deref()),
         Commands::Whoami => commands::registry::run_whoami(),
         Commands::Search { args } => commands::registry::run_search(&args.query),
-        Commands::InfoCmd { args } => commands::registry::run_info(&args.package, cli.json),
+        Commands::InfoCmd { args } => commands::registry::run_info(&args.package, json_output),
         Commands::Pack { output } => commands::pm::run_pack(output.as_deref()),
         Commands::Link { args } => commands::pm::run_link(&args),
         Commands::Unlink { package } => commands::pm::run_unlink_global(&package),

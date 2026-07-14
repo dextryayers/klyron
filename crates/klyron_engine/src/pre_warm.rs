@@ -36,7 +36,7 @@ impl EnginePreWarmer {
         let kind = self.engine_kind;
 
         thread::spawn(move || {
-            let pool = EnginePool::new(kind, pool_size, pool_size * 2);
+            let pool = EnginePool::new(kind, pool_size, pool_size.saturating_mul(2));
             pool.warmup(pool_size);
             pool.pre_compile_scripts(COMMON_POLYFILLS);
             *pool_arc.lock() = Some(pool);
@@ -45,7 +45,7 @@ impl EnginePreWarmer {
     }
 
     pub fn start_blocking(&self, pool_size: usize) -> EnginePool {
-        let pool = EnginePool::new(self.engine_kind, pool_size, pool_size * 2);
+        let pool = EnginePool::new(self.engine_kind, pool_size, pool_size.saturating_mul(2));
         pool.warmup(pool_size);
         pool.pre_compile_scripts(COMMON_POLYFILLS);
         *self.pool.lock() = Some(pool.clone());

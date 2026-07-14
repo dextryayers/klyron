@@ -71,7 +71,7 @@ pub fn run_format(args: FormatArgs) -> anyhow::Result<()> {
         report.files_changed, report.files_unchanged, report.files_skipped
     );
 
-    let backend = klyron_formatter::FormatBackend::detect(&dir);
+    let backend = klyron_formatter::Formatter::detect(&dir);
     println!("Backend: {}", backend.name());
 
     Ok(())

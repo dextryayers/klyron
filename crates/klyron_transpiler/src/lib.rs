@@ -140,44 +140,44 @@ pub fn strip_type_annotations(source: &str) -> String {
                 while j < chars.len() && (chars[j] == ' ' || chars[j] == '\n' || chars[j] == '\t') {
                     j += 1;
                 }
+                let start_type = j;
                 let mut depth = 0i32;
                 let mut paren_depth = 0i32;
                 let mut found_type = false;
                 while j < chars.len() {
                     match chars[j] {
                         '{' => {
-                            depth += 1;
-                            j += 1;
-                            while j < chars.len() && depth > 0 {
-                                if chars[j] == '{' { depth += 1; }
-                                else if chars[j] == '}' { depth -= 1; }
-                                j += 1;
+                            if paren_depth == 0 {
+                                let inner_rest: String = chars[j..].iter().collect();
+                                if !inner_rest.trim_start().starts_with('{') {
+                                    depth += 1;
+                                    j += 1;
+                                    while j < chars.len() && depth > 0 {
+                                        if chars[j] == '{' { depth += 1; }
+                                        else if chars[j] == '}' { depth -= 1; }
+                                        j += 1;
+                                    }
+                                    found_type = true;
+                                    break;
+                                }
+                                if j == start_type {
+                                    j += 1;
+                                    continue;
+                                }
+                                break;
                             }
-                            found_type = true;
-                            break;
+                            j += 1;
                         }
-                        ';' if depth == 0 && paren_depth == 0 => {
-                            found_type = true;
-                            break;
-                        }
-                        ',' if depth == 0 && paren_depth == 0 => {
-                            found_type = true;
-                            break;
-                        }
-                        ')' if paren_depth == 0 && depth == 0 => {
-                            found_type = true;
-                            break;
-                        }
-                        '=' if paren_depth == 0 && depth == 0 => {
-                            found_type = true;
-                            break;
-                        }
-                        '(' => { paren_depth += 1; }
-                        ')' => { paren_depth -= 1; }
-                        '\n' if depth == 0 && paren_depth == 0 => { break; }
-                        _ => {}
+                        ';' if paren_depth == 0 => { found_type = true; break; }
+                        ',' if paren_depth == 0 => { found_type = true; break; }
+                        ')' if paren_depth == 0 => { found_type = true; break; }
+                        '=' if paren_depth == 0 => { found_type = true; break; }
+                        '(' => { paren_depth += 1; j += 1; }
+                        ')' => { paren_depth -= 1; j += 1; }
+                        '\n' if paren_depth == 0 => { break; }
+                        ' ' | '\t' => { j += 1; }
+                        _ => { j += 1; }
                     }
-                    j += 1;
                 }
                 if found_type && i > 0 {
                     let before = chars[i-1];

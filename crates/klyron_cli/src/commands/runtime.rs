@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use clap::Args;
 use klyron_core::{Runtime, permissions::{PermissionSet, PolicyTemplate, SandboxLevel}};
 
@@ -80,20 +80,27 @@ pub fn run_eval_typescript(code: &str, jsx: bool) -> anyhow::Result<()> {
 }
 
 pub fn run_file(args: RunArgs, extensions: Vec<deno_core::Extension>) -> anyhow::Result<()> {
+    let watch = args.watch;
+    let path = args.path.clone();
+
+    if watch {
+        return run_file_watch(path);
+    }
+
     if args.sandbox.is_sandboxed() {
         klyron_core::sandbox::Sandbox::apply(args.sandbox, args.max_memory, args.max_cpu, args.max_fds)
             .map_err(|e| anyhow::anyhow!("Sandbox: {e}"))?;
     }
     let mut perm_set = PermissionSet::default();
-    if !args.allow_read.is_empty() { perm_set.allow_read = args.allow_read; }
-    if !args.deny_read.is_empty() { perm_set.deny_read = args.deny_read; }
-    if !args.allow_write.is_empty() { perm_set.allow_write = args.allow_write; }
-    if !args.deny_write.is_empty() { perm_set.deny_write = args.deny_write; }
-    if !args.allow_net.is_empty() { perm_set.allow_net = args.allow_net; }
-    if !args.deny_net.is_empty() { perm_set.deny_net = args.deny_net; }
-    if !args.allow_env.is_empty() { perm_set.allow_env = args.allow_env; }
-    if !args.deny_env.is_empty() { perm_set.deny_env = args.deny_env; }
-    if !args.allow_run.is_empty() { perm_set.allow_run = args.allow_run; }
+    perm_set.allow_read = args.allow_read.clone();
+    perm_set.deny_read = args.deny_read.clone();
+    perm_set.allow_write = args.allow_write.clone();
+    perm_set.deny_write = args.deny_write.clone();
+    perm_set.allow_net = args.allow_net.clone();
+    perm_set.deny_net = args.deny_net.clone();
+    perm_set.allow_env = args.allow_env.clone();
+    perm_set.deny_env = args.deny_env.clone();
+    perm_set.allow_run = args.allow_run.clone();
     if args.allow_ffi { perm_set.allow_ffi = true; }
     if args.allow_sys { perm_set.allow_sys = true; }
     if args.allow_read_all { perm_set.allow_read_all = true; }
@@ -106,10 +113,6 @@ pub fn run_file(args: RunArgs, extensions: Vec<deno_core::Extension>) -> anyhow:
     perm_set.max_cpu = args.max_cpu;
     perm_set.max_fds = args.max_fds;
 
-    if args.watch {
-        return run_file_watch(args);
-    }
-
     let runtime = Runtime::builder()
         .async_(true)
         .enable_typescript(true)
@@ -117,11 +120,11 @@ pub fn run_file(args: RunArgs, extensions: Vec<deno_core::Extension>) -> anyhow:
         .extensions(extensions)
         .build()?;
 
-    if !args.path.exists() {
-        anyhow::bail!("File not found: {}", args.path.display());
+    if !path.exists() {
+        anyhow::bail!("File not found: {}", path.display());
     }
-    let source = std::fs::read_to_string(&args.path)?;
-    let result = runtime.execute_script(args.path.to_str().unwrap_or("<file>"), &source)?;
+    let source = std::fs::read_to_string(&path)?;
+    let result = runtime.execute_script(path.to_str().unwrap_or("<file>"), &source)?;
     if !result.is_empty() && result != "undefined" {
         println!("{result}");
     }
@@ -135,8 +138,8 @@ pub fn run_file(args: RunArgs, extensions: Vec<deno_core::Extension>) -> anyhow:
     Ok(())
 }
 
-fn run_file_watch(args: RunArgs) -> anyhow::Result<()> {
-    let path = args.path.clone();
+fn run_file_watch(file_path: PathBuf) -> anyhow::Result<()> {
+    let path = file_path.clone();
     let path_str = path.display().to_string();
 
     println!("Watching {} for changes...", path_str);
@@ -147,34 +150,32 @@ fn run_file_watch(args: RunArgs) -> anyhow::Result<()> {
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to start watcher: {e}"))?;
 
-    let args_clone = RunArgs {
-        path: path.clone(),
-        watch: false,
-        ..args
-    };
-
-    let run_once = || -> anyhow::Result<()> {
-        let extensions = crate::all_extensions();
-        let runtime = Runtime::builder()
-            .async_(true)
-            .enable_typescript(true)
-            .permissions(PermissionSet::default())
-            .extensions(extensions)
-            .build()?;
-        let source = std::fs::read_to_string(&path)?;
-        let result = runtime.execute_script(path.to_str().unwrap_or("<file>"), &source)?;
-        if !result.is_empty() && result != "undefined" {
-            println!("{}", result);
+    let run_once = {
+        let path = path.clone();
+        move || -> anyhow::Result<()> {
+            let extensions = crate::all_extensions();
+            let runtime = Runtime::builder()
+                .async_(true)
+                .enable_typescript(true)
+                .permissions(PermissionSet::default())
+                .extensions(extensions)
+                .build()?;
+            let source = std::fs::read_to_string(&path)?;
+            let result = runtime.execute_script(path.to_str().unwrap_or("<file>"), &source)?;
+            if !result.is_empty() && result != "undefined" {
+                println!("{}", result);
+            }
+            Ok(())
         }
-        Ok(())
     };
 
     let _ = run_once();
 
+    let watch_path = path.clone();
     watcher.start(move |event| {
         use klyron_watcher::WatchEvent;
         match event {
-            WatchEvent::Modify(p) | WatchEvent::Any(p) if p == path => {
+            WatchEvent::Modify(p) | WatchEvent::Any(p) if p == watch_path => {
                 println!("\n\x1b[2K\x1b[GFile changed: {}", p.display());
                 match run_once() {
                     Ok(_) => {},

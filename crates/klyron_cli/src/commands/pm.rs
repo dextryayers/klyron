@@ -1,6 +1,6 @@
 use clap::Args;
 use klyron_pm::KlyronLockfile;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Args)]
 pub struct AddArgs {

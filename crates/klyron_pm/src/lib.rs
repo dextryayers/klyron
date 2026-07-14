@@ -1044,6 +1044,7 @@ pub fn resolve_workspace_dependency_version(
   }
 }
 
+#[allow(dead_code)]
 fn get_workspace_member_versions(workspace: &WorkspaceManager) -> HashMap<String, String> {
   let mut map = HashMap::new();
   for member in &workspace.member_packages {
@@ -2738,7 +2739,7 @@ mod tests {
     )
     .unwrap();
     let pm = PackageManager::new(&dir);
-    let outdated = pm.outdated().unwrap();
+    let _outdated = pm.outdated().unwrap();
     // left-pad 1.3.0 is latest, so not outdated
     let _ = std::fs::remove_dir_all(&dir);
   }
@@ -2755,7 +2756,7 @@ mod tests {
 
   #[test]
   fn test_dedupe_empty() {
-    let mut lock = LockfileV3 {
+    let lock = LockfileV3 {
       name: Some("test".into()),
       lockfile_version: Some("3".into()),
       packages: BTreeMap::new(),
