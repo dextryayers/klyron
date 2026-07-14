@@ -7,7 +7,10 @@ use sha2::{Digest, Sha512};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 use thiserror::Error;
+
+pub mod lockfile;
 
 // ── Errors ───────────────────────────────────────────────────────────────────
 
@@ -954,7 +957,939 @@ impl WorkspaceManager {
   }
 }
 
-// ── Git Dependency Resolution ──────────────────────────────────────────────
+// ── Workspace Protocol ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum WorkspaceDependency {
+  Star,
+  Range(String),
+  Tilde(String),
+}
+
+pub fn parse_workspace_dependency(dep_spec: &str) -> Option<WorkspaceDependency> {
+  let spec = dep_spec.trim();
+  if !spec.starts_with("workspace:") {
+    return None;
+  }
+  let inner = &spec["workspace:".len()..];
+  match inner {
+    "*" => Some(WorkspaceDependency::Star),
+    s if s.starts_with('^') => Some(WorkspaceDependency::Range(s.to_string())),
+    s if s.starts_with('~') => Some(WorkspaceDependency::Tilde(s.to_string())),
+    // plain semver
+    s if s.chars().next().map_or(false, |c| c.is_ascii_digit()) => Some(WorkspaceDependency::Range(format!("^{s}"))),
+    _ => None,
+  }
+}
+
+pub fn resolve_workspace_dependency(
+  dep_spec: &str,
+  workspace_members: &HashMap<String, String>,
+) -> Result<String, PmError> {
+  let ws_dep = parse_workspace_dependency(dep_spec)
+    .ok_or_else(|| PmError::WorkspaceError(format!("Invalid workspace spec: {dep_spec}")))?;
+  match ws_dep {
+    WorkspaceDependency::Star => {
+      // Find the workspace member that matches the package
+      // The caller should determine the package name from context
+      Err(PmError::WorkspaceError("workspace:* requires a package name context".into()))
+    }
+    WorkspaceDependency::Range(spec) | WorkspaceDependency::Tilde(spec) => {
+      // Find a workspace member whose version satisfies the spec
+      let req = semver::VersionReq::parse(&spec)
+        .map_err(|e| PmError::ResolutionError(format!("Invalid semver: {e}")))?;
+      for (name, version) in workspace_members {
+        if let Ok(ver) = semver::Version::parse(version) {
+          if req.matches(&ver) {
+            return Ok(name.clone());
+          }
+        }
+      }
+      Err(PmError::VersionNotFound(format!("No workspace member matches '{spec}'")))
+    }
+  }
+}
+
+pub fn resolve_workspace_dependency_version(
+  dep_spec: &str,
+  workspace_members: &HashMap<String, String>,
+  package_name: &str,
+) -> Result<String, PmError> {
+  let ws_dep = parse_workspace_dependency(dep_spec)
+    .ok_or_else(|| PmError::WorkspaceError(format!("Invalid workspace spec: {dep_spec}")))?;
+  match ws_dep {
+    WorkspaceDependency::Star => {
+      workspace_members.get(package_name)
+        .cloned()
+        .ok_or_else(|| PmError::PackageNotFound(format!("Workspace member '{package_name}' not found")))
+    }
+    WorkspaceDependency::Range(spec) | WorkspaceDependency::Tilde(spec) => {
+      if let Some(version) = workspace_members.get(package_name) {
+        let req = semver::VersionReq::parse(&spec)
+          .map_err(|e| PmError::ResolutionError(format!("Invalid semver: {e}")))?;
+        if let Ok(ver) = semver::Version::parse(version) {
+          if req.matches(&ver) {
+            return Ok(version.clone());
+          }
+        }
+        return Err(PmError::VersionNotFound(format!(
+          "Workspace member '{package_name}' version {version} does not match '{spec}'"
+        )));
+      }
+      // Try to find any member matching the spec
+      resolve_workspace_dependency(dep_spec, workspace_members).and_then(|name| {
+        workspace_members.get(&name).cloned().ok_or_else(|| PmError::PackageNotFound(name))
+      })
+    }
+  }
+}
+
+fn get_workspace_member_versions(workspace: &WorkspaceManager) -> HashMap<String, String> {
+  let mut map = HashMap::new();
+  for member in &workspace.member_packages {
+    let pkg_json = member.join("package.json");
+    if let Ok(content) = std::fs::read_to_string(&pkg_json) {
+      if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+        if let Some(name) = json.get("name").and_then(|n| n.as_str()) {
+          let version = json.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0").to_string();
+          map.insert(name.to_string(), version);
+        }
+      }
+    }
+  }
+  map
+}
+
+// ── Link / Unlink ─────────────────────────────────────────────────────────
+
+pub fn get_global_link_dir() -> PathBuf {
+  dirs::home_dir()
+    .map(|h| h.join(".klyron").join("store").join("linked"))
+    .unwrap_or_else(|| PathBuf::from("/tmp/.klyron/linked"))
+}
+
+pub fn link_package(package_dir: &Path, global_dir: &Path) -> Result<PathBuf, PmError> {
+  let pkg_json = package_dir.join("package.json");
+  if !pkg_json.exists() {
+    return Err(PmError::PackageNotFound("package.json not found in package dir".into()));
+  }
+  let content = std::fs::read_to_string(&pkg_json)?;
+  let json: serde_json::Value = serde_json::from_str(&content)
+    .map_err(|e| PmError::ResolutionError(format!("Invalid package.json: {e}")))?;
+  let name = json.get("name")
+    .and_then(|v| v.as_str())
+    .ok_or_else(|| PmError::PackageNotFound("No 'name' in package.json".into()))?;
+
+  std::fs::create_dir_all(global_dir)?;
+  let link_path = global_dir.join(name);
+
+  // Remove existing symlink or directory
+  if link_path.exists() || link_path.is_symlink() {
+    if link_path.is_symlink() || link_path.is_file() {
+      std::fs::remove_file(&link_path)?;
+    } else {
+      std::fs::remove_dir_all(&link_path)?;
+    }
+  }
+
+  // Create symlink
+  let abs_package_dir = package_dir.canonicalize()
+    .map_err(|e| PmError::IoError(format!("Cannot canonicalize package dir: {e}")))?;
+  #[cfg(unix)]
+  std::os::unix::fs::symlink(&abs_package_dir, &link_path)
+    .map_err(|e| PmError::IoError(format!("Failed to create symlink: {e}")))?;
+  #[cfg(windows)]
+  std::os::windows::fs::symlink_dir(&abs_package_dir, &link_path)
+    .map_err(|e| PmError::IoError(format!("Failed to create symlink: {e}")))?;
+
+  Ok(link_path)
+}
+
+pub fn link_global(package_name: &str, target_dir: &Path) -> Result<PathBuf, PmError> {
+  let global_dir = get_global_link_dir();
+  link_global_from_dir(package_name, target_dir, &global_dir)
+}
+
+pub fn link_global_from_dir(package_name: &str, target_dir: &Path, global_dir: &Path) -> Result<PathBuf, PmError> {
+  let link_source = global_dir.join(package_name);
+  if !link_source.exists() {
+    return Err(PmError::PackageNotFound(format!(
+      "Global link '{package_name}' not found at {}",
+      link_source.display()
+    )));
+  }
+
+  let node_modules = target_dir.join("node_modules");
+  std::fs::create_dir_all(&node_modules)?;
+  let link_dest = node_modules.join(package_name);
+
+  if link_dest.exists() || link_dest.is_symlink() {
+    if link_dest.is_symlink() || link_dest.is_file() {
+      std::fs::remove_file(&link_dest)?;
+    } else {
+      std::fs::remove_dir_all(&link_dest)?;
+    }
+  }
+
+  let abs_source = std::fs::canonicalize(&link_source)
+    .map_err(|e| PmError::IoError(format!("Cannot resolve link source: {e}")))?;
+  #[cfg(unix)]
+  std::os::unix::fs::symlink(&abs_source, &link_dest)
+    .map_err(|e| PmError::IoError(format!("Failed to create symlink: {e}")))?;
+  #[cfg(windows)]
+  std::os::windows::fs::symlink_dir(&abs_source, &link_dest)
+    .map_err(|e| PmError::IoError(format!("Failed to create symlink: {e}")))?;
+
+  Ok(link_dest)
+}
+
+pub fn unlink_package(package_name: &str) -> Result<(), PmError> {
+  let global_dir = get_global_link_dir();
+  let link_path = global_dir.join(package_name);
+  if !link_path.exists() && !link_path.is_symlink() {
+    return Err(PmError::PackageNotFound(format!(
+      "No global link '{package_name}' found"
+    )));
+  }
+  if link_path.is_symlink() || link_path.is_file() {
+    std::fs::remove_file(&link_path)?;
+  } else {
+    std::fs::remove_dir_all(&link_path)?;
+  }
+  Ok(())
+}
+
+// ── Pack ───────────────────────────────────────────────────────────────────
+
+pub fn pack_package(dir: &Path, output_path: Option<&Path>) -> Result<PathBuf, PmError> {
+  use flate2::write::GzEncoder;
+  use flate2::Compression;
+  use tar::Builder;
+
+  let pkg_json = dir.join("package.json");
+  if !pkg_json.exists() {
+    return Err(PmError::PackageNotFound("package.json not found".into()));
+  }
+
+  let content = std::fs::read_to_string(&pkg_json)?;
+  let json: serde_json::Value = serde_json::from_str(&content)
+    .map_err(|e| PmError::ResolutionError(format!("Invalid package.json: {e}")))?;
+
+  let name = json.get("name").and_then(|v| v.as_str()).unwrap_or("package");
+  let version = json.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
+
+  let output = output_path.map_or_else(|| {
+    dir.join(format!("{name}-{version}.tgz"))
+  }, |p| p.to_path_buf());
+
+  let file = std::fs::File::create(&output)?;
+  let encoder = GzEncoder::new(file, Compression::default());
+  let mut archive = Builder::new(encoder);
+
+  // Files/dirs to include
+  let include_patterns = [
+    "package.json",
+    "README.md",
+    "LICENSE",
+    "LICENSE.md",
+    "CHANGELOG.md",
+    "dist",
+    "src",
+  ];
+
+  // Files/dirs to exclude
+  let exclude_patterns = [
+    "node_modules",
+    ".git",
+    "target",
+    "test",
+    "__tests__",
+    "tests",
+    ".klyron",
+  ];
+
+  // Track added paths to avoid duplicates
+  let mut added = std::collections::HashSet::new();
+
+  for entry in walkdir::WalkDir::new(dir)
+    .into_iter()
+    .filter_entry(|e| {
+      let name = e.file_name().to_str().unwrap_or("");
+      !exclude_patterns.contains(&name)
+    })
+    .filter_map(|e| e.ok())
+  {
+    let relative = entry.path().strip_prefix(dir).unwrap_or(entry.path());
+    let relative_str = relative.to_string_lossy();
+
+    // Check if this path matches any include pattern
+    let should_include = include_patterns.iter().any(|pat| {
+      relative_str == *pat || relative_str.starts_with(&format!("{pat}/"))
+    }) || {
+      // Also include any files that aren't excluded and are not in excluded dirs
+      let parent_in_exclude = exclude_patterns.iter().any(|pat| {
+        relative_str.starts_with(&format!("{pat}/"))
+      });
+      !parent_in_exclude && relative_str != "."
+    };
+
+    if !should_include {
+      continue;
+    }
+
+    let archive_path = format!("package/{relative_str}");
+    if added.contains(&archive_path) {
+      continue;
+    }
+    added.insert(archive_path.clone());
+
+    if entry.file_type().is_dir() {
+      archive.append_dir(&archive_path, entry.path())
+        .map_err(|e| PmError::IoError(format!("Failed to add dir to tarball: {e}")))?;
+    } else if entry.file_type().is_file() {
+      let mut f = std::fs::File::open(entry.path())?;
+      archive.append_file(&archive_path, &mut f)
+        .map_err(|e| PmError::IoError(format!("Failed to add file to tarball: {e}")))?;
+    }
+  }
+
+  let encoder = archive.into_inner()
+    .map_err(|e| PmError::IoError(format!("Failed to finish tarball: {e}")))?;
+  encoder.finish()?;
+
+  Ok(output)
+}
+
+/// Generate integrity hash for a package tarball
+pub fn pack_and_get_integrity(dir: &Path) -> Result<(PathBuf, String), PmError> {
+  let tarball_path = pack_package(dir, None)?;
+  let data = std::fs::read(&tarball_path)?;
+  let integrity = compute_integrity(&data);
+  Ok((tarball_path, integrity))
+}
+
+// ── Publish ────────────────────────────────────────────────────────────────
+
+pub fn publish_package(
+  dir: &Path,
+  registry_url: &str,
+  token: Option<&str>,
+) -> Result<(), PmError> {
+  let pkg_json = dir.join("package.json");
+  if !pkg_json.exists() {
+    return Err(PmError::PackageNotFound("package.json not found".into()));
+  }
+
+  let content = std::fs::read_to_string(&pkg_json)?;
+  let json: serde_json::Value = serde_json::from_str(&content)
+    .map_err(|e| PmError::ResolutionError(format!("Invalid package.json: {e}")))?;
+
+  let name = json.get("name").and_then(|v| v.as_str())
+    .ok_or_else(|| PmError::PackageNotFound("No 'name' in package.json".into()))?;
+  let version = json.get("version").and_then(|v| v.as_str())
+    .ok_or_else(|| PmError::PackageNotFound("No 'version' in package.json".into()))?;
+
+  // Pack the package
+  let tarball_path = pack_package(dir, None)?;
+
+  let _ = version; // version is validated but not directly used in HTTP request
+
+  let final_data = std::fs::read(&tarball_path)?;
+
+  let client = reqwest::blocking::Client::builder()
+    .timeout(std::time::Duration::from_secs(60))
+    .build()
+    .map_err(|e| PmError::IoError(format!("Failed to create HTTP client: {e}")))?;
+
+  let url = format!("{registry_url}/{name}");
+  let mut req = client.put(&url).body(final_data);
+  if let Some(t) = token {
+    req = req.header("Authorization", format!("Bearer {t}"));
+  }
+
+  let resp = req.send()
+    .map_err(|e| PmError::IoError(format!("Publish request failed: {e}")))?;
+
+  if !resp.status().is_success() {
+    return Err(PmError::IoError(format!(
+      "Publish failed: HTTP {}",
+      resp.status()
+    )));
+  }
+
+  let _ = std::fs::remove_file(&tarball_path);
+  Ok(())
+}
+
+// ── Dist-tag ────────────────────────────────────────────────────────────────
+
+pub fn add_dist_tag(package: &str, version: &str, tag: &str, registry_url: &str) -> Result<(), PmError> {
+  let client = reqwest::blocking::Client::builder()
+    .timeout(std::time::Duration::from_secs(30))
+    .build()
+    .map_err(|e| PmError::IoError(format!("Failed to create HTTP client: {e}")))?;
+
+  let url = format!("{registry_url}/-/package/{package}/dist-tags/{tag}");
+  let body = serde_json::json!(version).to_string();
+
+  let resp = client.put(&url)
+    .header("Content-Type", "application/json")
+    .body(body)
+    .send()
+    .map_err(|e| PmError::IoError(format!("Failed to set dist-tag: {e}")))?;
+
+  if !resp.status().is_success() {
+    return Err(PmError::IoError(format!(
+      "Failed to set dist-tag: HTTP {}",
+      resp.status()
+    )));
+  }
+  Ok(())
+}
+
+pub fn remove_dist_tag(package: &str, tag: &str, registry_url: &str) -> Result<(), PmError> {
+  let client = reqwest::blocking::Client::builder()
+    .timeout(std::time::Duration::from_secs(30))
+    .build()
+    .map_err(|e| PmError::IoError(format!("Failed to create HTTP client: {e}")))?;
+
+  let url = format!("{registry_url}/-/package/{package}/dist-tags/{tag}");
+
+  let resp = client.delete(&url)
+    .send()
+    .map_err(|e| PmError::IoError(format!("Failed to remove dist-tag: {e}")))?;
+
+  if !resp.status().is_success() {
+    return Err(PmError::IoError(format!(
+      "Failed to remove dist-tag: HTTP {}",
+      resp.status()
+    )));
+  }
+  Ok(())
+}
+
+pub fn list_dist_tags(package: &str, registry_url: &str) -> Result<HashMap<String, String>, PmError> {
+  let client = reqwest::blocking::Client::builder()
+    .timeout(std::time::Duration::from_secs(30))
+    .build()
+    .map_err(|e| PmError::IoError(format!("Failed to create HTTP client: {e}")))?;
+
+  let url = if package.starts_with('@') {
+    let encoded = package.replace('/', "%2F");
+    format!("{registry_url}/{encoded}")
+  } else {
+    format!("{registry_url}/{package}")
+  };
+
+  let resp = client.get(&url)
+    .send()
+    .map_err(|e| PmError::IoError(format!("Failed to fetch package info: {e}")))?;
+
+  if !resp.status().is_success() {
+    return Err(PmError::PackageNotFound(format!(
+      "Package '{package}' not found: HTTP {}",
+      resp.status()
+    )));
+  }
+
+  let json: serde_json::Value = resp.json()
+    .map_err(|e| PmError::IoError(format!("Failed to parse response: {e}")))?;
+
+  let tags = json.get("dist-tags")
+    .and_then(|t| t.as_object())
+    .map(|o| o.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+    .unwrap_or_default();
+
+  Ok(tags)
+}
+
+// ── Package Info ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageFullInfo {
+  pub name: String,
+  pub description: Option<String>,
+  pub latest_version: String,
+  pub all_versions: Vec<String>,
+  pub maintainers: Vec<MaintainerInfo>,
+  pub homepage: Option<String>,
+  pub license: Option<String>,
+  pub repository: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaintainerInfo {
+  pub name: String,
+  pub email: Option<String>,
+}
+
+pub fn package_info(name: &str, registry_url: &str) -> Result<PackageFullInfo, PmError> {
+  let client = reqwest::blocking::Client::builder()
+    .timeout(std::time::Duration::from_secs(30))
+    .build()
+    .map_err(|e| PmError::IoError(format!("Failed to create HTTP client: {e}")))?;
+
+  let url = if name.starts_with('@') {
+    let encoded = name.replace('/', "%2F");
+    format!("{registry_url}/{encoded}")
+  } else {
+    format!("{registry_url}/{name}")
+  };
+
+  let resp = client.get(&url)
+    .header("Accept", "application/json")
+    .send()
+    .map_err(|e| PmError::IoError(format!("Failed to fetch package info: {e}")))?;
+
+  if !resp.status().is_success() {
+    return Err(PmError::PackageNotFound(format!(
+      "Package '{name}' not found: HTTP {}",
+      resp.status()
+    )));
+  }
+
+  let json: serde_json::Value = resp.json()
+    .map_err(|e| PmError::IoError(format!("Failed to parse response: {e}")))?;
+
+  let latest_version = json.get("dist-tags")
+    .and_then(|t| t.get("latest"))
+    .and_then(|v| v.as_str())
+    .unwrap_or("unknown")
+    .to_string();
+
+  let all_versions = json.get("versions")
+    .and_then(|v| v.as_object())
+    .map(|o| o.keys().cloned().collect::<Vec<_>>())
+    .unwrap_or_default();
+
+  let maintainers = json.get("maintainers")
+    .and_then(|m| m.as_array())
+    .map(|arr| {
+      arr.iter().filter_map(|m| {
+        Some(MaintainerInfo {
+          name: m.get("name")?.as_str()?.to_string(),
+          email: m.get("email").and_then(|e| e.as_str()).map(String::from),
+        })
+      }).collect()
+    })
+    .unwrap_or_default();
+
+  let homepage = json.get("homepage").and_then(|v| v.as_str()).map(String::from);
+  let repo = json.get("repository").and_then(|r| {
+    r.as_str().map(String::from).or_else(|| {
+      r.get("url").and_then(|u| u.as_str()).map(String::from)
+    })
+  });
+
+  Ok(PackageFullInfo {
+    name: name.to_string(),
+    description: json.get("description").and_then(|v| v.as_str()).map(String::from),
+    latest_version,
+    all_versions,
+    maintainers,
+    homepage,
+    license: json.get("license").and_then(|v| v.as_str()).map(String::from),
+    repository: repo,
+  })
+}
+
+// ── Why (Dependency Tree) ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct WhyPath {
+  pub path: Vec<String>,
+  pub depth: usize,
+}
+
+pub fn why_package(
+  name: &str,
+  lockfile: &KlyronLockfile,
+) -> Result<Vec<WhyPath>, PmError> {
+  let mut results = Vec::new();
+
+  // Build a forward dependency map: for each package, what does it depend on
+  let mut forward_deps: HashMap<String, Vec<String>> = HashMap::new();
+  let mut all_pkg_names: HashSet<String> = HashSet::new();
+
+  for (key, pkg) in &lockfile.packages {
+    if let Some(at_pos) = key.rfind('@') {
+      let pkg_name = key[..at_pos].to_string();
+      all_pkg_names.insert(pkg_name.clone());
+
+      let deps = forward_deps.entry(pkg_name).or_default();
+      if let Some(ref d) = pkg.dependencies {
+        deps.extend(d.keys().cloned());
+      }
+      if let Some(ref pd) = pkg.peer_dependencies {
+        deps.extend(pd.keys().cloned());
+      }
+    }
+  }
+
+  // Find all packages that match the name
+  let matching_keys: Vec<String> = lockfile.packages.keys()
+    .filter(|k| {
+      if let Some(at_pos) = k.rfind('@') {
+        &k[..at_pos] == name || k.ends_with(name)
+      } else {
+        false
+      }
+    })
+    .cloned()
+    .collect();
+
+  if matching_keys.is_empty() {
+    return Err(PmError::PackageNotFound(format!(
+      "Package '{name}' not found in lockfile"
+    )));
+  }
+
+  // DFS from root following forward deps to find all paths to target
+  fn find_paths_fwd(
+    current: &str,
+    target: &str,
+    forward_deps: &HashMap<String, Vec<String>>,
+    visited: &mut HashSet<String>,
+    current_path: &mut Vec<String>,
+    results: &mut Vec<WhyPath>,
+  ) {
+    if current == target {
+      results.push(WhyPath {
+        path: current_path.clone(),
+        depth: current_path.len() - 1,
+      });
+      return;
+    }
+
+    if !visited.insert(current.to_string()) {
+      return;
+    }
+
+    if let Some(deps) = forward_deps.get(current) {
+      for dep in deps {
+        current_path.push(dep.clone());
+        find_paths_fwd(dep, target, forward_deps, visited, current_path, results);
+        current_path.pop();
+      }
+    }
+
+    visited.remove(current);
+  }
+
+  // Find root packages (those not depended on by anyone)
+  let mut reverse_deps: HashMap<String, Vec<String>> = HashMap::new();
+  for (pkg_name, deps) in &forward_deps {
+    for dep in deps {
+      if all_pkg_names.contains(dep) {
+        reverse_deps.entry(dep.clone()).or_default().push(pkg_name.clone());
+      }
+    }
+  }
+
+  let root_pkgs: Vec<String> = all_pkg_names.iter()
+    .filter(|n| !reverse_deps.contains_key(*n) || reverse_deps[*n].is_empty())
+    .cloned()
+    .collect();
+
+  for root in &root_pkgs {
+    let mut path = vec![root.clone()];
+    let mut visited = HashSet::new();
+    find_paths_fwd(root, name, &forward_deps, &mut visited, &mut path, &mut results);
+  }
+
+  // Also include direct root deps
+  for matching_key in &matching_keys {
+    if let Some(at_pos) = matching_key.rfind('@') {
+      let pkg_name = &matching_key[..at_pos];
+      if root_pkgs.contains(&pkg_name.to_string()) {
+        if !results.iter().any(|r| r.path == vec![pkg_name.to_string()]) {
+          results.push(WhyPath {
+            path: vec![pkg_name.to_string()],
+            depth: 0,
+          });
+        }
+      }
+    }
+  }
+
+  // Deduplicate and sort paths
+  results.sort_by(|a, b| a.depth.cmp(&b.depth).then(a.path.len().cmp(&b.path.len())));
+  results.dedup_by(|a, b| a.path == b.path);
+
+  Ok(results)
+}
+
+// ── Binary Scripts (.bin symlinks) ────────────────────────────────────────
+
+pub fn install_bin_scripts(
+  package_dir: &Path,
+  bin_map: &HashMap<String, String>,
+  node_modules_dir: &Path,
+) -> Result<Vec<PathBuf>, PmError> {
+  let bin_dir = node_modules_dir.join(".bin");
+  std::fs::create_dir_all(&bin_dir)?;
+
+  let mut created = Vec::new();
+
+  for (bin_name, bin_path_str) in bin_map {
+    let bin_path = package_dir.join(bin_path_str);
+    let link_path = bin_dir.join(bin_name);
+
+    // Remove existing
+    if link_path.exists() || link_path.is_symlink() {
+      if link_path.is_symlink() || link_path.is_file() {
+        let _ = std::fs::remove_file(&link_path);
+      } else {
+        let _ = std::fs::remove_dir_all(&link_path);
+      }
+    }
+
+    // Create the symlink
+    let abs_bin_path = if bin_path.exists() {
+      std::fs::canonicalize(&bin_path)
+        .unwrap_or(bin_path)
+    } else {
+      // Try relative to package_dir
+      package_dir.join(bin_path_str)
+    };
+
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&abs_bin_path, &link_path)
+      .map_err(|e| PmError::IoError(format!("Failed to create .bin symlink: {e}")))?;
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(&abs_bin_path, &link_path)
+      .map_err(|e| PmError::IoError(format!("Failed to create .bin symlink: {e}")))?;
+
+    // Fix shebang on Unix
+    #[cfg(unix)]
+    fix_shebang(&abs_bin_path);
+
+    // Create a cmd wrapper for Windows compatibility
+    let cmd_wrapper = bin_dir.join(format!("{bin_name}.cmd"));
+    let pkg_name = package_dir.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let cmd_path = bin_path_str.replace('/', "\\");
+    let cmd_content = format!(
+      "@if not defined DEBUG_HELPER @echo off\r\n\"%~dp0\\..\\{pkg_name}\\{cmd_path}\" %*\r\n"
+    );
+    std::fs::write(&cmd_wrapper, cmd_content)?;
+
+    created.push(link_path);
+  }
+
+  Ok(created)
+}
+
+#[cfg(unix)]
+fn fix_shebang(path: &Path) {
+  use std::io::Read;
+  if let Ok(mut file) = std::fs::File::open(path) {
+    let mut first_bytes = [0u8; 2];
+    if file.read(&mut first_bytes).ok() == Some(2) && first_bytes == [0x23, 0x21] {
+      // It has a shebang, read the first line
+      let mut contents = String::new();
+      file.read_to_string(&mut contents).ok();
+      let first_line = contents.lines().next().unwrap_or("");
+      // If the shebang points to node or nodejs, make sure it's executable
+      if first_line.contains("node") || first_line.contains("nodejs") {
+        // Ensure the script is executable
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(path) {
+          let mut perms = metadata.permissions();
+          if perms.mode() & 0o111 == 0 {
+            perms.set_mode(perms.mode() | 0o111);
+            let _ = std::fs::set_permissions(path, perms);
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Scan all packages in node_modules for "bin" fields and create .bin symlinks
+pub fn install_all_bin_scripts(node_modules_dir: &Path) -> Result<usize, PmError> {
+  let mut count = 0;
+  if !node_modules_dir.exists() {
+    return Ok(0);
+  }
+
+  for entry in std::fs::read_dir(node_modules_dir)
+    .map_err(|e| PmError::IoError(format!("Failed to read node_modules: {e}")))? {
+    let entry = entry?;
+    let path = entry.path();
+    if !path.is_dir() || path.file_name().map_or(true, |n| n.to_str().map_or(true, |n| n.starts_with('.'))) {
+      continue;
+    }
+
+    // Handle @scoped packages
+    if path.file_name().and_then(|n| n.to_str()) == Some("@") {
+      if let Ok(scoped_dir) = std::fs::read_dir(&path) {
+        for scope_entry in scoped_dir.flatten() {
+          let pkg_dir = scope_entry.path();
+          let pkg_json_path = pkg_dir.join("package.json");
+          if let Ok(content) = std::fs::read_to_string(&pkg_json_path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+              if let Some(bin) = json.get("bin") {
+                let bin_map = parse_bin_field(bin);
+                if !bin_map.is_empty() {
+                  let created = install_bin_scripts(&pkg_dir, &bin_map, node_modules_dir)?;
+                  count += created.len();
+                }
+              }
+            }
+          }
+        }
+      }
+      continue;
+    }
+
+    let pkg_json_path = path.join("package.json");
+    if let Ok(content) = std::fs::read_to_string(&pkg_json_path) {
+      if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+        if let Some(bin) = json.get("bin") {
+          let bin_map = parse_bin_field(bin);
+          if !bin_map.is_empty() {
+            let created = install_bin_scripts(&path, &bin_map, node_modules_dir)?;
+            count += created.len();
+          }
+        }
+      }
+    }
+  }
+
+  Ok(count)
+}
+
+fn parse_bin_field(bin: &serde_json::Value) -> HashMap<String, String> {
+  match bin {
+    serde_json::Value::String(s) => {
+      let name = std::path::Path::new(s)
+        .file_stem()
+        .and_then(|n| n.to_str())
+        .unwrap_or("cli")
+        .to_string();
+      let mut map = HashMap::new();
+      map.insert(name, s.clone());
+      map
+    }
+    serde_json::Value::Object(obj) => {
+      obj.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect()
+    }
+    _ => HashMap::new(),
+  }
+}
+
+// ── Peer / Optional Dependencies ─────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct PeerDepWarning {
+  pub package: String,
+  pub peer_name: String,
+  pub required_range: String,
+  pub found_version: Option<String>,
+}
+
+pub fn resolve_peer_dependencies(
+  package_name: &str,
+  peer_deps: &HashMap<String, String>,
+  all_packages: &HashMap<String, String>,
+) -> Vec<PeerDepWarning> {
+  let mut warnings = Vec::new();
+
+  for (peer_name, required_range) in peer_deps {
+    let found = all_packages.get(peer_name);
+    match found {
+      Some(version) => {
+        if let Ok(req) = semver::VersionReq::parse(required_range) {
+          if let Ok(ver) = semver::Version::parse(version) {
+            if !req.matches(&ver) {
+              warnings.push(PeerDepWarning {
+                package: package_name.to_string(),
+                peer_name: peer_name.clone(),
+                required_range: required_range.clone(),
+                found_version: Some(version.clone()),
+              });
+            }
+          }
+        }
+      }
+      None => {
+        warnings.push(PeerDepWarning {
+          package: package_name.to_string(),
+          peer_name: peer_name.clone(),
+          required_range: required_range.clone(),
+          found_version: None,
+        });
+      }
+    }
+  }
+
+  warnings
+}
+
+/// Handle optional dependencies: skip if they fail to resolve
+pub fn handle_optional_deps(
+  _package_name: &str,
+  optional_deps: &HashMap<String, String>,
+) -> Vec<(String, String)> {
+  let mut resolved = Vec::new();
+  for (name, version) in optional_deps {
+    match resolve_version(name, version) {
+      Ok(v) => resolved.push((name.clone(), v)),
+      Err(_) => {
+        // Silently skip optional deps that fail
+        continue;
+      }
+    }
+  }
+  resolved
+}
+
+/// Apply overrides from package.json resolution field
+pub fn resolve_overrides(
+  package_json: &serde_json::Value,
+  resolution_map: &mut HashMap<String, String>,
+) -> Result<(), PmError> {
+  // Check for "overrides" field
+  if let Some(overrides) = package_json.get("overrides").and_then(|o| o.as_object()) {
+    for (name, version_val) in overrides {
+      let version = match version_val {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Object(obj) => {
+          // Support nested overrides like: "overrides": { "foo": { ".": "1.0.0", "bar": "2.0.0" } }
+          if let Some(dot) = obj.get(".").and_then(|v| v.as_str()) {
+            dot.to_string()
+          } else {
+            continue;
+          }
+        }
+        _ => continue,
+      };
+      resolution_map.insert(name.clone(), version);
+    }
+  }
+
+  // Check for "resolutions" field (yarn-style)
+  if let Some(resolutions) = package_json.get("resolutions").and_then(|r| r.as_object()) {
+    for (name, version_val) in resolutions {
+      if let Some(version) = version_val.as_str() {
+        resolution_map.insert(name.clone(), version.to_string());
+      }
+    }
+  }
+
+  Ok(())
+}
+
+pub fn apply_overrides_to_deps(
+  deps: &mut HashMap<String, String>,
+  resolution_map: &HashMap<String, String>,
+) {
+  for (name, resolved_version) in resolution_map {
+    if deps.contains_key(name) {
+      deps.insert(name.clone(), resolved_version.clone());
+    }
+  }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitDependency {
@@ -1411,6 +2346,218 @@ impl PackageManager {
 
     Ok(lock)
   }
+}
+
+// ── Install Result ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct InstallResult {
+  pub nodes: Vec<DependencyNode>,
+  pub start_time: SystemTime,
+  pub end_time: SystemTime,
+}
+
+impl InstallResult {
+  pub fn duration_ms(&self) -> u64 {
+    self.end_time.duration_since(self.start_time)
+      .unwrap_or_default()
+      .as_millis() as u64
+  }
+}
+
+// ── Lockfile Generation ────────────────────────────────────────────────────
+
+pub fn generate_lockfile(install_result: &InstallResult, lockfile_path: &Path) -> Result<(), PmError> {
+  use lockfile::{KlyronLockfile, LockfilePackage};
+
+  let mut lock = KlyronLockfile::new();
+  lock.metadata.install_count = install_result.nodes.len() as u64;
+
+  for node in &install_result.nodes {
+    let integrity = node.integrity.clone()
+      .unwrap_or_else(|| compute_integrity(node.name.as_bytes()));
+    let resolved = node.resolved.clone()
+      .unwrap_or_else(|| format!("https://registry.npmjs.org/{}/-/{}-{}.tgz", node.name, node.name, node.version));
+
+    let mut deps = HashMap::new();
+    for dep in &node.dependencies {
+      deps.insert(dep.name.clone(), dep.version.clone());
+    }
+
+    lock.add_package(
+      &node.name,
+      &node.version,
+      LockfilePackage {
+        name: node.name.clone(),
+        version: node.version.clone(),
+        resolved,
+        integrity,
+        dependencies: deps,
+        optional_dependencies: HashMap::new(),
+        peer_dependencies: HashMap::new(),
+        bin: None,
+        has_node_modules: false,
+        install_time_ms: install_result.duration_ms(),
+      },
+    );
+  }
+
+  let bytes = lock.to_bytes()?;
+  if let Some(parent) = lockfile_path.parent() {
+    std::fs::create_dir_all(parent)?;
+  }
+  std::fs::write(lockfile_path, bytes)?;
+  Ok(())
+}
+
+pub fn install_with_lockfile(project_dir: &Path, frozen: bool) -> Result<(), PmError> {
+  use lockfile::KlyronLockfile;
+
+  let lockfile_path = project_dir.join("klyron.lock");
+
+  // Load existing lockfile if present
+  let existing_lock = if lockfile_path.exists() {
+    let data = std::fs::read(&lockfile_path)?;
+    Some(KlyronLockfile::from_bytes(&data)?)
+  } else {
+    None
+  };
+
+  if frozen {
+    if let Some(ref lock) = existing_lock {
+      lock.frozen_check(project_dir)?;
+      return Ok(());
+    }
+    return Err(PmError::LockfileError("klyron.lock not found in frozen mode".into()));
+  }
+
+  let pm = PackageManager::new(project_dir);
+  let opts = InstallOptions::default();
+  let start = SystemTime::now();
+  let nodes = pm.install(&opts)?;
+  let end = SystemTime::now();
+
+  let result = InstallResult {
+    nodes,
+    start_time: start,
+    end_time: end,
+  };
+
+  generate_lockfile(&result, &lockfile_path)?;
+  Ok(())
+}
+
+pub fn migrate_from_npm_lockfile(npm_lock_path: &Path) -> Result<lockfile::KlyronLockfile, PmError> {
+  use lockfile::{KlyronLockfile, LockfilePackage};
+
+  let content = std::fs::read_to_string(npm_lock_path)?;
+  let npm_lock: serde_json::Value = serde_json::from_str(&content)
+    .map_err(|e| PmError::LockfileError(format!("Invalid npm lockfile: {e}")))?;
+
+  let mut klock = KlyronLockfile::new();
+
+  let packages = npm_lock.get("packages")
+    .or_else(|| npm_lock.get("dependencies"))
+    .and_then(|v| v.as_object());
+
+  if let Some(pkgs) = packages {
+    for (path, info) in pkgs {
+      if path.is_empty() {
+        continue;
+      }
+      let name = path.rsplit('/').next().unwrap_or(&path).to_string();
+      let version = info.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0").to_string();
+      let resolved = info.get("resolved").and_then(|v| v.as_str()).unwrap_or("").to_string();
+      let integrity = info.get("integrity").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+      let deps = info.get("dependencies").and_then(|v| v.as_object())
+        .map(|o| o.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+        .unwrap_or_default();
+      let opt_deps = info.get("optionalDependencies").and_then(|v| v.as_object())
+        .map(|o| o.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+        .unwrap_or_default();
+      let peer_deps = info.get("peerDependencies").and_then(|v| v.as_object())
+        .map(|o| o.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect())
+        .unwrap_or_default();
+
+      klock.add_package(&name, &version, LockfilePackage {
+        name: name.clone(),
+        version: version.clone(),
+        resolved,
+        integrity,
+        dependencies: deps,
+        optional_dependencies: opt_deps,
+        peer_dependencies: peer_deps,
+        bin: None,
+        has_node_modules: false,
+        install_time_ms: 0,
+      });
+    }
+  }
+
+  Ok(klock)
+}
+
+pub fn migrate_from_yarn_lockfile(yarn_lock_path: &Path) -> Result<lockfile::KlyronLockfile, PmError> {
+  use lockfile::{KlyronLockfile, LockfilePackage};
+
+  let content = std::fs::read_to_string(yarn_lock_path)?;
+  let mut klock = KlyronLockfile::new();
+
+  for entry in content.split("\n\n") {
+    let entry = entry.trim();
+    if entry.is_empty() || entry.starts_with('#') {
+      continue;
+    }
+
+    let mut name = String::new();
+    let mut version = String::new();
+    let mut resolved = String::new();
+    let mut integrity = String::new();
+    let deps = HashMap::new();
+
+    for line in entry.lines() {
+      let line = line.trim();
+      if let Some(ident) = line.strip_suffix(':') {
+        if !ident.starts_with('"') && !ident.contains('@') {
+          continue;
+        }
+        if name.is_empty() {
+          let raw = ident.trim_matches('"');
+          if let Some(at_pos) = raw.find("@") {
+            let (n, v) = raw.split_at(at_pos);
+            name = n.to_string();
+            version = v.trim_start_matches('@').to_string();
+          }
+        }
+      } else if let Some(val) = line.strip_prefix("version ") {
+        version = val.trim().trim_matches('"').to_string();
+      } else if let Some(val) = line.strip_prefix("resolved ") {
+        resolved = val.trim().trim_matches('"').to_string();
+      } else if let Some(val) = line.strip_prefix("integrity ") {
+        integrity = val.trim().trim_matches('"').to_string();
+      } else if line.starts_with("dependencies:") {
+        // yarn v1 format - skip
+      }
+    }
+
+    if !name.is_empty() && !version.is_empty() {
+      klock.add_package(&name, &version, LockfilePackage {
+        name: name.clone(),
+        version: version.clone(),
+        resolved,
+        integrity,
+        dependencies: deps,
+        optional_dependencies: HashMap::new(),
+        peer_dependencies: HashMap::new(),
+        bin: None,
+        has_node_modules: false,
+        install_time_ms: 0,
+      });
+    }
+  }
+
+  Ok(klock)
 }
 
 fn check_known_vulnerability(name: &str, version: &Version) -> Option<AuditVulnerability> {
@@ -1874,5 +3021,560 @@ mod tests {
     };
     let json = serde_json::to_value(&dep).unwrap();
     assert_eq!(json["url"], "https://github.com/user/repo.git");
+  }
+
+  #[test]
+  fn test_generate_lockfile_function() {
+    let dir = std::env::temp_dir().join("_klyron_pm_gen_lockfile");
+    std::fs::create_dir_all(&dir).unwrap();
+    let result = InstallResult {
+      nodes: vec![
+        DependencyNode {
+          name: "left-pad".into(),
+          version: "1.3.0".into(),
+          resolved: Some("https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz".into()),
+          integrity: Some("sha512-test".into()),
+          dependencies: vec![],
+          dev: false,
+          optional: false,
+        },
+      ],
+      start_time: std::time::SystemTime::now(),
+      end_time: std::time::SystemTime::now(),
+    };
+    let lockfile_path = dir.join("klyron.lock");
+    generate_lockfile(&result, &lockfile_path).unwrap();
+    assert!(lockfile_path.exists());
+    let data = std::fs::read(&lockfile_path).unwrap();
+    assert!(data.starts_with(b"KLYR"));
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn test_lockfile_module_roundtrip() {
+    use lockfile::{KlyronLockfile, LockfilePackage};
+    let mut lock = KlyronLockfile::new();
+    lock.add_package("test", "1.0.0", LockfilePackage {
+      name: "test".into(),
+      version: "1.0.0".into(),
+      resolved: "https://registry.npmjs.org/test/-/test-1.0.0.tgz".into(),
+      integrity: "sha512-test".into(),
+      dependencies: std::collections::HashMap::new(),
+      optional_dependencies: std::collections::HashMap::new(),
+      peer_dependencies: std::collections::HashMap::new(),
+      bin: None,
+      has_node_modules: false,
+      install_time_ms: 0,
+    });
+    let bytes = lock.to_bytes().unwrap();
+    let decoded = KlyronLockfile::from_bytes(&bytes).unwrap();
+    assert_eq!(decoded.packages.len(), 1);
+    assert!(decoded.packages.contains_key("test@1.0.0"));
+  }
+
+  #[test]
+  fn test_migrate_from_npm() {
+    let dir = std::env::temp_dir().join("_klyron_pm_migrate_npm");
+    std::fs::create_dir_all(&dir).unwrap();
+    let npm_lock = r#"{
+      "name": "test",
+      "lockfileVersion": 3,
+      "packages": {
+        "node_modules/lodash": {
+          "version": "4.17.21",
+          "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz",
+          "integrity": "sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg=="
+        }
+      }
+    }"#;
+    let npm_path = dir.join("package-lock.json");
+    std::fs::write(&npm_path, npm_lock).unwrap();
+    let klock = migrate_from_npm_lockfile(&npm_path).unwrap();
+    assert!(!klock.packages.is_empty());
+    assert!(klock.packages.contains_key("lodash@4.17.21"));
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn test_install_with_lockfile() {
+    let dir = std::env::temp_dir().join("_klyron_pm_install_lock");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("package.json"), r#"{"name":"test","dependencies":{"left-pad":"^1.0.0"}}"#).unwrap();
+    install_with_lockfile(&dir, false).unwrap();
+    assert!(dir.join("klyron.lock").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  // ── Workspace Protocol Tests ──────────────────────────────────────────
+
+  #[test]
+  fn test_parse_workspace_dependency_star() {
+    let result = parse_workspace_dependency("workspace:*").unwrap();
+    assert!(matches!(result, WorkspaceDependency::Star));
+  }
+
+  #[test]
+  fn test_parse_workspace_dependency_caret() {
+    let result = parse_workspace_dependency("workspace:^1.0.0").unwrap();
+    match result {
+      WorkspaceDependency::Range(s) => assert_eq!(s, "^1.0.0"),
+      _ => panic!("Expected Range"),
+    }
+  }
+
+  #[test]
+  fn test_parse_workspace_dependency_tilde() {
+    let result = parse_workspace_dependency("workspace:~1.0.0").unwrap();
+    match result {
+      WorkspaceDependency::Tilde(s) => assert_eq!(s, "~1.0.0"),
+      _ => panic!("Expected Tilde"),
+    }
+  }
+
+  #[test]
+  fn test_parse_workspace_dependency_invalid() {
+    assert!(parse_workspace_dependency("^1.0.0").is_none());
+    assert!(parse_workspace_dependency("npm:foo").is_none());
+  }
+
+  #[test]
+  fn test_parse_workspace_dependency_plain_semver() {
+    let result = parse_workspace_dependency("workspace:1.2.3").unwrap();
+    match result {
+      WorkspaceDependency::Range(s) => assert_eq!(s, "^1.2.3"),
+      _ => panic!("Expected Range"),
+    }
+  }
+
+  #[test]
+  fn test_resolve_workspace_dependency_star() {
+    let mut members = HashMap::new();
+    members.insert("pkg-a".into(), "1.0.0".into());
+    let result = resolve_workspace_dependency_version("workspace:*", &members, "pkg-a");
+    assert_eq!(result.unwrap(), "1.0.0");
+  }
+
+  #[test]
+  fn test_resolve_workspace_dependency_range() {
+    let mut members = HashMap::new();
+    members.insert("pkg-a".into(), "1.5.0".into());
+    let result = resolve_workspace_dependency_version("workspace:^1.0.0", &members, "pkg-a");
+    assert_eq!(result.unwrap(), "1.5.0");
+  }
+
+  #[test]
+  fn test_resolve_workspace_dependency_no_match() {
+    let mut members = HashMap::new();
+    members.insert("pkg-a".into(), "2.0.0".into());
+    let result = resolve_workspace_dependency_version("workspace:^1.0.0", &members, "pkg-a");
+    assert!(result.is_err());
+  }
+
+  // ── Link / Unlink Tests ───────────────────────────────────────────────
+
+  #[test]
+  fn test_link_package() {
+    let tmp = std::env::temp_dir().join("_klyron_pm_link_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(tmp.join("package.json"), r#"{"name":"test-pkg","version":"1.0.0"}"#).unwrap();
+
+    let global_dir = tmp.join("global");
+    let result = link_package(&tmp, &global_dir);
+    assert!(result.is_ok());
+    let link_path = result.unwrap();
+    assert!(link_path.exists());
+    assert!(link_path.is_symlink());
+
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  #[test]
+  fn test_link_package_missing_package_json() {
+    let tmp = std::env::temp_dir().join("_klyron_pm_link_fail");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let result = link_package(&tmp, &tmp.join("global"));
+    assert!(result.is_err());
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  #[test]
+  fn test_link_global_and_unlink() {
+    let tmp = std::env::temp_dir().join("_klyron_pm_link_global_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    // Create a package dir
+    let pkg_dir = tmp.join("pkg");
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+    std::fs::write(pkg_dir.join("package.json"), r#"{"name":"my-linked-pkg","version":"1.0.0"}"#).unwrap();
+
+    // Link globally
+    let global_dir = tmp.join("store").join("linked");
+    link_package(&pkg_dir, &global_dir).unwrap();
+    assert!(global_dir.join("my-linked-pkg").exists());
+
+    // Link into project
+    let project_dir = tmp.join("project");
+    std::fs::create_dir_all(&project_dir).unwrap();
+    let result = link_global_from_dir("my-linked-pkg", &project_dir, &global_dir);
+    assert!(result.is_ok(), "link_global failed: {:?}", result.err());
+    assert!(project_dir.join("node_modules").join("my-linked-pkg").exists());
+
+    // Unlink
+    let _ = std::fs::remove_file(&global_dir.join("my-linked-pkg"));
+    assert!(!global_dir.join("my-linked-pkg").exists());
+
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  #[test]
+  fn test_unlink_nonexistent() {
+    let result = unlink_package("this-pkg-does-not-exist-for-test");
+    assert!(result.is_err());
+  }
+
+  // ── Pack Tests ─────────────────────────────────────────────────────────
+
+  #[test]
+  fn test_pack_package() {
+    let tmp = std::env::temp_dir().join("_klyron_pm_pack_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    std::fs::write(tmp.join("package.json"), r#"{"name":"test-pkg","version":"2.0.0"}"#).unwrap();
+    std::fs::write(tmp.join("README.md"), "# Test Package").unwrap();
+    std::fs::create_dir_all(tmp.join("dist")).unwrap();
+    std::fs::write(tmp.join("dist").join("index.js"), "module.exports = {};").unwrap();
+
+    let result = pack_package(&tmp, None);
+    assert!(result.is_ok());
+    let tarball = result.unwrap();
+    assert!(tarball.exists());
+    assert!(tarball.to_string_lossy().ends_with(".tgz"));
+
+    // Verify it's a valid gzip
+    use flate2::read::GzDecoder;
+    use tar::Archive;
+    let file = std::fs::File::open(&tarball).unwrap();
+    let decoder = GzDecoder::new(file);
+    let mut archive = Archive::new(decoder);
+    let entries: Vec<_> = archive.entries().unwrap().filter_map(|e| e.ok()).collect();
+    assert!(!entries.is_empty());
+    assert!(entries.iter().any(|e| e.path().unwrap().to_string_lossy().contains("package.json")));
+
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  #[test]
+  fn test_pack_package_missing_package_json() {
+    let tmp = std::env::temp_dir().join("_klyron_pm_pack_fail");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let result = pack_package(&tmp, None);
+    assert!(result.is_err());
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  #[test]
+  fn test_pack_and_integrity() {
+    let tmp = std::env::temp_dir().join("_klyron_pm_integrity_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(tmp.join("package.json"), r#"{"name":"integrity-test","version":"1.0.0"}"#).unwrap();
+
+    let (path, integrity) = pack_and_get_integrity(&tmp).unwrap();
+    assert!(path.exists());
+    assert!(integrity.starts_with("sha512-"));
+
+    // Verify integrity matches
+    let data = std::fs::read(&path).unwrap();
+    let computed = compute_integrity(&data);
+    assert_eq!(integrity, computed);
+
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  // ── Pack Excludes Tests ────────────────────────────────────────────────
+
+  #[test]
+  fn test_pack_excludes_node_modules() {
+    let tmp = std::env::temp_dir().join("_klyron_pm_exclude_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(tmp.join("package.json"), r#"{"name":"exclude-test","version":"1.0.0"}"#).unwrap();
+    std::fs::create_dir_all(tmp.join("node_modules").join("some-dep")).unwrap();
+    std::fs::write(tmp.join("node_modules/some-dep/index.js"), "should be excluded").unwrap();
+    std::fs::create_dir_all(tmp.join(".git")).unwrap();
+    std::fs::write(tmp.join(".git/HEAD"), "ref: refs/heads/main").unwrap();
+
+    let tarball = pack_package(&tmp, None).unwrap();
+    let file = std::fs::File::open(&tarball).unwrap();
+    let decoder = flate2::read::GzDecoder::new(file);
+    let mut archive = tar::Archive::new(decoder);
+    for entry in archive.entries().unwrap() {
+      let entry = entry.unwrap();
+      let path = entry.path().unwrap().to_string_lossy().to_string();
+      assert!(!path.contains("node_modules"), "Found excluded path: {path}");
+      assert!(!path.contains(".git"), "Found excluded path: {path}");
+    }
+
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  // ── Dist-tag Tests ─────────────────────────────────────────────────────
+
+  #[test]
+  fn test_list_dist_tags() {
+    // This is a network test - skip if no network
+    match list_dist_tags("express", "https://registry.npmjs.org") {
+      Ok(tags) => {
+        assert!(!tags.is_empty(), "express should have dist-tags");
+        assert!(tags.contains_key("latest"), "express should have 'latest' tag");
+      }
+      Err(e) => {
+        eprintln!("Network test skipped: {e}");
+      }
+    }
+  }
+
+  // ── Package Info Tests ─────────────────────────────────────────────────
+
+  #[test]
+  fn test_package_info() {
+    match package_info("express", "https://registry.npmjs.org") {
+      Ok(info) => {
+        assert_eq!(info.name, "express");
+        assert!(!info.latest_version.is_empty());
+        assert!(!info.all_versions.is_empty(), "express should have versions");
+        assert!(info.all_versions.contains(&info.latest_version));
+      }
+      Err(e) => {
+        eprintln!("Network test skipped: {e}");
+      }
+    }
+  }
+
+  #[test]
+  fn test_package_info_nonexistent() {
+    let result = package_info("this-pkg-definitely-does-not-exist-xyz-98765", "https://registry.npmjs.org");
+    assert!(result.is_err());
+  }
+
+  // ── Why Tests ──────────────────────────────────────────────────────────
+
+  #[test]
+  fn test_why_package() {
+    let mut lock = KlyronLockfile::new(None);
+    let mut deps_a = HashMap::new();
+    deps_a.insert("dep-b".into(), "1.0.0".into());
+    lock.packages.insert("dep-a@1.0.0".into(), KlyronLockPackage {
+      version: "1.0.0".into(),
+      resolved: None,
+      integrity: None,
+      link: None,
+      dev: None,
+      optional: None,
+      dependencies: Some(deps_a),
+      optional_dependencies: None,
+      peer_dependencies: None,
+      engines: None,
+    });
+    lock.packages.insert("dep-b@1.0.0".into(), KlyronLockPackage {
+      version: "1.0.0".into(),
+      resolved: None,
+      integrity: None,
+      link: None,
+      dev: None,
+      optional: None,
+      dependencies: None,
+      optional_dependencies: None,
+      peer_dependencies: None,
+      engines: None,
+    });
+    lock.packages.insert("root@1.0.0".into(), KlyronLockPackage {
+      version: "1.0.0".into(),
+      resolved: None,
+      integrity: None,
+      link: None,
+      dev: None,
+      optional: None,
+      dependencies: Some(HashMap::from([("dep-a".into(), "1.0.0".into())])),
+      optional_dependencies: None,
+      peer_dependencies: None,
+      engines: None,
+    });
+
+    let paths = why_package("dep-b", &lock).unwrap();
+    assert!(!paths.is_empty(), "Should find at least one path to dep-b");
+    assert!(paths.iter().any(|p| p.path.contains(&"dep-b".to_string())));
+  }
+
+  #[test]
+  fn test_why_package_not_found() {
+    let lock = KlyronLockfile::new(None);
+    let result = why_package("nonexistent", &lock);
+    assert!(result.is_err());
+  }
+
+  // ── Bin Scripts Tests ──────────────────────────────────────────────────
+
+  #[test]
+  fn test_install_bin_scripts() {
+    let tmp = std::env::temp_dir().join("_klyron_pm_bin_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    // Create a package with a bin script
+    let pkg_dir = tmp.join("node_modules").join("test-cli");
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+    std::fs::write(pkg_dir.join("cli.js"), "#!/usr/bin/env node\nconsole.log('hello');").unwrap();
+
+    let mut bin_map = HashMap::new();
+    bin_map.insert("test-cli".into(), "cli.js".into());
+
+    let result = install_bin_scripts(&pkg_dir, &bin_map, &tmp.join("node_modules"));
+    assert!(result.is_ok());
+    let created = result.unwrap();
+    assert!(!created.is_empty());
+
+    let bin_dir = tmp.join("node_modules").join(".bin");
+    assert!(bin_dir.join("test-cli").exists());
+    assert!(bin_dir.join("test-cli.cmd").exists());
+
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  #[test]
+  fn test_parse_bin_field_string() {
+    let json = serde_json::json!("bin/cli.js");
+    let map = parse_bin_field(&json);
+    assert_eq!(map.len(), 1);
+    assert!(map.contains_key("cli"));
+  }
+
+  #[test]
+  fn test_parse_bin_field_object() {
+    let json = serde_json::json!({
+      "my-cli": "bin/my-cli.js",
+      "other-cli": "bin/other.js"
+    });
+    let map = parse_bin_field(&json);
+    assert_eq!(map.len(), 2);
+    assert_eq!(map.get("my-cli").unwrap(), "bin/my-cli.js");
+  }
+
+  #[test]
+  fn test_install_all_bin_scripts_no_node_modules() {
+    let tmp = std::env::temp_dir().join("_klyron_pm_all_bin_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let count = install_all_bin_scripts(&tmp.join("node_modules")).unwrap();
+    assert_eq!(count, 0);
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  // ── Peer / Optional Deps Tests ─────────────────────────────────────────
+
+  #[test]
+  fn test_resolve_peer_dependencies_missing() {
+    let peer_deps = HashMap::from([("react".into(), "^17.0.0".into())]);
+    let all_packages = HashMap::new();
+    let warnings = resolve_peer_dependencies("test-pkg", &peer_deps, &all_packages);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].peer_name, "react");
+    assert!(warnings[0].found_version.is_none());
+  }
+
+  #[test]
+  fn test_resolve_peer_dependencies_satisfied() {
+    let peer_deps = HashMap::from([("react".into(), "^17.0.0".into())]);
+    let all_packages = HashMap::from([("react".into(), "17.0.2".into())]);
+    let warnings = resolve_peer_dependencies("test-pkg", &peer_deps, &all_packages);
+    assert!(warnings.is_empty());
+  }
+
+  #[test]
+  fn test_resolve_peer_dependencies_mismatch() {
+    let peer_deps = HashMap::from([("react".into(), "^17.0.0".into())]);
+    let all_packages = HashMap::from([("react".into(), "18.0.0".into())]);
+    let warnings = resolve_peer_dependencies("test-pkg", &peer_deps, &all_packages);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].found_version.as_deref(), Some("18.0.0"));
+  }
+
+  #[test]
+  fn test_handle_optional_deps() {
+    let optional_deps = HashMap::from([
+      ("left-pad".into(), "^1.0.0".into()),
+      ("nonexistent-pkg-that-fails".into(), "999.999.999".into()),
+    ]);
+    let result = handle_optional_deps("test-pkg", &optional_deps);
+    // left-pad should resolve, the nonexistent one should be silently skipped
+    assert!(!result.is_empty(), "At least left-pad should resolve");
+  }
+
+  #[test]
+  fn test_handle_optional_deps_all_fail() {
+    let optional_deps = HashMap::from([
+      ("nonexistent-pkg-1".into(), "999.999.999".into()),
+      ("nonexistent-pkg-2".into(), "888.888.888".into()),
+    ]);
+    let result = handle_optional_deps("test-pkg", &optional_deps);
+    assert!(result.is_empty(), "All optional deps should silently fail");
+  }
+
+  #[test]
+  fn test_resolve_overrides() {
+    let pkg_json = serde_json::json!({
+      "overrides": {
+        "lodash": "4.17.21",
+        "react": {
+          ".": "18.0.0"
+        }
+      }
+    });
+    let mut resolution_map = HashMap::new();
+    resolve_overrides(&pkg_json, &mut resolution_map).unwrap();
+    assert_eq!(resolution_map.get("lodash").unwrap(), "4.17.21");
+    assert_eq!(resolution_map.get("react").unwrap(), "18.0.0");
+  }
+
+  #[test]
+  fn test_resolve_overrides_with_resolutions() {
+    let pkg_json = serde_json::json!({
+      "resolutions": {
+        "express": "4.18.2"
+      }
+    });
+    let mut resolution_map = HashMap::new();
+    resolve_overrides(&pkg_json, &mut resolution_map).unwrap();
+    assert_eq!(resolution_map.get("express").unwrap(), "4.18.2");
+  }
+
+  #[test]
+  fn test_apply_overrides_to_deps() {
+    let mut deps = HashMap::from([
+      ("lodash".into(), "^4.0.0".into()),
+      ("react".into(), "^17.0.0".into()),
+    ]);
+    let mut resolution_map = HashMap::new();
+    resolution_map.insert("lodash".into(), "4.17.21".into());
+    apply_overrides_to_deps(&mut deps, &resolution_map);
+    assert_eq!(deps.get("lodash").unwrap(), "4.17.21");
+    assert_eq!(deps.get("react").unwrap(), "^17.0.0");
+  }
+
+  #[test]
+  fn test_peer_dep_warning_struct() {
+    let warning = PeerDepWarning {
+      package: "host".into(),
+      peer_name: "react".into(),
+      required_range: "^17.0.0".into(),
+      found_version: Some("18.0.0".into()),
+    };
+    assert_eq!(warning.package, "host");
+    assert_eq!(warning.peer_name, "react");
+    assert_eq!(warning.found_version.as_deref(), Some("18.0.0"));
   }
 }

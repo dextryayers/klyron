@@ -13,6 +13,10 @@ once_cell = "1"
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 bincode = "1"
+sha2 = "0.10"
+lru = "0.12"
+parking_lot = "0.12"
+dirs = "5"
 
 [features]
 v8 = ["dep:klyron-engine-v8"]

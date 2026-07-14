@@ -1,5 +1,5 @@
 use clap::Args;
-use klyron_test::TestRunner;
+use klyron_test::{TestRunner, TestRunnerConfig};
 
 #[derive(Args)]
 pub struct TestArgs {
@@ -11,6 +11,10 @@ pub struct TestArgs {
     pub watch: bool,
     #[arg(long)]
     pub coverage: bool,
+    #[arg(long)]
+    pub shuffle: bool,
+    #[arg(long)]
+    pub verbose: bool,
     #[arg(long)]
     pub ui: bool,
     #[arg(long)]
@@ -33,6 +37,14 @@ pub fn run_test(args: TestArgs) -> anyhow::Result<()> {
     let runner = detect_test_runner(dir);
     println!("Detected project type: {project_type}, test runner: {runner}");
 
+    if args.shuffle {
+        eprintln!("Shuffle mode: randomized test order");
+    }
+
+    if args.verbose {
+        eprintln!("Verbose output enabled");
+    }
+
     if let Some(backend) = &args.backend {
         println!("Forcing test backend: {backend}");
     }
@@ -45,22 +57,47 @@ pub fn run_test(args: TestArgs) -> anyhow::Result<()> {
         println!("Running tests with coverage...");
         return TestRunner::run_coverage(dir);
     }
+
+    let config = TestRunnerConfig {
+        parallel: !args.shuffle,
+        ..Default::default()
+    };
+    let runner = TestRunner::with_config(config);
+
     if args.ui || args.e2e || args.unit || args.integration {
         let category = if args.ui { "ui" } else if args.e2e { "e2e" } else if args.unit { "unit" } else { "integration" };
         println!("Running {category} tests...");
         let result = TestRunner::run(dir, args.filter.as_deref())?;
+        if args.verbose {
+            println!("--- Test Output ---");
+            println!("{}", result.output);
+            println!("--- End Output ---");
+        }
         println!(
-            "Tests: {} passed, {} failed, {} skipped in {:.2}s",
+            "\x1b[{}mTests: {} passed, {} failed, {} skipped in {:.2}s\x1b[0m",
+            if result.failed > 0 { "31" } else { "32" },
             result.passed, result.failed, result.skipped, result.time
         );
+        if result.failed > 0 {
+            std::process::exit(1);
+        }
         return Ok(());
     }
 
     let result = TestRunner::run(dir, args.filter.as_deref())?;
+    if args.verbose {
+        println!("--- Test Output ---");
+        println!("{}", result.output);
+        println!("--- End Output ---");
+    }
     println!(
-        "Tests: {} passed, {} failed, {} skipped in {:.2}s",
+        "\x1b[{}mTests: {} passed, {} failed, {} skipped in {:.2}s\x1b[0m",
+        if result.failed > 0 { "31" } else { "32" },
         result.passed, result.failed, result.skipped, result.time
     );
+    if result.failed > 0 {
+        std::process::exit(1);
+    }
     Ok(())
 }
 

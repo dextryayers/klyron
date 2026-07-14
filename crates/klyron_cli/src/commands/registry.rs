@@ -1,5 +1,6 @@
 use clap::Args;
 use klyron_registry::{RegistryClient, RegistryKind};
+use klyron_pm;
 
 #[derive(Args)]
 pub struct PublishArgs {
@@ -9,6 +10,8 @@ pub struct PublishArgs {
     pub tag: Option<String>,
     #[arg(long)]
     pub access: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
 }
 
 #[derive(Args)]
@@ -64,35 +67,39 @@ pub fn run_publish(args: &PublishArgs) -> anyhow::Result<()> {
     let registry = resolve_registry(args.registry.as_deref());
     let dir = std::env::current_dir()?;
 
-    let tarball = if dir.join("package.json").exists() {
-        let runner = crate::detect_package_runner(&dir);
-        crate::run_cmd(runner, &["pack"], &dir)?;
-        let pkg_json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("package.json"))?)?;
-        let name = pkg_json.get("name").and_then(|v| v.as_str()).unwrap_or("package");
-        let version = pkg_json.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
-        dir.join(format!("{name}-{version}.tgz"))
+    if dir.join("package.json").exists() {
+        let registry_url = "https://registry.npmjs.org";
+        let token = args.token.as_deref();
+        klyron_pm::publish_package(&dir, registry_url, token)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("Published successfully");
+        Ok(())
     } else if dir.join("Cargo.toml").exists() {
-        crate::run_cmd("cargo", &["package"], &dir)?;
-        let toml_str = std::fs::read_to_string(dir.join("Cargo.toml"))?;
-        let toml_val: toml::Value = toml::from_str(&toml_str)?;
-        let pkg = toml_val.get("package");
-        let name = pkg.and_then(|p| p.get("name")).and_then(|v| v.as_str()).unwrap_or("crate");
-        let version = pkg.and_then(|p| p.get("version")).and_then(|v| v.as_str()).unwrap_or("0.1.0");
-        let target = dir.join("target").join("package");
-        if target.join(format!("{name}-{version}.crate")).exists() {
-            target.join(format!("{name}-{version}.crate"))
+        let tarball = if dir.join("Cargo.toml").exists() {
+            crate::run_cmd("cargo", &["package"], &dir)?;
+            let toml_str = std::fs::read_to_string(dir.join("Cargo.toml"))?;
+            let toml_val: toml::Value = toml::from_str(&toml_str)?;
+            let pkg = toml_val.get("package");
+            let name = pkg.and_then(|p| p.get("name")).and_then(|v| v.as_str()).unwrap_or("crate");
+            let version = pkg.and_then(|p| p.get("version")).and_then(|v| v.as_str()).unwrap_or("0.1.0");
+            let target = dir.join("target").join("package");
+            if target.join(format!("{name}-{version}.crate")).exists() {
+                target.join(format!("{name}-{version}.crate"))
+            } else {
+                anyhow::bail!("Run `cargo package` first to generate .crate file")
+            }
         } else {
-            anyhow::bail!("Run `cargo package` first to generate .crate file")
-        }
+            anyhow::bail!("No package manifest found (package.json or Cargo.toml)")
+        };
+
+        let data = std::fs::read(&tarball)?;
+        registry.publish("package", &data, args.tag.as_deref())?;
+        println!("Published successfully");
+        let _ = std::fs::remove_file(&tarball);
+        Ok(())
     } else {
         anyhow::bail!("No package manifest found (package.json or Cargo.toml)")
-    };
-
-    let data = std::fs::read(&tarball)?;
-    registry.publish("package", &data, args.tag.as_deref())?;
-    println!("Published successfully");
-    let _ = std::fs::remove_file(&tarball);
-    Ok(())
+    }
 }
 
 pub fn run_unpublish(name: &str) -> anyhow::Result<()> {
@@ -146,30 +153,53 @@ pub fn run_search(query: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn run_info(package: &str) -> anyhow::Result<()> {
-    let registry = RegistryClient::detect(package);
-    match registry.info(package) {
+pub fn run_info(package: &str, json: bool) -> anyhow::Result<()> {
+    let registry_url = "https://registry.npmjs.org";
+
+    match klyron_pm::package_info(package, registry_url) {
         Ok(info) => {
-            println!("{}@{}", info.name, info.version);
-            if let Some(desc) = &info.description {
-                println!("  Description: {desc}");
+            if json {
+                println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                    "name": info.name,
+                    "description": info.description,
+                    "latest_version": info.latest_version,
+                    "all_versions": info.all_versions,
+                    "maintainers": info.maintainers,
+                    "homepage": info.homepage,
+                    "license": info.license,
+                    "repository": info.repository,
+                }))?);
+            } else {
+                println!("{}@{}", info.name, info.latest_version);
+                if let Some(desc) = &info.description {
+                    println!("  Description: {desc}");
+                }
+                if let Some(lic) = &info.license {
+                    println!("  License: {lic}");
+                }
+                if let Some(home) = &info.homepage {
+                    println!("  Homepage: {home}");
+                }
+                if let Some(repo) = &info.repository {
+                    println!("  Repository: {repo}");
+                }
+                if !info.maintainers.is_empty() {
+                    let names: Vec<&str> = info.maintainers.iter().map(|m| m.name.as_str()).collect();
+                    println!("  Maintainers: {}", names.join(", "));
+                }
+                println!("  Versions:");
+                for v in &info.all_versions {
+                    if v == &info.latest_version {
+                        println!("    {v} (latest)");
+                    } else {
+                        println!("    {v}");
+                    }
+                }
             }
-            if let Some(lic) = &info.license {
-                println!("  License: {lic}");
-            }
-            if let Some(home) = &info.homepage {
-                println!("  Homepage: {home}");
-            }
-            if let Some(repo) = &info.repository {
-                println!("  Repository: {repo}");
-            }
-            if let Some(author) = &info.author {
-                println!("  Author: {author}");
-            }
-            println!("  Registry: {}", info.registry.name());
             Ok(())
         }
         Err(_) => {
+            // Fallback to npm info
             let dir = std::env::current_dir()?;
             let status = std::process::Command::new("npm")
                 .args(["info", package])
@@ -177,7 +207,7 @@ pub fn run_info(package: &str) -> anyhow::Result<()> {
                 .status()
                 .map_err(|e| anyhow::anyhow!("Failed to run npm: {e}"))?;
             if !status.success() {
-                anyhow::bail!("npm info failed");
+                anyhow::bail!("npm info failed for {package}");
             }
             Ok(())
         }

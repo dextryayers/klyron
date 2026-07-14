@@ -79,23 +79,27 @@ pub struct TestSuiteResult {
 
 #[derive(Debug, Clone)]
 pub struct TestRunnerConfig {
-  pub parallel: bool,
-  pub retry: u32,
-  pub timeout: Option<Duration>,
-  pub category: Option<TestCategory>,
-  pub junit_output: Option<PathBuf>,
+    pub parallel: bool,
+    pub retry: u32,
+    pub timeout: Option<Duration>,
+    pub category: Option<TestCategory>,
+    pub junit_output: Option<PathBuf>,
+    pub shuffle: bool,
+    pub verbose: bool,
 }
 
 impl Default for TestRunnerConfig {
-  fn default() -> Self {
-    TestRunnerConfig {
-      parallel: true,
-      retry: 0,
-      timeout: None,
-      category: None,
-      junit_output: None,
+    fn default() -> Self {
+        TestRunnerConfig {
+            parallel: true,
+            retry: 0,
+            timeout: None,
+            category: None,
+            junit_output: None,
+            shuffle: false,
+            verbose: false,
+        }
     }
-  }
 }
 
 #[derive(Debug)]
@@ -252,9 +256,33 @@ impl TestRunner {
     Ok(suite)
   }
 
-  fn run_internal(&self, dir: &Path, filter: Option<&str>, category: TestCategory) -> Result<TestResult> {
-    let backend = Self::detect(dir);
-    let (program, mut args) = backend.command();
+    fn run_internal(&self, dir: &Path, filter: Option<&str>, category: TestCategory) -> Result<TestResult> {
+        let backend = Self::detect(dir);
+        let (program, mut args) = backend.command();
+
+        if self.config.shuffle {
+            match backend {
+                TestBackend::CargoTest => args.push("--shuffle"),
+                TestBackend::Pytest => {
+                    args.push("--random-order");
+                    args.push("-p");
+                    args.push("randomly");
+                }
+                TestBackend::Vitest => args.push("--sequence.shuffle"),
+                TestBackend::Jest => args.push("--randomize"),
+                _ => {}
+            }
+        }
+
+        if self.config.verbose {
+            match backend {
+                TestBackend::CargoTest => args.push("--nocapture"),
+                TestBackend::Pytest => args.push("-v"),
+                TestBackend::Vitest => args.push("--reporter=verbose"),
+                TestBackend::Jest => args.push("--verbose"),
+                _ => {}
+            }
+        }
     if let Some(f) = filter {
       match backend {
         TestBackend::CargoTest => args.push(f),

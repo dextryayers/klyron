@@ -134,19 +134,21 @@ pub struct LintReport {
 
 #[derive(Debug, Clone)]
 pub struct LinterConfig {
-  pub max_warnings: Option<u64>,
-  pub cache_config: bool,
-  pub sarif_output: bool,
+    pub max_warnings: Option<u64>,
+    pub cache_config: bool,
+    pub sarif_output: bool,
+    pub rules: Option<String>,
 }
 
 impl Default for LinterConfig {
-  fn default() -> Self {
-    LinterConfig {
-      max_warnings: None,
-      cache_config: true,
-      sarif_output: false,
+    fn default() -> Self {
+        LinterConfig {
+            max_warnings: None,
+            cache_config: true,
+            sarif_output: false,
+            rules: None,
+        }
     }
-  }
 }
 
 #[derive(Debug)]
@@ -218,13 +220,26 @@ impl Linter {
     self.lint_dir(dir, &[path])
   }
 
-  pub fn lint_dir(&self, dir: &Path, extra_args: &[&str]) -> Result<LintReport> {
-    let backend = self.detect(dir);
-    let (program, base_args) = backend.command();
-    let mut args: Vec<&str> = base_args.iter().copied().collect();
-    if !extra_args.is_empty() {
-      args = extra_args.to_vec();
-    }
+    pub fn lint_dir(&self, dir: &Path, extra_args: &[&str]) -> Result<LintReport> {
+        let backend = self.detect(dir);
+        let (program, base_args) = backend.command();
+        let mut args: Vec<&str> = base_args.iter().copied().collect();
+        if !extra_args.is_empty() {
+            args = extra_args.to_vec();
+        }
+        if let Some(ref rules) = self.config.rules {
+            match backend {
+                LintBackend::Eslint => {
+                    args.push("--rulesdir");
+                    args.push(rules);
+                }
+                LintBackend::Biome => {
+                    args.push("--rules");
+                    args.push(rules);
+                }
+                _ => {}
+            }
+        }
 
     let output = std::process::Command::new(program)
       .args(&args)
@@ -486,9 +501,10 @@ mod tests {
   #[test]
   fn test_max_warnings_threshold() {
     let config = LinterConfig {
-      max_warnings: Some(0),
-      cache_config: false,
-      sarif_output: false,
+        max_warnings: Some(0),
+        cache_config: false,
+        sarif_output: false,
+        rules: None,
     };
     let linter = Linter::with_config(config);
     match linter.lint_dir(Path::new("/nonexistent"), &[]) {

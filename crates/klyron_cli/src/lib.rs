@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand, Args, CommandFactory};
 use klyron_adapter::AdapterRegistry;
 use klyron_adapter::adapters::register_all;
 use klyron_core::Runtime;
-use klyron_engine::{JsEngineKind, EngineRuntime, detect_best_engine, benchmark_all_engines};
+use klyron_engine::{JsEngineKind, EngineRuntime, detect_best_engine, benchmark_all_engines, EnginePool, EnginePreWarmer, profile_engine, profile_all_engines};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use tracing_subscriber::EnvFilter;
@@ -156,6 +156,12 @@ pub struct Cli {
     #[arg(long = "engine", global = true, help = "JavaScript engine to use (v8, boa, quickjs, jsc, auto)")]
     pub engine: Option<String>,
 
+    #[arg(long = "engine-pool-size", global = true, default_value_t = 4, help = "Size of the concurrent engine pool")]
+    pub engine_pool_size: usize,
+
+    #[arg(long = "pre-warm", global = true, default_value_t = false, help = "Pre-warm engines at startup")]
+    pub pre_warm: bool,
+
     #[arg(long = "json", global = true, help = "Output in JSON format")]
     pub json: bool,
 
@@ -273,7 +279,10 @@ pub enum Commands {
     Kysely { #[command(subcommand)] action: commands::orm::KyselyAction },
     KnexCmd { #[command(subcommand)] action: commands::orm::KnexAction },
     Orm { #[command(subcommand)] action: commands::orm::OrmCommand },
-    Install,
+    Install {
+        #[arg(long = "frozen-lockfile")]
+        frozen_lockfile: bool,
+    },
     Add { #[command(flatten)] args: commands::pm::AddArgs },
     Remove { #[command(flatten)] args: commands::pm::RemoveArgs },
     Uninstall { #[command(flatten)] args: commands::pm::RemoveArgs },
@@ -281,6 +290,7 @@ pub enum Commands {
     Update,
     Audit,
     Dedupe,
+    Lock { #[command(flatten)] args: commands::pm::LockArgs },
     Publish { #[command(flatten)] args: commands::registry::PublishArgs },
     Unpublish { #[command(flatten)] args: commands::registry::UnpublishArgs },
     Login { #[command(flatten)] args: commands::registry::LoginArgs },
@@ -288,6 +298,11 @@ pub enum Commands {
     Whoami,
     Search { #[command(flatten)] args: commands::registry::SearchArgs },
     InfoCmd { #[command(flatten)] args: commands::registry::InfoArgs },
+    Pack { #[arg(long)] output: Option<PathBuf> },
+    Link { #[command(flatten)] args: commands::pm::LinkArgs },
+    Unlink { package: String },
+    DistTag { #[command(subcommand)] action: commands::pm::DistTagAction },
+    Why { package: String },
     Workspace { #[command(subcommand)] action: commands::workspace::WorkspaceAction },
     Plugin { #[command(subcommand)] action: commands::plugin::PluginAction },
     Cache { #[command(subcommand)] action: commands::cache::CacheAction },
@@ -302,7 +317,8 @@ pub enum Commands {
     Info { #[command(flatten)] args: InfoArgs },
     Version,
     Clean { #[arg(long)] yes: bool },
-    Telemetry { #[command(flatten)] args: commands::utils::TelemetryArgs },
+    Coverage { #[command(flatten)] args: commands::coverage::CoverageArgs },
+    Telemetry { #[command(subcommand)] action: commands::utils::TelemetryAction },
     Config { #[command(flatten)] args: commands::utils::ConfigArgs },
     Laravel { #[command(subcommand)] action: commands::laravel::LaravelCommand },
     Serve { #[arg(long, default_value = "localhost")] host: String, #[arg(long, default_value_t = 3000)] port: u16, #[arg(long)] dir: Option<PathBuf>, #[arg(long)] watch: bool },
@@ -323,6 +339,16 @@ fn handle_info(json: bool) -> anyhow::Result<()> {
         }
     }
 
+    let profiles = profile_all_engines(100);
+    let engine_metrics: Vec<serde_json::Value> = profiles.iter().map(|p| {
+        serde_json::json!({
+            "engine": p.engine_kind.name(),
+            "ops_per_sec": p.ops_per_sec,
+            "avg_eval_time_ns": p.avg_eval_time_ns,
+            "warmup_complete": p.warmup_complete,
+        })
+    }).collect();
+
     let info = serde_json::json!({
         "name": "klyron",
         "version": env!("CARGO_PKG_VERSION"),
@@ -331,7 +357,8 @@ fn handle_info(json: bool) -> anyhow::Result<()> {
         "best_engine": js_engines["best"],
         "adapters": {
             "count": ADAPTER_REGISTRY.lock().names().len(),
-        }
+        },
+        "engine_metrics": engine_metrics,
     });
 
     if json {
@@ -350,6 +377,13 @@ fn handle_info(json: bool) -> anyhow::Result<()> {
             }
         }
         println!("Adapters: {} registered", info["adapters"]["count"]);
+        println!("Engine Performance:");
+        for m in &engine_metrics {
+            let name = m["engine"].as_str().unwrap_or("?");
+            let ops = m["ops_per_sec"].as_f64().unwrap_or(0.0);
+            let avg_ns = m["avg_eval_time_ns"].as_f64().unwrap_or(0.0);
+            println!("  {name:<8} {ops:>10.0} ops/s  avg {avg_ns:>8.0} ns");
+        }
     }
     Ok(())
 }
@@ -437,6 +471,13 @@ pub fn run_cli() -> anyhow::Result<()> {
 
     let engine = resolve_engine(cli.engine.as_deref())?;
 
+    if cli.pre_warm {
+        let kind = engine.as_ref().map(|e| e.kind()).unwrap_or(JsEngineKind::Boa);
+        let warmer = EnginePreWarmer::new(kind);
+        warmer.start_background(cli.engine_pool_size);
+        log_info(format!("Pre-warming {} engines (pool size: {})", kind, cli.engine_pool_size));
+    }
+
     let result = dispatch_command(cli.command, engine);
 
     if cli.json {
@@ -459,12 +500,13 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>) -> anyhow:
     match cmd {
         Commands::Eval { args } => {
             if let Some(eng) = engine {
-                let result = exec_with_engine(&eng, &args.code)?;
-                if !result.is_empty() { println!("{result}"); }
-                Ok(())
-            } else {
-                commands::runtime::run_eval(&args.code, args.module, all_extensions())
+                if !args.typescript && !args.jsx {
+                    let result = exec_with_engine(&eng, &args.code)?;
+                    if !result.is_empty() { println!("{result}"); }
+                    return Ok(());
+                }
             }
+            commands::runtime::eval_with_args(args)
         }
         Commands::Run { args } => {
             if let Some(eng) = engine {
@@ -639,21 +681,30 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>) -> anyhow:
         Commands::Kysely { action } => commands::orm::run_kysely(action),
         Commands::KnexCmd { action } => commands::orm::run_knex(action),
         Commands::Orm { action } => commands::orm::run_orm(action),
-        Commands::Install => commands::pm::run_install(),
+        Commands::Install { frozen_lockfile } => commands::pm::run_install(frozen_lockfile),
         Commands::Add { args } => commands::pm::run_add(&args.packages, args.dev),
         Commands::Remove { args } => commands::pm::run_remove(&args.packages),
         Commands::Uninstall { args } => commands::pm::run_remove(&args.packages),
         Commands::Outdated => commands::pm::run_outdated(),
-        Commands::Update => commands::pm::run_update(),
+        Commands::Update => commands::pm::run_update(false),
         Commands::Audit => commands::pm::run_audit(),
         Commands::Dedupe => commands::pm::run_dedupe(),
+        Commands::Lock { args } => match args.action {
+            commands::pm::LockAction::Verify => commands::pm::run_lock_verify(),
+            commands::pm::LockAction::Update { force } => commands::pm::run_lock_update(force),
+        },
         Commands::Publish { args } => commands::registry::run_publish(&args),
         Commands::Unpublish { args } => commands::registry::run_unpublish(&args.name),
         Commands::Login { args } => commands::registry::run_login(args.registry.as_deref()),
         Commands::Logout { args } => commands::registry::run_logout(args.registry.as_deref()),
         Commands::Whoami => commands::registry::run_whoami(),
         Commands::Search { args } => commands::registry::run_search(&args.query),
-        Commands::InfoCmd { args } => commands::registry::run_info(&args.package),
+        Commands::InfoCmd { args } => commands::registry::run_info(&args.package, cli.json),
+        Commands::Pack { output } => commands::pm::run_pack(output.as_deref()),
+        Commands::Link { args } => commands::pm::run_link(&args),
+        Commands::Unlink { package } => commands::pm::run_unlink_global(&package),
+        Commands::DistTag { action } => commands::pm::run_dist_tag(action),
+        Commands::Why { package } => commands::pm::run_why(&package),
         Commands::Laravel { action } => commands::laravel::run_laravel(action),
         Commands::Info { args } => handle_info(args.json),
         Commands::Workspace { action } => commands::workspace::run_workspace(action),
@@ -669,7 +720,8 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>) -> anyhow:
         Commands::Doctor => commands::utils::run_doctor(),
         Commands::Version => commands::utils::run_version(),
         Commands::Clean { yes } => commands::utils::run_clean(yes),
-        Commands::Telemetry { args } => commands::utils::run_telemetry(args.enabled),
+        Commands::Coverage { args } => commands::coverage::run_coverage(args),
+        Commands::Telemetry { action } => commands::utils::run_telemetry(action),
         Commands::Config { args } => commands::utils::run_config(args.key, args.value),
         Commands::Serve { host, port, dir, watch } => {
             let serve_dir = dir.unwrap_or_else(|| std::env::current_dir().unwrap());

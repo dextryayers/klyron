@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use clap::Args;
 use klyron_core::{Runtime, permissions::{PermissionSet, PolicyTemplate, SandboxLevel}};
 
@@ -10,6 +11,10 @@ pub struct EvalArgs {
     pub policy: Option<PolicyTemplate>,
     #[arg(short, long)]
     pub module: bool,
+    #[arg(long)]
+    pub typescript: bool,
+    #[arg(long)]
+    pub jsx: bool,
 }
 
 #[derive(Args)]
@@ -55,6 +60,25 @@ pub fn run_eval(code: &str, _module: bool, extensions: Vec<deno_core::Extension>
     Ok(())
 }
 
+pub fn run_eval_typescript(code: &str, jsx: bool) -> anyhow::Result<()> {
+    use klyron_transpiler::{transpile_ts_to_js, TranspileOptions, Lang, Target};
+    let lang = if jsx { Lang::Tsx } else { Lang::TypeScript };
+    let options = TranspileOptions { lang, target: Target::EsNext, minify: false, sourcemap: false };
+    let js_code = transpile_ts_to_js(code)?;
+    let js_code = if js_code.is_empty() { code.to_string() } else { js_code };
+
+    let runtime = Runtime::builder()
+        .async_(true)
+        .enable_typescript(true)
+        .extensions(crate::all_extensions())
+        .build()?;
+    let result = runtime.eval(&js_code)?;
+    if !result.is_empty() {
+        println!("{}", result);
+    }
+    Ok(())
+}
+
 pub fn run_file(args: RunArgs, extensions: Vec<deno_core::Extension>) -> anyhow::Result<()> {
     if args.sandbox.is_sandboxed() {
         klyron_core::sandbox::Sandbox::apply(args.sandbox, args.max_memory, args.max_cpu, args.max_fds)
@@ -82,6 +106,10 @@ pub fn run_file(args: RunArgs, extensions: Vec<deno_core::Extension>) -> anyhow:
     perm_set.max_cpu = args.max_cpu;
     perm_set.max_fds = args.max_fds;
 
+    if args.watch {
+        return run_file_watch(args);
+    }
+
     let runtime = Runtime::builder()
         .async_(true)
         .enable_typescript(true)
@@ -105,6 +133,61 @@ pub fn run_file(args: RunArgs, extensions: Vec<deno_core::Extension>) -> anyhow:
         }
     }
     Ok(())
+}
+
+fn run_file_watch(args: RunArgs) -> anyhow::Result<()> {
+    let path = args.path.clone();
+    let path_str = path.display().to_string();
+
+    println!("Watching {} for changes...", path_str);
+
+    let watcher = klyron_watcher::WatcherBuilder::new()
+        .add_path(&path_str)
+        .debounce(300)
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to start watcher: {e}"))?;
+
+    let args_clone = RunArgs {
+        path: path.clone(),
+        watch: false,
+        ..args
+    };
+
+    let run_once = || -> anyhow::Result<()> {
+        let extensions = crate::all_extensions();
+        let runtime = Runtime::builder()
+            .async_(true)
+            .enable_typescript(true)
+            .permissions(PermissionSet::default())
+            .extensions(extensions)
+            .build()?;
+        let source = std::fs::read_to_string(&path)?;
+        let result = runtime.execute_script(path.to_str().unwrap_or("<file>"), &source)?;
+        if !result.is_empty() && result != "undefined" {
+            println!("{}", result);
+        }
+        Ok(())
+    };
+
+    let _ = run_once();
+
+    watcher.start(move |event| {
+        use klyron_watcher::WatchEvent;
+        match event {
+            WatchEvent::Modify(p) | WatchEvent::Any(p) if p == path => {
+                println!("\n\x1b[2K\x1b[GFile changed: {}", p.display());
+                match run_once() {
+                    Ok(_) => {},
+                    Err(e) => eprintln!("Error: {e}"),
+                }
+            }
+            _ => {}
+        }
+    }).map_err(|e| anyhow::anyhow!("Watcher error: {e}"))?;
+
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
+    }
 }
 
 pub fn repl_loop() -> anyhow::Result<()> {
@@ -137,6 +220,7 @@ pub fn repl_loop_ext(engine: Option<klyron_engine::EngineRuntime>) -> anyhow::Re
                 println!("  .version        Show version");
                 println!("  .engine         Show/switch engine");
                 println!("  .engine <name>  Switch to engine (v8, boa, quickjs, jsc, auto)");
+                println!("  .color          Toggle colored output");
             }
             ".clear" => { print!("\x1B[2J\x1B[1;1H"); std::io::stdout().flush()?; }
             ".version" => println!("Klyron v{}", env!("CARGO_PKG_VERSION")),
@@ -174,8 +258,12 @@ pub fn repl_loop_ext(engine: Option<klyron_engine::EngineRuntime>) -> anyhow::Re
             _ => {
                 if let Some(ref eng) = current_engine {
                     match eng.eval(input) {
-                        Ok(result) => { if !result.is_empty() { println!("{result}"); } }
-                        Err(e) => eprintln!("Error: {e}"),
+                        Ok(result) => {
+                            if !result.is_empty() {
+                                println!("{}", klyron_shell::colorize_output(&result));
+                            }
+                        }
+                        Err(e) => eprintln!("\x1b[31mError: {e}\x1b[0m"),
                     }
                 } else {
                     let runtime = Runtime::builder()
@@ -184,8 +272,12 @@ pub fn repl_loop_ext(engine: Option<klyron_engine::EngineRuntime>) -> anyhow::Re
                         .extensions(crate::all_extensions())
                         .build()?;
                     match runtime.eval(input) {
-                        Ok(result) => { if !result.is_empty() && result != "undefined" { println!("{}", result); } }
-                        Err(e) => eprintln!("Error: {e}"),
+                        Ok(result) => {
+                            if !result.is_empty() && result != "undefined" {
+                                println!("{}", klyron_shell::colorize_output(&result));
+                            }
+                        }
+                        Err(e) => eprintln!("\x1b[31mError: {e}\x1b[0m"),
                     }
                 }
             }
@@ -204,7 +296,7 @@ pub fn shell_loop() -> anyhow::Result<()> {
         if std::io::stdin().read_line(&mut input)? == 0 { break; }
         let input = input.trim();
         if input.is_empty() || input == "exit" || input == ".exit" { break; }
-        let status = std::process::Command::new("sh")
+        let status = Command::new("sh")
             .arg("-c").arg(input)
             .status();
         match status {
@@ -212,6 +304,42 @@ pub fn shell_loop() -> anyhow::Result<()> {
             Err(e) => eprintln!("error: {e}"),
             _ => {}
         }
+    }
+    Ok(())
+}
+
+pub fn eval_with_args(args: EvalArgs) -> anyhow::Result<()> {
+    if args.typescript || args.jsx {
+        return run_eval_typescript(&args.code, args.jsx);
+    }
+
+    let runtime = Runtime::builder()
+        .async_(true)
+        .enable_typescript(true)
+        .extensions(crate::all_extensions())
+        .build()?;
+
+    let result = if args.module {
+        runtime.execute_script("<eval>", &args.code)?
+    } else {
+        runtime.eval(&args.code)?
+    };
+
+    if !result.is_empty() && result != "undefined" {
+        println!("{}", result);
+    }
+    Ok(())
+}
+
+pub fn shell_eval_line(code: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = Runtime::builder()
+        .async_(true)
+        .enable_typescript(true)
+        .extensions(crate::all_extensions())
+        .build()?;
+    let result = runtime.eval(code)?;
+    if !result.is_empty() && result != "undefined" {
+        println!("{}", result);
     }
     Ok(())
 }

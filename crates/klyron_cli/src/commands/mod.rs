@@ -24,3 +24,4 @@ pub mod ai;
 pub mod utils;
 pub mod artisan;
 pub mod laravel;
+pub mod coverage;
