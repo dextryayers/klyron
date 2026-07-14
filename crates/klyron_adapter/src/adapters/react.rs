@@ -403,7 +403,7 @@ export default tseslint.config(
 
         std::fs::write(
             project_dir.join("public/vite.svg"),
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><title>Vite</title><path d="M29.883 6.146L16.741 29.645a.423.423 0 01-.744 0L2.117 6.146a.423.423 0 01.508-.606L16 9.678l13.375-4.138a.423.423 0 01.508.606z" fill="#646CFF"/></svg>"#,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><title>Vite</title><path d="M29.883 6.146L16.741 29.645a.423.423 0 01-.744 0L2.117 6.146a.423.423 0 01.508-.606L16 9.678l13.375-4.138a.423.423 0 01.508.606z" fill="#646CFF"/></svg>"##,
         )?;
 
         std::fs::write(

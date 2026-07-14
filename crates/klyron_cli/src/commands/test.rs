@@ -1,4 +1,5 @@
 use clap::Args;
+use klyron_test::TestRunner;
 
 #[derive(Args)]
 pub struct TestArgs {
@@ -25,52 +26,32 @@ pub fn run_test(args: TestArgs) -> anyhow::Result<()> {
     if !dir.exists() {
         anyhow::bail!("Directory not found: {}", dir.display());
     }
-    let project = crate::detect_project_type(&dir);
 
     if args.watch {
         println!("Running tests in watch mode...");
-        return match project {
-            "node" => crate::run_cmd("npx", &["vitest", "--watch"], &dir),
-            _ => crate::run_cmd("npx", &["vitest", "--watch"], &dir),
-        };
+        return TestRunner::run_watch(&dir);
     }
     if args.coverage {
         println!("Running tests with coverage...");
-        return match project {
-            "node" => crate::run_cmd("npx", &["vitest", "--coverage"], &dir),
-            "laravel" => crate::run_cmd("php", &["vendor/bin/phpunit", "--coverage-html", "coverage"], &dir),
-            _ => crate::run_cmd("npx", &["vitest", "--coverage"], &dir),
-        };
+        return TestRunner::run_coverage(&dir);
     }
     if args.ui {
-        return crate::run_cmd("npx", &["vitest", "--ui"], &dir);
+        return TestRunner::run_ui(&dir);
     }
     if args.e2e {
-        return crate::run_cmd("npx", &["playwright", "test"], &dir);
+        return TestRunner::run_e2e(&dir);
     }
     if args.unit {
-        return match project {
-            "node" => crate::run_cmd("npx", &["vitest", "run", "--testPathPattern=unit"], &dir),
-            _ => crate::run_cmd("npx", &["vitest", "run"], &dir),
-        };
+        return TestRunner::run_unit(&dir);
     }
     if args.integration {
-        return match project {
-            "node" => crate::run_cmd("npx", &["vitest", "run", "--testPathPattern=integration"], &dir),
-            _ => crate::run_cmd("npx", &["vitest", "run"], &dir),
-        };
+        return TestRunner::run_integration(&dir);
     }
 
-    match project {
-        "node" => crate::run_cmd("npx", &["vitest", "run"], &dir),
-        "laravel" => crate::run_cmd("php", &["vendor/bin/phpunit"], &dir),
-        "python" => crate::run_cmd("python3", &["-m", "pytest"], &dir),
-        "ruby" => crate::run_cmd("bundle", &["exec", "rspec"], &dir),
-        "rust" => crate::run_cmd("cargo", &["test"], &dir),
-        "go" => crate::run_cmd("go", &["test", "./..."], &dir),
-        _ => {
-            println!("No test runner configured for {project}, trying vitest...");
-            crate::run_cmd("npx", &["vitest", "run"], &dir)
-        }
-    }
+    let result = TestRunner::run(&dir, args.filter.as_deref())?;
+    println!(
+        "Tests: {} passed, {} failed, {} skipped in {:.2}s",
+        result.passed, result.failed, result.skipped, result.time
+    );
+    Ok(())
 }

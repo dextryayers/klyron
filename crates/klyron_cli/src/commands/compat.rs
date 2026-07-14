@@ -1,4 +1,5 @@
 use clap::Args;
+use klyron_compat::{CompatChecker, FrameworkTarget};
 
 #[derive(Args)]
 pub struct CompatArgs {
@@ -8,49 +9,28 @@ pub struct CompatArgs {
 pub fn run_compat(args: CompatArgs) -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     match args.target.as_deref() {
-        None | Some("check") => check_compat(&dir),
-        Some("react") => check_framework_compat(&dir, "react"),
-        Some("next") => check_framework_compat(&dir, "next"),
-        Some("astro") => check_framework_compat(&dir, "astro"),
-        Some("nest") => check_framework_compat(&dir, "nest"),
-        Some("prisma") => check_framework_compat(&dir, "prisma"),
+        None | Some("check") => {
+            let report = CompatChecker::check_project(&dir)?;
+            println!("{}", report.summary);
+            for check in &report.checks {
+                println!("  {:?}: {} \u{2014} {}", check.status, check.name, check.message);
+            }
+            Ok(())
+        }
+        Some("react") => check_framework(&dir, FrameworkTarget::React),
+        Some("next") => check_framework(&dir, FrameworkTarget::Next),
+        Some("astro") => check_framework(&dir, FrameworkTarget::Astro),
+        Some("nest") => check_framework(&dir, FrameworkTarget::Nest),
+        Some("prisma") => check_framework(&dir, FrameworkTarget::Prisma),
         Some(t) => anyhow::bail!("Unknown compat target: {t}"),
     }
 }
 
-fn check_compat(dir: &std::path::Path) -> anyhow::Result<()> {
-    println!("🔍 Node.js Compatibility Check");
-    println!("  Directory: {}", dir.display());
-    let pkg = dir.join("package.json");
-    if pkg.exists() {
-        println!("  ✅ package.json found");
-        let content = std::fs::read_to_string(&pkg)?;
-        if content.contains("\"type\": \"module\"") {
-            println!("  ✅ ESM modules supported");
-        }
-        if content.contains("next") { println!("  ℹ️  Next.js detected — needs Node.js runtime"); }
-        if content.contains("express") { println!("  ✅ Express.js compatible"); }
-        if content.contains("prisma") { println!("  ✅ Prisma compatible (runs via npx)"); }
-    } else {
-        println!("  ⚠️  No package.json found");
-    }
-    Ok(())
-}
-
-fn check_framework_compat(dir: &std::path::Path, framework: &str) -> anyhow::Result<()> {
-    let pkg = dir.join("package.json");
-    if !pkg.exists() {
-        println!("❌ No package.json found");
-        return Ok(());
-    }
-    let content = std::fs::read_to_string(&pkg)?;
-    println!("🔍 {} Compatibility Check", framework);
-    if content.contains(framework) {
-        println!("  ✅ {} detected in dependencies", framework);
-        println!("  ⚠️  Full compatibility requires Node.js runtime (Phase 3)");
-        println!("  ℹ️  Scaffold via: klyron create {}", framework);
-    } else {
-        println!("  ❌ {} not found in dependencies", framework);
+fn check_framework(dir: &std::path::Path, target: FrameworkTarget) -> anyhow::Result<()> {
+    let report = CompatChecker::check_framework(dir, target)?;
+    println!("{}", report.summary);
+    for check in &report.checks {
+        println!("  {:?}: {} \u{2014} {}", check.status, check.name, check.message);
     }
     Ok(())
 }

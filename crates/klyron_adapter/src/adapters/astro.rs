@@ -158,7 +158,7 @@ body { font-family: system-ui, sans-serif; }
             r#"User-agent: *\nAllow: /\n"#)?;
 
         std::fs::write(project_dir.join("public/favicon.svg"),
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="16" fill="#333"/></svg>"#)?;
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="16" fill="#333"/></svg>"##)?;
 
         std::fs::write(project_dir.join(".gitignore"), "node_modules\ndist\n.DS_Store\n")?;
 
