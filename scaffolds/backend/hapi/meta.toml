@@ -1,0 +1,7 @@
+[template]
+name = "Hapi.js 21 API"
+description = "Hapi.js 21 REST API with TypeScript, Joi validation, and Swagger"
+version = "1.0.0"
+author = "Klyron"
+kind = "backend"
+tags = ["hapi", "node", "typescript", "rest-api"]

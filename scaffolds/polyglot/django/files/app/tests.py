@@ -1,0 +1,1 @@
+from django.test import TestCase; from .models import Item; class ItemModelTest(TestCase): def test_create_item(self): item = Item.objects.create(title='Test Item'); self.assertEqual(item.title, 'Test Item')

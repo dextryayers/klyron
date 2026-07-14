@@ -1,0 +1,7 @@
+[template]
+name = "Qwik City"
+description = "Qwik City application with TypeScript, Tailwind CSS, and ESLint"
+version = "1.0.0"
+author = "Klyron"
+kind = "frontend"
+tags = ["qwik", "typescript", "ssr", "resumable"]

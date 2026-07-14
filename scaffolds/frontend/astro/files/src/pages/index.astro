@@ -1,0 +1,15 @@
+---
+import Layout from '../layouts/Layout.astro'
+import Card from '../components/Card.astro'
+---
+
+<Layout title="{{ name }}" description="{{ description }}">
+  <main class="flex min-h-[80vh] flex-col items-center justify-center">
+    <h1 class="text-4xl font-bold text-gray-900 sm:text-6xl">{{ name }}</h1>
+    <p class="mt-4 text-lg text-gray-600">{{ description }}</p>
+    <div class="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <Card title="Documentation" body="Learn how Astro works and explore the official API docs." href="https://astro.build/docs" />
+      <Card title="Integrations" body="Supercharge your project with new frameworks and libraries." href="https://astro.build/integrations" />
+    </div>
+  </main>
+</Layout>

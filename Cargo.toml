@@ -15,6 +15,7 @@ members = [
     "src/ext/ffi",
     "src/ext/ws",
     "src/ext/html",
+    "crates/klyron_adapter",
     "crates/klyron_ai",
     "crates/klyron_bench",
     "crates/klyron_bundler",

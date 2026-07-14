@@ -1,0 +1,7 @@
+[template]
+name = "Next.js 15"
+description = "Next.js 15 application with App Router, TypeScript, Tailwind CSS, and ESLint"
+version = "1.0.0"
+author = "Klyron"
+kind = "frontend"
+tags = ["nextjs", "react", "typescript", "ssr", "app-router"]

@@ -1,0 +1,7 @@
+[template]
+name = "Laravel API Only"
+description = "Laravel API-only application with Sanctum auth, Scribe docs, and tests"
+version = "1.0.0"
+author = "Klyron"
+kind = "laravel"
+tags = ["laravel", "api", "sanctum", "rest"]

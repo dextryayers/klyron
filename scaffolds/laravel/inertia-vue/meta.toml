@@ -1,0 +1,7 @@
+[template]
+name = "Laravel + Inertia + Vue"
+description = "Laravel with Inertia.js, Vue 3, PrimeVue, Vite, and Tailwind CSS"
+version = "1.0.0"
+author = "Klyron"
+kind = "laravel"
+tags = ["laravel", "inertia", "vue", "primevue"]

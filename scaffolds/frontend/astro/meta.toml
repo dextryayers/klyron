@@ -1,0 +1,7 @@
+[template]
+name = "Astro 5"
+description = "Astro 5 site with TypeScript, Tailwind CSS, and integrations"
+version = "1.0.0"
+author = "Klyron"
+kind = "frontend"
+tags = ["astro", "typescript", "ssg", "tailwind"]

@@ -1,0 +1,7 @@
+[template]
+name = "SolidJS + Vite"
+description = "SolidJS 1 application with Vite, TypeScript, ESLint, and Vitest"
+version = "1.0.0"
+author = "Klyron"
+kind = "frontend"
+tags = ["solidjs", "vite", "typescript", "spa"]

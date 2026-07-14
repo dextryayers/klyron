@@ -1,0 +1,7 @@
+[template]
+name = "Tauri 2 + Svelte"
+description = "Tauri 2 desktop application with Svelte frontend and Rust backend"
+version = "1.0.0"
+author = "Klyron"
+kind = "polyglot"
+tags = ["rust", "tauri", "svelte", "desktop"]

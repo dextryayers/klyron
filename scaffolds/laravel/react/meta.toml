@@ -1,0 +1,7 @@
+[template]
+name = "Laravel + React SPA"
+description = "Laravel backend with React SPA frontend using Vite, React Router, and Tailwind CSS"
+version = "1.0.0"
+author = "Klyron"
+kind = "laravel"
+tags = ["laravel", "react", "spa", "vite"]

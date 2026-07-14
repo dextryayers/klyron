@@ -1,0 +1,7 @@
+[template]
+name = "Laravel Blade"
+description = "Laravel with Blade templating, Tailwind CSS, Alpine.js, and Vite"
+version = "1.0.0"
+author = "Klyron"
+kind = "laravel"
+tags = ["laravel", "blade", "tailwind", "alpinejs"]

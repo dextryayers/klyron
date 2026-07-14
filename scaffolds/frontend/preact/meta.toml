@@ -1,0 +1,7 @@
+[template]
+name = "Preact + Vite"
+description = "Preact application with Vite, TypeScript, ESLint, and Vitest"
+version = "1.0.0"
+author = "Klyron"
+kind = "frontend"
+tags = ["preact", "vite", "typescript", "spa"]

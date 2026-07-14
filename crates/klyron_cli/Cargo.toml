@@ -6,7 +6,19 @@ license.workspace = true
 
 [dependencies]
 klyron-core = { path = "../../src/core" }
+klyron_adapter = { path = "../klyron_adapter" }
 klyron_engine = { path = "../klyron_engine" }
+klyron_test = { path = "../klyron_test" }
+klyron_linter = { path = "../klyron_linter" }
+klyron_formatter = { path = "../klyron_formatter" }
+klyron_bench = { path = "../klyron_bench" }
+klyron_compat = { path = "../klyron_compat" }
+klyron_deploy = { path = "../klyron_deploy" }
+klyron_docker = { path = "../klyron_docker" }
+klyron_template = { path = "../klyron_template" }
+klyron_workspace = { path = "../klyron_workspace" }
+klyron_watcher = { path = "../klyron_watcher" }
+klyron_bundler = { path = "../klyron_bundler" }
 klyron_runtime = { path = "../klyron_runtime" }
 klyron-ext-console = { path = "../../src/ext/console" }
 klyron-ext-timers = { path = "../../src/ext/timers" }

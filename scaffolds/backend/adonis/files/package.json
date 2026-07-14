@@ -1,0 +1,31 @@
+{
+  "name": "{{ name }}",
+  "version": "{{ version }}",
+  "description": "{{ description }}",
+  "author": "{{ author }}",
+  "license": "{{ license }}",
+  "type": "module",
+  "scripts": {
+    "dev": "node ace serve --watch",
+    "build": "node ace build",
+    "start": "node bin/server.js",
+    "lint": "eslint . --ext ts",
+    "test": "node ace test"
+  },
+  "dependencies": {
+    "@adonisjs/core": "^6.15.0",
+    "@adonisjs/lucid": "^21.0.0",
+    "@adonisjs/auth": "^9.3.0",
+    "@adonisjs/ally": "^5.0.0",
+    "@adonisjs/health": "^2.0.0",
+    "@vinejs/vine": "^2.0.0",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@adonisjs/assembler": "^7.10.0",
+    "@japa/runner": "^4.1.0",
+    "typescript": "^5.7.0",
+    "eslint": "^9.0.0",
+    "tsx": "^4.19.0"
+  }
+}

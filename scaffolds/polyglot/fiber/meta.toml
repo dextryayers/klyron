@@ -1,0 +1,7 @@
+[template]
+name = "Go Fiber API"
+description = "Go REST API with Fiber framework and Ent ORM"
+version = "1.0.0"
+author = "Klyron"
+kind = "polyglot"
+tags = ["go", "fiber", "ent", "rest-api"]

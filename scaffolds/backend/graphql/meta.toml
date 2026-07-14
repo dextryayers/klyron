@@ -1,0 +1,7 @@
+[template]
+name = "GraphQL Yoga + Pothos"
+description = "GraphQL API with Yoga server, Pothos schema builder, TypeScript, and Prisma"
+version = "1.0.0"
+author = "Klyron"
+kind = "backend"
+tags = ["graphql", "node", "typescript", "api"]

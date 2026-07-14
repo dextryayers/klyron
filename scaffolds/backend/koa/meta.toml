@@ -1,0 +1,7 @@
+[template]
+name = "Koa API"
+description = "Koa REST API with TypeScript, @koa/router, and middleware pattern"
+version = "1.0.0"
+author = "Klyron"
+kind = "backend"
+tags = ["koa", "node", "typescript", "rest-api"]

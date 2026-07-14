@@ -1,0 +1,7 @@
+[template]
+name = "Svelte 5 + Vite"
+description = "Svelte 5 application with Vite, TypeScript, and ESLint"
+version = "1.0.0"
+author = "Klyron"
+kind = "frontend"
+tags = ["svelte", "vite", "typescript", "spa"]

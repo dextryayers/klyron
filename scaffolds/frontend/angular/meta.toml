@@ -1,0 +1,7 @@
+[template]
+name = "Angular 19"
+description = "Angular 19 standalone application with TypeScript, SCSS, and ESLint"
+version = "1.0.0"
+author = "Klyron"
+kind = "frontend"
+tags = ["angular", "typescript", "scss", "standalone"]

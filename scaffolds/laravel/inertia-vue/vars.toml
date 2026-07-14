@@ -1,0 +1,6 @@
+[variables]
+name = { type = "string", prompt = "Project name", default = "my-laravel-inertia-vue-app" }
+description = { type = "string", prompt = "Project description", default = "A Laravel Inertia Vue application" }
+author = { type = "string", prompt = "Author name", default = "Klyron" }
+version = { type = "string", prompt = "Initial version", default = "0.1.0" }
+license = { type = "string", prompt = "License", default = "MIT" }

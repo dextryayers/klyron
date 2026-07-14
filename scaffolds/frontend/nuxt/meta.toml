@@ -1,0 +1,7 @@
+[template]
+name = "Nuxt 3"
+description = "Nuxt 3 application with TypeScript, Tailwind CSS, Pinia, and ESLint"
+version = "1.0.0"
+author = "Klyron"
+kind = "frontend"
+tags = ["nuxt", "vue", "typescript", "ssr"]

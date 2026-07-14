@@ -1,0 +1,7 @@
+[template]
+name = "Hono 4 API"
+description = "Hono 4 REST API with TypeScript, Zod validation, and OpenAPI"
+version = "1.0.0"
+author = "Klyron"
+kind = "backend"
+tags = ["hono", "node", "typescript", "rest-api"]

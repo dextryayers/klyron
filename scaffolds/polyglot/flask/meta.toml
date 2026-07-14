@@ -1,0 +1,7 @@
+[template]
+name = "Python Flask"
+description = "Python Flask with SQLAlchemy, Marshmallow, and testing"
+version = "1.0.0"
+author = "Klyron"
+kind = "polyglot"
+tags = ["python", "flask", "sqlalchemy", "rest-api"]

@@ -1,0 +1,31 @@
+{
+  "name": "{{ name }}",
+  "version": "{{ version }}",
+  "description": "{{ description }}",
+  "author": "{{ author }}",
+  "license": "{{ license }}",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "eslint . --ext ts",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "koa": "^2.15.0",
+    "@koa/router": "^12.0.0",
+    "koa-cors": "^0.0.16",
+    "koa-helmet": "^8.0.0",
+    "koa-body": "^6.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/koa": "^2.15.0",
+    "@types/koa__router": "^12.0.0",
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "eslint": "^9.0.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,7 @@
+[template]
+name = "Laravel + Vue 3 SPA"
+description = "Laravel backend with Vue 3 SPA frontend using Vite, Vue Router, Pinia, and Tailwind CSS"
+version = "1.0.0"
+author = "Klyron"
+kind = "laravel"
+tags = ["laravel", "vue", "spa", "vite"]

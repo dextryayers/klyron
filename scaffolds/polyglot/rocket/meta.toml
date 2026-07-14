@@ -1,0 +1,7 @@
+[template]
+name = "Rust Rocket API"
+description = "Rust REST API with Rocket and Diesel ORM"
+version = "1.0.0"
+author = "Klyron"
+kind = "polyglot"
+tags = ["rust", "rocket", "diesel", "rest-api"]

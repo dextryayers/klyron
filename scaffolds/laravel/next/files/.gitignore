@@ -1,0 +1,1 @@
+node_modules vendor .env .DS_Store *.log storage/framework/cache/data/* storage/framework/sessions/* storage/framework/views/* storage/logs/* public/build public/hot public/storage bootstrap/cache/*

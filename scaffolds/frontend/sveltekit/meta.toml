@@ -1,0 +1,7 @@
+[template]
+name = "SvelteKit 2"
+description = "SvelteKit 2 application with TypeScript, ESLint, Prettier, and Vite"
+version = "1.0.0"
+author = "Klyron"
+kind = "frontend"
+tags = ["sveltekit", "svelte", "typescript", "ssr"]

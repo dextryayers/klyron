@@ -1,0 +1,6 @@
+[variables]
+name = { type = "string", prompt = "Project name", default = "my-adonis-api" }
+description = { type = "string", prompt = "Project description", default = "An AdonisJS 6 API" }
+author = { type = "string", prompt = "Author name", default = "Klyron" }
+version = { type = "string", prompt = "Initial version", default = "0.1.0" }
+license = { type = "string", prompt = "License", default = "MIT" }

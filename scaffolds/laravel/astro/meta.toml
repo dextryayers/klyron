@@ -1,0 +1,7 @@
+[template]
+name = "Laravel + Astro"
+description = "Laravel API backend with Astro frontend using Tailwind CSS and integrations"
+version = "1.0.0"
+author = "Klyron"
+kind = "laravel"
+tags = ["laravel", "astro", "fullstack"]

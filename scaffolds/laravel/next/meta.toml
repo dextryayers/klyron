@@ -1,0 +1,7 @@
+[template]
+name = "Laravel + Next.js BFF"
+description = "Laravel API backend with Next.js BFF frontend using App Router and Tailwind CSS"
+version = "1.0.0"
+author = "Klyron"
+kind = "laravel"
+tags = ["laravel", "nextjs", "bff", "fullstack"]

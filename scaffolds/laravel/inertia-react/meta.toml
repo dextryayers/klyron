@@ -1,0 +1,7 @@
+[template]
+name = "Laravel + Inertia + React"
+description = "Laravel with Inertia.js, React, shadcn/ui, Vite, and Tailwind CSS"
+version = "1.0.0"
+author = "Klyron"
+kind = "laravel"
+tags = ["laravel", "inertia", "react", "shadcn"]
