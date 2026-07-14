@@ -267,7 +267,7 @@ fn generate_html(coverage: &CoverageData) -> String {
 fn generate_bar(pct: f64) -> String {
     let width = 100usize;
     let filled = ((pct / 100.0) * width as f64) as usize;
-    let empty = width.saturating_sub(filled);
+    let _empty = width.saturating_sub(filled);
     let color = if pct >= 90.0 { "#4caf50" } else if pct >= 70.0 { "#ff9800" } else { "#f44336" };
     format!(
         r#"<div class="bar" style="background:#eee"><div style="width:{pct:.1}%;height:100%;background:{color}">&nbsp;</div></div>"#,

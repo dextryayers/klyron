@@ -1,4 +1,4 @@
-use crate::{PmError, KlyronLockfile as MainKlyronLockfile, KlyronLockPackage, LockfileV3};
+use crate::PmError;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -199,6 +199,17 @@ impl KlyronLockfile {
   }
 }
 
+impl KlyronLockfile {
+  pub fn diff(&self, other: &Self) -> Vec<DiffEntry> {
+    lockfile_diff(self, other)
+  }
+
+  pub fn print_diff(&self, other: &Self) {
+    let entries = self.diff(other);
+    print_diff_entries(&entries);
+  }
+}
+
 // ── Diffing ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,7 +283,7 @@ pub fn lockfile_diff(a: &KlyronLockfile, b: &KlyronLockfile) -> Vec<DiffEntry> {
   entries
 }
 
-pub fn print_diff(entries: &[DiffEntry]) {
+pub fn print_diff_entries(entries: &[DiffEntry]) {
   if entries.is_empty() {
     println!("No differences between lockfiles");
     return;
@@ -291,6 +302,10 @@ pub fn print_diff(entries: &[DiffEntry]) {
       _ => println!(" {} {} ({} -> {})", symbol, entry.name, entry.old_version.as_deref().unwrap_or("?"), entry.new_version.as_deref().unwrap_or("?")),
     }
   }
+}
+
+pub fn print_diff(entries: &[DiffEntry]) {
+  print_diff_entries(entries);
 }
 
 // ── Auto-repair ──────────────────────────────────────────────────────────────

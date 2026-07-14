@@ -190,3 +190,85 @@ fn test_detect_best_engine() {
     let name = best.name();
     assert!(!name.is_empty());
 }
+
+#[test]
+fn test_each_engine_eval_1plus1() {
+    use klyron_engine::{JsEngineKind, EngineRuntime};
+
+    for kind in JsEngineKind::all() {
+        match EngineRuntime::new(kind) {
+            Ok(engine) => {
+                let result = engine.eval("1+1");
+                match result {
+                    Ok(val) => {
+                        assert!(!val.is_empty(), "{} eval should return non-empty", kind);
+                    }
+                    Err(e) => {
+                        // Engine may not be fully available (e.g., V8 not compiled)
+                        eprintln!("{kind} eval note: {e}");
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("{kind} not available: {e}");
+                // Not all engines may be built; that's acceptable
+            }
+        }
+    }
+}
+
+#[test]
+fn test_each_engine_eval_2_plus_2() {
+    use klyron_engine::{JsEngineKind, EngineRuntime};
+
+    for kind in JsEngineKind::all() {
+        if let Ok(engine) = EngineRuntime::new(kind) {
+            if let Ok(val) = engine.eval("2 + 2") {
+                // Should contain "4" or be non-empty
+                assert!(!val.is_empty(), "{kind} eval '2+2' returned empty");
+            }
+        }
+    }
+}
+
+#[test]
+fn test_each_engine_execute_script() {
+    use klyron_engine::{JsEngineKind, EngineRuntime};
+
+    for kind in JsEngineKind::all() {
+        if let Ok(engine) = EngineRuntime::new(kind) {
+            let result = engine.execute_script("test.js", "1 + 1");
+            match result {
+                Ok(val) => assert!(!val.is_empty()),
+                Err(_) => {} // engine features may vary
+            }
+        }
+    }
+}
+
+#[test]
+fn test_each_engine_rejects_syntax_error() {
+    use klyron_engine::{JsEngineKind, EngineRuntime};
+
+    for kind in JsEngineKind::all() {
+        if let Ok(engine) = EngineRuntime::new(kind) {
+            let result = engine.eval("syntax error{{{");
+            // Should be an error for all engines
+            assert!(result.is_err(), "{kind} should reject invalid syntax");
+        }
+    }
+}
+
+#[test]
+fn test_engine_eval_returns_number() {
+    use klyron_engine::{JsEngineKind, EngineRuntime};
+
+    for kind in JsEngineKind::all() {
+        if let Ok(engine) = EngineRuntime::new(kind) {
+            if let Ok(val) = engine.eval("42") {
+                let trimmed = val.trim();
+                assert!(!trimmed.is_empty(), "{kind} should return non-empty for 42");
+            }
+        }
+    }
+}

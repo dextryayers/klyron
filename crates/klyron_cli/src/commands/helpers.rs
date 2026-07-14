@@ -187,7 +187,7 @@ pub fn load_dotenv(dir: &Path) {
                     let key = line[..eq_idx].trim();
                     let value = line[eq_idx + 1..].trim();
                     if !key.is_empty() && std::env::var(key).is_err() {
-                        std::env::set_var(key, value);
+                        unsafe { std::env::set_var(key, value); }
                     }
                 }
             }
@@ -304,6 +304,10 @@ pub fn detect_framework_from_pkg(dir: &Path) -> (String, Option<String>) {
 // ── klyron.json config auto-create ──────────────────────────────────────
 
 pub fn auto_create_klyron_config(dir: &Path) -> anyhow::Result<()> {
+    generate_klyron_config(dir, false)
+}
+
+pub fn generate_klyron_config(dir: &Path, non_interactive: bool) -> anyhow::Result<()> {
     let config_path = dir.join("klyron.json");
     if config_path.exists() {
         return Ok(());
@@ -316,11 +320,14 @@ pub fn auto_create_klyron_config(dir: &Path) -> anyhow::Result<()> {
         .unwrap_or("my-app")
         .to_string();
 
+    let language = detect_project_language(dir);
+
     let mut config = serde_json::json!({
         "name": project_name,
         "version": "0.1.0",
         "type": project_type,
         "framework": framework,
+        "language": language,
         "compiler": {
             "target": "esnext",
             "module": "esnext",
@@ -347,6 +354,23 @@ pub fn auto_create_klyron_config(dir: &Path) -> anyhow::Result<()> {
         }
     }
 
+    // Framework-specific overrides
+    let config_overrides = get_framework_config(&framework, &project_type);
+    if let Some(overrides) = config_overrides {
+        if let Some(obj) = overrides.as_object() {
+            for (key, val) in obj {
+                config[key] = val.clone();
+            }
+        }
+    }
+
+    if non_interactive {
+        let content = serde_json::to_string_pretty(&config)?;
+        std::fs::write(&config_path, content)?;
+        crate::log_info(format!("Generated {}", config_path.display()));
+        return Ok(());
+    }
+
     eprint!("No klyron.json found. Create one? [Y/n] ");
     std::io::Write::flush(&mut std::io::stderr())?;
     let mut input = String::new();
@@ -361,6 +385,90 @@ pub fn auto_create_klyron_config(dir: &Path) -> anyhow::Result<()> {
     std::fs::write(&config_path, content)?;
     println!("Created {}", config_path.display());
     Ok(())
+}
+
+fn get_framework_config(framework: &str, _project_type: &str) -> Option<serde_json::Value> {
+    match framework {
+        "Next.js" => Some(serde_json::json!({
+            "dev": { "port": 3000, "command": "next dev" },
+            "build": { "outDir": ".next", "command": "next build" }
+        })),
+        "Vue" | "Nuxt" => Some(serde_json::json!({
+            "dev": { "port": 5173, "command": "nuxt dev" },
+            "build": { "outDir": "dist", "command": "nuxt build" }
+        })),
+        "Svelte" | "SvelteKit" => Some(serde_json::json!({
+            "dev": { "port": 5173, "command": "vite dev" },
+            "build": { "outDir": "build", "command": "vite build" }
+        })),
+        "React" => Some(serde_json::json!({
+            "dev": { "port": 3000, "command": "vite" },
+            "build": { "outDir": "dist", "command": "vite build" }
+        })),
+        "Angular" => Some(serde_json::json!({
+            "dev": { "port": 4200, "command": "ng serve" },
+            "build": { "outDir": "dist", "command": "ng build" }
+        })),
+        "Astro" => Some(serde_json::json!({
+            "dev": { "port": 4321, "command": "astro dev" },
+            "build": { "outDir": "dist", "command": "astro build" }
+        })),
+        "NestJS" => Some(serde_json::json!({
+            "dev": { "port": 3000, "command": "nest start --watch" },
+            "build": { "outDir": "dist", "command": "nest build" }
+        })),
+        "Express" => Some(serde_json::json!({
+            "dev": { "port": 3000, "command": "node --watch" }
+        })),
+        "Fastify" => Some(serde_json::json!({
+            "dev": { "port": 3000 }
+        })),
+        "Hono" => Some(serde_json::json!({
+            "dev": { "port": 3000 }
+        })),
+        "Solid" => Some(serde_json::json!({
+            "dev": { "port": 3000, "command": "vite" },
+            "build": { "outDir": "dist", "command": "vite build" }
+        })),
+        "Gatsby" => Some(serde_json::json!({
+            "dev": { "port": 8000, "command": "gatsby develop" },
+            "build": { "outDir": "public", "command": "gatsby build" }
+        })),
+        "Remix" => Some(serde_json::json!({
+            "dev": { "port": 3000, "command": "remix dev" },
+            "build": { "outDir": "build", "command": "remix build" }
+        })),
+        "Preact" => Some(serde_json::json!({
+            "dev": { "port": 5173, "command": "vite" },
+            "build": { "outDir": "dist", "command": "vite build" }
+        })),
+        "Lit" => Some(serde_json::json!({
+            "dev": { "port": 5173, "command": "vite" },
+            "build": { "outDir": "dist", "command": "vite build" }
+        })),
+        _ => None,
+    }
+}
+
+pub fn apply_tsconfig_paths(tsconfig: &serde_json::Value) -> Vec<(String, String)> {
+    let mut aliases = Vec::new();
+    if let Some(compiler) = tsconfig.get("compilerOptions").and_then(|v| v.as_object()) {
+        if let Some(paths) = compiler.get("paths").and_then(|v| v.as_object()) {
+            for (alias, targets) in paths {
+                if let Some(targets_arr) = targets.as_array() {
+                    if let Some(first) = targets_arr.first().and_then(|v| v.as_str()) {
+                        let alias_clean = alias.trim_end_matches("/*");
+                        let target_clean = first.trim_end_matches("/*");
+                        aliases.push((alias_clean.to_string(), target_clean.to_string()));
+                    }
+                }
+            }
+        }
+        if let Some(base_url) = compiler.get("baseUrl").and_then(|v| v.as_str()) {
+            aliases.push(("baseUrl".to_string(), base_url.to_string()));
+        }
+    }
+    aliases
 }
 
 pub fn detect_project_language(dir: &Path) -> &'static str {

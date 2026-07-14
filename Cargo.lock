@@ -3881,6 +3881,7 @@ name = "klyron_loader"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "once_cell",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -7633,6 +7634,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

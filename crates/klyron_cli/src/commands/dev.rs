@@ -1,10 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::convert::Infallible;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use clap::Args;
 use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
 
 #[derive(Args)]
 pub struct DevArgs {
@@ -18,6 +22,8 @@ pub struct DevArgs {
     pub watch: bool,
     #[arg(long)]
     pub hot: bool,
+    #[arg(long, default_value_t = false)]
+    pub no_hmr_inject: bool,
 }
 
 pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
@@ -39,25 +45,32 @@ pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
     }
 
     if !dir.join("klyron.json").exists() {
-        let _ = crate::auto_create_klyron_config(&dir);
+        let _ = crate::generate_klyron_config(&dir, true);
     }
 
     let project_type = crate::detect_project_type(&dir);
-    let hmr_enabled = args.hot || args.watch;
+    let hmr_enabled = (args.hot || args.watch) && !args.no_hmr_inject;
 
     if hmr_enabled {
         crate::log_info(format!(
-            "{} Klyron Dev Server — {} on http://{}:{} [HMR]",
+            "{} {} {} [HMR]",
             crate::Color::GREEN.paint("\u{25C9}"),
-            project_type, host, port
+            format!("Klyron Dev Server \u{2014} {project_type} on http://{host}:{port}"),
+            crate::Color::DIM.paint("(hot module replacement)")
         ));
     } else {
         crate::log_info(format!(
-            "{} Klyron Dev Server — {} on http://{}:{}",
+            "{} {}",
             crate::Color::GREEN.paint("\u{25C9}"),
-            project_type, host, port
+            format!("Klyron Dev Server \u{2014} {project_type} on http://{host}:{port}")
         ));
     }
+
+    crate::log_info(format!(
+        "{} {}",
+        crate::Color::DIM.paint("\u{2502}"),
+        crate::Color::CYAN.paint(format!("serving: {}", dir.display()))
+    ));
 
     match project_type {
         "node" => {
@@ -70,7 +83,8 @@ pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
                     crate::run_cmd("npx", &["next", "dev", "-p", &port.to_string()], &dir)
                 }
             } else if has_vite {
-                let mut args_vite = vec!["vite", "--port", &port.to_string(), "--host", &host];
+                let port_str = port.to_string();
+                let mut args_vite = vec!["vite", "--port", &port_str, "--host", &host];
                 if hmr_enabled { args_vite.push("--hmr"); }
                 if hmr_enabled {
                     watch_dev("npx", &args_vite, &dir)
@@ -126,19 +140,31 @@ pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
 }
 
 fn run_klyron_static_server(dir: &Path, port: u16, host: String) -> anyhow::Result<()> {
-    crate::start_dev_server(&host, port, dir)
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let service = tower_http::services::ServeDir::new(dir)
+            .append_index_html_on_directories(true);
+        let addr = format!("{host}:{port}");
+        let listener = tokio::net::TcpListener::bind(&addr).await
+            .map_err(|e| anyhow::anyhow!("Cannot bind {addr}: {e}"))?;
+        crate::log_info(format!("Listening on http://{addr}"));
+        axum::serve(listener, axum::routing::any_service(service))
+            .await
+            .map_err(|e| anyhow::anyhow!("Server error: {e}"))?;
+        Ok(())
+    })
 }
 
 fn run_klyron_hmr_server(dir: &Path, port: u16, host: String) -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     let dir = dir.to_path_buf();
     let shutdown = Arc::new(AtomicBool::new(false));
+    let connected_clients = Arc::new(AtomicUsize::new(0));
 
     rt.block_on(async {
-        let (tx, _rx) = broadcast::channel::<String>(100);
+        let (tx, _rx) = broadcast::channel::<String>(200);
         let tx_clone = tx.clone();
         let dir_clone = dir.clone();
-        let shutdown_clone = shutdown.clone();
 
         let watch_handle = std::thread::spawn(move || {
             let watch_dir = dir_clone.clone();
@@ -155,12 +181,19 @@ fn run_klyron_hmr_server(dir: &Path, port: u16, host: String) -> anyhow::Result<
             };
 
             let _ = watcher.start_hmr(move |update| {
+                let now = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs_f64())
+                    .unwrap_or(0.0);
+                let time_str = format_time(now);
+
                 for path in &update.changed {
                     let rel = path.strip_prefix(&dir_clone).unwrap_or(path);
                     let msg = format!("changed:{}", rel.display());
                     let _ = tx_clone.send(msg);
                     crate::log_info(format!(
-                        "{} {} {}",
+                        "{} {} {} {}",
+                        crate::Color::DIM.paint(format!("[{time_str}]")),
                         crate::Color::YELLOW.paint("\u{26A1}"),
                         crate::Color::BOLD.paint("[HMR]"),
                         crate::Color::CYAN.paint(format!("{} changed, recompiling...", rel.display()))
@@ -171,7 +204,8 @@ fn run_klyron_hmr_server(dir: &Path, port: u16, host: String) -> anyhow::Result<
                     let msg = format!("added:{}", rel.display());
                     let _ = tx_clone.send(msg);
                     crate::log_info(format!(
-                        "{} {} {}",
+                        "{} {} {} {}",
+                        crate::Color::DIM.paint(format!("[{time_str}]")),
                         crate::Color::GREEN.paint("\u{2795}"),
                         crate::Color::BOLD.paint("[HMR]"),
                         crate::Color::CYAN.paint(format!("{} added", rel.display()))
@@ -182,7 +216,8 @@ fn run_klyron_hmr_server(dir: &Path, port: u16, host: String) -> anyhow::Result<
                     let msg = format!("removed:{}", rel.display());
                     let _ = tx_clone.send(msg);
                     crate::log_info(format!(
-                        "{} {} {}",
+                        "{} {} {} {}",
+                        crate::Color::DIM.paint(format!("[{time_str}]")),
                         crate::Color::RED.paint("\u{2796}"),
                         crate::Color::BOLD.paint("[HMR]"),
                         crate::Color::CYAN.paint(format!("{} removed", rel.display()))
@@ -193,7 +228,11 @@ fn run_klyron_hmr_server(dir: &Path, port: u16, host: String) -> anyhow::Result<
 
         let app = axum::Router::new()
             .route("/__klyron_hmr", axum::routing::get(hmr_sse_handler))
-            .with_state(tx)
+            .route("/__klyron_hmr.js", axum::routing::get(hmr_client_js))
+            .with_state(HmrState {
+                tx: tx.clone(),
+                clients: connected_clients.clone(),
+            })
             .fallback_service(tower_http::services::ServeDir::new(&dir)
                 .append_index_html_on_directories(true)
                 .not_found_service(tower_http::services::ServeDir::new(&dir)
@@ -215,48 +254,130 @@ fn run_klyron_hmr_server(dir: &Path, port: u16, host: String) -> anyhow::Result<
             crate::Color::GREEN.paint("\u{25C9}"),
             crate::Color::BOLD.paint("Klyron HMR Dev Server"),
             crate::Color::CYAN.paint(format!("http://{addr}")),
-            crate::Color::DIM.paint(format!("(watcher: {} dirs)", 1))
+            crate::Color::DIM.paint("(watcher active)")
         ));
 
         crate::log_info(format!(
             "{} {}",
             crate::Color::BLUE.paint("\u{2139}"),
-            crate::Color::DIM.paint("SSE endpoint: /__klyron_hmr")
+            crate::Color::DIM.paint("SSE: /__klyron_hmr | Client: /__klyron_hmr.js")
         ));
 
         axum::serve(listener, app)
             .await
             .map_err(|e| anyhow::anyhow!("Server error: {e}"))?;
 
-        shutdown_clone.store(true, Ordering::SeqCst);
+        shutdown.store(true, Ordering::SeqCst);
         drop(watch_handle);
         Ok(())
     })
 }
 
+#[derive(Clone)]
+struct HmrState {
+    tx: broadcast::Sender<String>,
+    clients: Arc<AtomicUsize>,
+}
+
 async fn hmr_sse_handler(
-    axum::extract::State(tx): axum::extract::State<broadcast::Sender<String>>,
-) -> axum::response::Sse<impl tokio_stream::Stream<Item = Result<String, std::convert::Infallible>>> {
-    let mut rx = tx.subscribe();
+    axum::extract::State(state): axum::extract::State<HmrState>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    state.clients.fetch_add(1, Ordering::SeqCst);
+    let clients = state.clients.load(Ordering::SeqCst);
+    crate::log_info(format!(
+        "{} {} {} {}",
+        crate::Color::DIM.paint("[SSE]"),
+        crate::Color::GREEN.paint("\u{2795}"),
+        "Client connected",
+        crate::Color::DIM.paint(format!("({clients} total)"))
+    ));
 
-    let initial = vec![
-        Ok::<_, std::convert::Infallible>(format!("data: {}\n\n", serde_json::json!({"type": "connected", "hmr": true}))),
-    ];
+    let rx = state.tx.subscribe();
 
-    let stream = tokio_stream::wrappers::BroadcastStream::new(rx)
-        .filter_map(|result| async move {
-            match result {
-                Ok(msg) => Some(Ok::<_, std::convert::Infallible>(format!("data: {}\n\n", serde_json::json!({"type": "update", "body": msg})))),
-                Err(_) => None,
+    let init_event = Ok::<Event, Infallible>(
+        Event::default().data(serde_json::json!({
+            "type": "connected",
+            "hmr": true,
+            "clientCount": clients
+        }).to_string())
+    );
+
+    let stream = BroadcastStream::new(rx).filter_map(|result| {
+        match result {
+            Ok(msg) => {
+                let parts: Vec<&str> = msg.splitn(2, ':').collect();
+                let (event_type, path) = if parts.len() == 2 {
+                    (parts[0], parts[1])
+                } else {
+                    ("update", msg.as_str())
+                };
+                let event = Event::default().data(serde_json::json!({
+                    "type": event_type,
+                    "path": path,
+                    "timestamp": SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_secs_f64())
+                        .unwrap_or(0.0)
+                }).to_string());
+                Some(Ok::<Event, Infallible>(event))
             }
-        });
+            Err(_) => None,
+        }
+    });
 
-    let full_stream = tokio_stream::iter(initial).chain(stream);
+    let full_stream = tokio_stream::once(init_event).chain(stream);
 
-    axum::response::Sse::new(full_stream)
-        .keep_alive(axum::response::sse::KeepAlive::new()
-            .interval(Duration::from_secs(30))
+    Sse::new(full_stream)
+        .keep_alive(KeepAlive::new()
+            .interval(Duration::from_secs(15))
             .text("keep-alive"))
+}
+
+async fn hmr_client_js() -> impl axum::response::IntoResponse {
+    let hmr_client = r#"(function() {
+    'use strict';
+    const evtSource = new EventSource('/__klyron_hmr');
+    evtSource.onmessage = function(evt) {
+        try {
+            const data = JSON.parse(evt.data);
+            if (data.type === 'connected') {
+                console.log('[Klyron HMR] Connected', data.clientCount ? '(' + data.clientCount + ' clients)' : '');
+                return;
+            }
+            if (data.type === 'changed' || data.type === 'update') {
+                const path = data.path || '';
+                console.log('[Klyron HMR] Update:', path);
+                if (path.endsWith('.css')) {
+                    const links = document.querySelectorAll('link[rel="stylesheet"]');
+                    for (const link of links) {
+                        const href = link.getAttribute('href');
+                        if (href && href.includes(path.split('/').pop())) {
+                            link.href = href.split('?')[0] + '?t=' + Date.now();
+                            return;
+                        }
+                    }
+                }
+                setTimeout(function() { window.location.reload(); }, 100);
+            }
+        } catch(e) { console.warn('[Klyron HMR] Parse error:', e); }
+    };
+    evtSource.onerror = function() {
+        console.warn('[Klyron HMR] Disconnected, retrying...');
+    };
+})();"#;
+    axum::response::Response::builder()
+        .header("Content-Type", "application/javascript; charset=utf-8")
+        .body(axum::body::Body::from(hmr_client))
+        .unwrap()
+}
+
+fn format_time(unix_secs: f64) -> String {
+    let total_secs = unix_secs as u64;
+    let secs_of_day = total_secs % 86400;
+    let hours = secs_of_day / 3600;
+    let minutes = (secs_of_day % 3600) / 60;
+    let seconds = secs_of_day % 60;
+    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
 }
 
 fn watch_dev(program: &str, args: &[&str], dir: &Path) -> anyhow::Result<()> {
@@ -271,7 +392,7 @@ fn watch_dev(program: &str, args: &[&str], dir: &Path) -> anyhow::Result<()> {
             .debounce(300)
             .build();
         if let Ok(watcher) = watcher {
-            let _ = watcher.start(move |_event| {
+            let _ = watcher.start_hmr(move |_update| {
                 let _ = tx.send(());
             });
         }

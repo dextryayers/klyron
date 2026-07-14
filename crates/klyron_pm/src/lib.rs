@@ -348,7 +348,7 @@ pub struct OutdatedPackage {
 
 // ── Dependency Resolution ────────────────────────────────────────────────────
 
-fn resolve_version(name: &str, constraint: &str) -> Result<String, PmError> {
+pub fn resolve_version(name: &str, constraint: &str) -> Result<String, PmError> {
   // For testing and offline: simulate version resolution
   // In production, this would hit the npm registry
   let versions = vec![
@@ -2559,6 +2559,47 @@ pub fn migrate_from_yarn_lockfile(yarn_lock_path: &Path) -> Result<lockfile::Kly
   }
 
   Ok(klock)
+}
+
+// ── Outdated Packages with Lockfile Comparison ───────────────────────────────
+
+pub fn get_outdated_packages(
+  lockfile_path: &Path,
+  _registry: &str,
+) -> Result<Vec<OutdatedPackage>, PmError> {
+  use lockfile::KlyronLockfile as BinKlyronLockfile;
+
+  let data = std::fs::read(lockfile_path)?;
+  let lock = BinKlyronLockfile::from_bytes(&data)?;
+
+  let mut outdated = Vec::new();
+  let mut seen = HashSet::new();
+
+  for (_key, pkg) in &lock.packages {
+    let name = &pkg.name;
+    if !seen.insert(name.clone()) {
+      continue;
+    }
+
+    let current = &pkg.version;
+    let constraint = format!("^{}", current);
+    let wanted = resolve_version(name, &constraint)
+      .unwrap_or_else(|_| current.clone());
+    let latest = resolve_version(name, ">=0.0.0")
+      .unwrap_or_else(|_| current.clone());
+
+    if wanted != *current || latest != *current {
+      outdated.push(OutdatedPackage {
+        name: name.clone(),
+        current: current.clone(),
+        wanted,
+        latest,
+      });
+    }
+  }
+
+  outdated.sort_by(|a, b| a.name.cmp(&b.name));
+  Ok(outdated)
 }
 
 fn check_known_vulnerability(name: &str, version: &Version) -> Option<AuditVulnerability> {

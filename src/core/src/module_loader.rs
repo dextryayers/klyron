@@ -16,13 +16,13 @@ use crate::transpiler::Transpiler;
 // ── Import Map ──────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default)]
-struct ImportMap {
-  imports: HashMap<String, String>,
-  scopes: HashMap<String, HashMap<String, String>>,
+pub struct ImportMap {
+  pub imports: HashMap<String, String>,
+  pub scopes: HashMap<String, HashMap<String, String>>,
 }
 
 impl ImportMap {
-  fn auto_detect(start_dir: &Path) -> Self {
+  pub fn auto_detect(start_dir: &Path) -> Self {
     let names = &["import_map.json", "import_map.jsonc"];
     let mut dir = Some(start_dir);
     while let Some(d) = dir {
@@ -68,7 +68,7 @@ impl ImportMap {
     Self::default()
   }
 
-  fn from_json(value: &serde_json::Value) -> Self {
+  pub fn from_json(value: &serde_json::Value) -> Self {
     let mut map = ImportMap::default();
     if let Some(imports) = value.get("imports").and_then(|v| v.as_object()) {
       for (k, v) in imports {
@@ -132,19 +132,51 @@ impl ImportMap {
 static NODE_BUILTINS: LazyLock<Vec<(&'static str, &'static str)>> = LazyLock::new(|| {
   vec![
     ("assert", "ext:klyron_node/assert.js"),
+    ("assert/strict", "ext:klyron_node/assert_strict.js"),
     ("buffer", "ext:klyron_node/buffer.js"),
     ("child_process", "ext:klyron_node/child_process.js"),
+    ("cluster", "ext:klyron_node/cluster.js"),
+    ("console", "ext:klyron_node/console.js"),
     ("crypto", "ext:klyron_node/crypto.js"),
+    ("dgram", "ext:klyron_node/dgram.js"),
+    ("diagnostics_channel", "ext:klyron_node/diagnostics_channel.js"),
+    ("dns", "ext:klyron_node/dns.js"),
+    ("domain", "ext:klyron_node/domain.js"),
     ("events", "ext:klyron_node/events.js"),
     ("fs", "ext:klyron_node/fs.js"),
+    ("fs/promises", "ext:klyron_node/fs_promises.js"),
+    ("http", "ext:klyron_node/http.js"),
+    ("http2", "ext:klyron_node/http2.js"),
+    ("https", "ext:klyron_node/https.js"),
+    ("inspector", "ext:klyron_node/inspector.js"),
+    ("module", "ext:klyron_node/module.js"),
+    ("net", "ext:klyron_node/net.js"),
     ("os", "ext:klyron_node/os.js"),
     ("path", "ext:klyron_node/path.js"),
+    ("path/posix", "ext:klyron_node/path_posix.js"),
+    ("path/win32", "ext:klyron_node/path_win32.js"),
+    ("perf_hooks", "ext:klyron_node/perf_hooks.js"),
     ("process", "ext:klyron_node/process.js"),
+    ("punycode", "ext:klyron_node/punycode.js"),
     ("querystring", "ext:klyron_node/querystring.js"),
+    ("readline", "ext:klyron_node/readline.js"),
+    ("repl", "ext:klyron_node/repl.js"),
     ("stream", "ext:klyron_node/stream.js"),
+    ("stream/promises", "ext:klyron_node/stream_promises.js"),
+    ("stream/web", "ext:klyron_node/stream_web.js"),
     ("string_decoder", "ext:klyron_node/string_decoder.js"),
+    ("timers", "ext:klyron_node/timers.js"),
+    ("timers/promises", "ext:klyron_node/timers_promises.js"),
+    ("tls", "ext:klyron_node/tls.js"),
+    ("trace_events", "ext:klyron_node/trace_events.js"),
+    ("tty", "ext:klyron_node/tty.js"),
     ("url", "ext:klyron_node/url.js"),
     ("util", "ext:klyron_node/util.js"),
+    ("util/types", "ext:klyron_node/util_types.js"),
+    ("v8", "ext:klyron_node/v8.js"),
+    ("vm", "ext:klyron_node/vm.js"),
+    ("worker_threads", "ext:klyron_node/worker_threads.js"),
+    ("zlib", "ext:klyron_node/zlib.js"),
   ]
 });
 
@@ -158,13 +190,31 @@ pub struct KlyronModuleLoader {
   transpiler: Option<Transpiler>,
   cache: Arc<Mutex<Vec<(String, CachedModule)>>>,
   _npm_registry: String,
+  import_map: ImportMap,
 }
 
 impl KlyronModuleLoader {
   pub fn new(permissions: Arc<Permissions>, transpiler: Option<Transpiler>) -> Self {
     let npm_registry = std::env::var("KLYRON_NPM_REGISTRY")
       .unwrap_or_else(|_| "https://registry.npmjs.org".to_string());
-    Self { permissions, transpiler, cache: Arc::new(Mutex::new(Vec::new())), _npm_registry: npm_registry }
+    let import_map = ImportMap::auto_detect(&std::env::current_dir().unwrap_or_default());
+    Self { permissions, transpiler, cache: Arc::new(Mutex::new(Vec::new())), _npm_registry: npm_registry, import_map }
+  }
+
+  pub fn resolve_import_map(&self, specifier: &str, referrer: Option<&str>) -> Option<String> {
+    self.import_map.resolve(specifier, referrer)
+  }
+
+  pub fn set_import_map(&mut self, import_map: ImportMap) {
+    self.import_map = import_map;
+  }
+
+  pub fn get_import_map(&self) -> &ImportMap {
+    &self.import_map
+  }
+
+  pub fn detect_import_map(start_dir: &Path) -> ImportMap {
+    ImportMap::auto_detect(start_dir)
   }
 
   fn cache_get(&self, url: &str) -> Option<CachedModule> {
@@ -222,24 +272,68 @@ impl KlyronModuleLoader {
 
   fn resolve_npm(&self, specifier: &str) -> ModuleResolveResponse {
     let package = specifier.strip_prefix("npm:").unwrap_or(specifier);
-    // npm:package or npm:package@version or npm:@scope/package
-    let (package_name, _version) = if let Some(idx) = package.find('@') {
+    // npm:package, npm:package@version, npm:@scope/package, npm:package/subpath
+    let (package_name, subpath) = if let Some(slash_idx) = package.find('/') {
+      // check if it's @scope/package or package/subpath
       if package.starts_with('@') {
-        // @scope/package@version
-        let at_idx = package[1..].rfind('@').map(|i| i + 1);
-        match at_idx {
-          Some(pos) => (&package[..pos], Some(&package[pos + 1..])),
-          None => (package, None),
+        // @scope/package or @scope/package/subpath or @scope/package@version
+        let after_scope = &package[slash_idx + 1..];
+        let (rest, sub) = if let Some(next_slash) = after_scope.find('/') {
+          let _pkg_base = &package[..slash_idx + 1 + next_slash];
+          (&package[..slash_idx + 1 + next_slash], Some(&after_scope[next_slash + 1..]))
+        } else {
+          (package, None)
+        };
+        if let Some(ver_sep) = rest.rfind('@') {
+          if ver_sep > slash_idx + 1 {
+            let name = &rest[..ver_sep];
+            let _ver = &rest[ver_sep + 1..];
+            (name, sub)
+          } else {
+            (rest, sub)
+          }
+        } else {
+          (rest, sub)
         }
       } else {
-        let pos = idx;
-        (&package[..pos], Some(&package[pos + 1..]))
+        // package/subpath or package@version/subpath
+        if let Some(ver_sep) = package.find('@') {
+          let name = &package[..ver_sep];
+          let rest = &package[ver_sep + 1..];
+          if let Some(sub_slash) = rest.find('/') {
+            let _ver = &rest[..sub_slash];
+            (name, Some(&rest[sub_slash + 1..]))
+          } else {
+            (name, None)
+          }
+        } else {
+          let first_slash = package.find('/').unwrap();
+          (&package[..first_slash], Some(&package[first_slash + 1..]))
+        }
       }
     } else {
-      (package, None)
+      // plain package or package@version
+      if let Some(ver_sep) = package.find('@') {
+        if package.starts_with('@') {
+          (package, None)
+        } else {
+          (&package[..ver_sep], None)
+        }
+      } else {
+        (package, None)
+      }
     };
-    // For now, resolve npm: specifiers by looking in node_modules
-    self.resolve_node_modules(package_name, &std::env::current_dir().unwrap())
+
+    let base_resolved = self.resolve_node_modules(package_name, &std::env::current_dir().unwrap())?;
+    if let Some(sub) = subpath {
+      if let Ok(base_path) = base_resolved.to_file_path() {
+        if let Some(parent) = base_path.parent() {
+          let sub_path = parent.join(sub);
+          return self.resolve_file_path(&sub_path);
+        }
+      }
+    }
+    Ok(base_resolved)
   }
 }
 
@@ -250,7 +344,39 @@ impl ModuleLoader for KlyronModuleLoader {
     referrer: &str,
     _kind: ResolutionKind,
   ) -> ModuleResolveResponse {
-    // node: builtins -> ext:klyron_node/*.js
+    // 0. Try import map first
+    let referrer_str = if referrer.starts_with("file://") {
+      Some(referrer)
+    } else {
+      None
+    };
+    if let Some(mapped) = self.import_map.resolve(specifier, referrer_str) {
+      if mapped.starts_with("file://") {
+        return Ok(ModuleSpecifier::parse(&mapped).unwrap());
+      }
+      if mapped.starts_with("https://") || mapped.starts_with("http://") {
+        return Ok(ModuleSpecifier::parse(&mapped).unwrap());
+      }
+      if mapped.starts_with("npm:") {
+        return self.resolve_npm(&mapped);
+      }
+      if mapped.starts_with("node:") {
+        let builtin = mapped.strip_prefix("node:").unwrap_or(&mapped);
+        for (name, url) in NODE_BUILTINS.iter() {
+          if *name == builtin {
+            return Ok(ModuleSpecifier::parse(url).unwrap());
+          }
+        }
+        return Err(JsErrorBox::generic(format!("Unknown node:builtin: {builtin}")));
+      }
+      // Fallback: treat mapped as relative path from project root
+      if let Ok(path) = std::env::current_dir() {
+        let candidate = path.join(&mapped);
+        return self.resolve_file_path(&candidate);
+      }
+    }
+
+    // 1. node: builtins -> ext:klyron_node/*.js
     if let Some(builtin) = specifier.strip_prefix("node:") {
       for (name, url) in NODE_BUILTINS.iter() {
         if *name == builtin {
@@ -260,27 +386,29 @@ impl ModuleLoader for KlyronModuleLoader {
       return Err(JsErrorBox::generic(format!("Unknown node:builtin: {builtin}")));
     }
 
-    // npm: specifiers
+    // 2. npm: specifiers
     if specifier.starts_with("npm:") {
       return self.resolve_npm(specifier);
     }
 
-    // ext: / klyron: -> deno_core extension modules
+    // 3. ext: / klyron: -> deno_core extension modules
     if specifier.starts_with("ext:") || specifier.starts_with("klyron:") {
       return Ok(ModuleSpecifier::parse(specifier).unwrap());
     }
 
-    // file:// protocol
+    // 4. file:// protocol
     if specifier.starts_with("file://") {
-      return Ok(ModuleSpecifier::parse(specifier).unwrap());
+      let path = specifier.strip_prefix("file://").unwrap_or(specifier);
+      let path_buf = PathBuf::from(path);
+      return self.resolve_file_path(&path_buf);
     }
 
-    // data: and blob: URLs
+    // 5. data: and blob: URLs
     if specifier.starts_with("data:") || specifier.starts_with("blob:") {
       return Ok(ModuleSpecifier::parse(specifier).unwrap());
     }
 
-    // Relative imports
+    // 6. Relative imports
     if specifier.starts_with("./") || specifier.starts_with("../") {
       if referrer.starts_with("ext:") || referrer.starts_with("klyron:") {
         let base_url = ModuleSpecifier::parse(referrer).unwrap();
@@ -302,11 +430,12 @@ impl ModuleLoader for KlyronModuleLoader {
       return self.resolve_file_path(&base_dir.join(specifier));
     }
 
+    // 7. Absolute paths
     if specifier.starts_with('/') {
       return self.resolve_file_path(&PathBuf::from(specifier));
     }
 
-    // Bare specifier -> node_modules, then npm:
+    // 8. Bare specifier -> node_modules
     self.resolve_node_modules(specifier, &std::env::current_dir().unwrap())
   }
 
@@ -347,56 +476,99 @@ impl ModuleLoader for KlyronModuleLoader {
       }
     }
 
-    // File system
-    if let Ok(path) = module_specifier.to_file_path() {
-      if path.exists() {
-        let path_str = path.to_string_lossy();
-        if let Err(e) = self.permissions.check_read(&path_str) {
-          return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(e)));
-        }
-
-        match std::fs::read_to_string(&path) {
-          Ok(content) => {
-            let is_ts = path
-              .extension()
-              .map(|e| e == "ts" || e == "tsx" || e == "mts")
-              .unwrap_or(false);
-            let is_json = path
-              .extension()
-              .map(|e| e == "json")
-              .unwrap_or(false);
-            let module_type = if is_json {
-              ModuleType::Json
-            } else {
-              ModuleType::JavaScript
-            };
-            let code = if is_ts {
-              if let Some(ref t) = self.transpiler {
-                t.transpile(&content).unwrap_or(content)
-              } else {
-                content
-              }
-            } else {
-              content
-            };
+    // npm: / https: / http: remote fetching
+    if url.starts_with("https://") || url.starts_with("http://") || url.starts_with("npm:") {
+      if let Ok(path) = std::env::current_dir() {
+        let cache_dir = path.join(".klyron").join("cache").join("npm");
+        let cache_key = url.replace(&['/', ':', '@', '#'][..], "_");
+        let cache_file = cache_dir.join(&cache_key);
+        if cache_file.exists() {
+          if let Ok(content) = std::fs::read_to_string(&cache_file) {
             let cached = CachedModule {
-              code: code.clone(),
-              module_type: module_type.clone(),
+              code: content.clone(),
+              module_type: ModuleType::JavaScript,
             };
-            self.cache_set(url, cached);
-            let src = ModuleSource::new(
-              module_type,
-              ModuleSourceCode::String(code.into()),
-              module_specifier,
-              None,
-            );
+            self.cache_set(url.clone(), cached);
+            let code = ModuleSourceCode::String(content.into());
+            let src = ModuleSource::new(ModuleType::JavaScript, code, module_specifier, None);
             return ModuleLoadResponse::Sync(Ok(src));
           }
-          Err(e) => {
-            return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
-              "Read error {path:?}: {e}"
-            ))));
-          }
+        }
+      }
+      // For now, return error for remote modules without cache
+      return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+        "Remote module not cached: {url}. Run `klyron cache add {url}` first."
+      ))));
+    }
+
+    // File system (including file:// URIs)
+    let path = if url.starts_with("file://") {
+      match module_specifier.to_file_path() {
+        Ok(p) => p,
+        Err(_) => {
+          return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+            "Invalid file URI: {url}"
+          ))));
+        }
+      }
+    } else {
+      match module_specifier.to_file_path() {
+        Ok(p) => p,
+        Err(_) => {
+          return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+            "Module not found: {url}"
+          ))));
+        }
+      }
+    };
+
+    if path.exists() {
+      let path_str = path.to_string_lossy();
+      if let Err(e) = self.permissions.check_read(&path_str) {
+        return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(e)));
+      }
+
+      match std::fs::read_to_string(&path) {
+        Ok(content) => {
+          let is_ts = path
+            .extension()
+            .map(|e| e == "ts" || e == "tsx" || e == "mts" || e == "cts")
+            .unwrap_or(false);
+          let is_json = path
+            .extension()
+            .map(|e| e == "json")
+            .unwrap_or(false);
+          let module_type = if is_json {
+            ModuleType::Json
+          } else {
+            ModuleType::JavaScript
+          };
+          let code = if is_ts {
+            if let Some(ref t) = self.transpiler {
+              t.transpile(&content).unwrap_or(content)
+            } else {
+              content
+            }
+          } else {
+            content
+          };
+          let cached = CachedModule {
+            code: code.clone(),
+            module_type: module_type.clone(),
+          };
+          self.cache_set(url, cached);
+          let src = ModuleSource::new(
+            module_type,
+            ModuleSourceCode::String(code.into()),
+            module_specifier,
+            None,
+          );
+          return ModuleLoadResponse::Sync(Ok(src));
+        }
+        Err(e) => {
+          return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+            "Read error {path:?}: {e}"
+          ))));
         }
       }
     }

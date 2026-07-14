@@ -1,8 +1,10 @@
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use thiserror::Error;
 use url::Url;
+use once_cell::sync::Lazy;
 
 // ── Errors ───────────────────────────────────────────────────────────────────
 
@@ -102,6 +104,22 @@ pub struct ModuleResolution {
   pub format: ModuleFormat,
   pub kind: ModuleKind,
   pub package_json: Option<Value>,
+}
+
+// ── Resolution Cache ──────────────────────────────────────────────────────────
+
+static RESOLVE_CACHE: Lazy<Mutex<HashMap<String, Option<PathBuf>>>> = Lazy::new(|| {
+    Mutex::new(HashMap::new())
+});
+
+pub fn clear_resolve_cache() {
+    if let Ok(mut cache) = RESOLVE_CACHE.lock() {
+        cache.clear();
+    }
+}
+
+pub fn get_resolve_cache_size() -> usize {
+    RESOLVE_CACHE.lock().map(|c| c.len()).unwrap_or(0)
 }
 
 // ── Import Map ───────────────────────────────────────────────────────────────
@@ -297,17 +315,51 @@ impl ModuleResolver {
   // ── Bare Specifier Resolution ────────────────────────────────────────────
 
   pub fn resolve_bare_specifier(specifier: &str, start: &Path) -> Result<PathBuf, LoaderError> {
+    // Handle subpath imports: lodash/merge -> resolve lodash first, then find merge
+    let (package_name, subpath) = Self::parse_package_specifier(specifier);
+
     let mut dir = Some(start);
     while let Some(d) = dir {
-      let nm = d.join("node_modules").join(specifier);
+      let nm = d.join("node_modules").join(&package_name);
       if let Some(resolved) = Self::resolve_node_module_entry(&nm) {
+        if let Some(sub) = &subpath {
+          if let Some(parent) = resolved.parent() {
+            let sub_path = parent.join(sub);
+            // Try exact, then with extensions, then index files
+            if sub_path.is_file() {
+              return Ok(sub_path);
+            }
+            for ext in &[".js", ".mjs", ".cjs", ".json", ".ts", ".tsx", ".jsx"] {
+              let with_ext = sub_path.with_extension(ext.trim_start_matches('.'));
+              if with_ext.is_file() {
+                return Ok(with_ext);
+              }
+            }
+            for name in &["index.js", "index.mjs", "index.cjs", "index.ts", "index.tsx", "index.jsx"] {
+              let idx = sub_path.join(name);
+              if idx.is_file() {
+                return Ok(idx);
+              }
+            }
+            // Try node_modules of the resolved parent
+            if let Some(pkg_node_modules) = parent.join("node_modules").parent() {
+              let sub_nm = pkg_node_modules.join(sub);
+              if let Some(sub_resolved) = Self::resolve_node_module_entry(&sub_nm) {
+                return Ok(sub_resolved);
+              }
+            }
+          }
+          return Err(LoaderError::ModuleNotFound(format!(
+            "Cannot find subpath '{sub}' in package '{package_name}'"
+          )));
+        }
         return Ok(resolved);
       }
       dir = d.parent();
     }
     // Try global node_modules
     if let Ok(home) = std::env::var("HOME") {
-      let global = PathBuf::from(home).join(".node_modules").join(specifier);
+      let global = PathBuf::from(home).join(".node_modules").join(&package_name);
       if let Some(resolved) = Self::resolve_node_module_entry(&global) {
         return Ok(resolved);
       }
@@ -315,6 +367,28 @@ impl ModuleResolver {
     Err(LoaderError::ModuleNotFound(format!(
       "Cannot find bare specifier '{specifier}'"
     )))
+  }
+
+  fn parse_package_specifier(specifier: &str) -> (String, Option<String>) {
+    if let Some(slash_idx) = specifier.find('/') {
+      if specifier.starts_with('@') {
+        // @scope/package or @scope/package/subpath
+        if let Some(next_slash) = specifier[slash_idx + 1..].find('/') {
+          let pkg_end = slash_idx + 1 + next_slash;
+          let pkg = &specifier[..pkg_end];
+          let sub = &specifier[pkg_end + 1..];
+          (pkg.to_string(), Some(sub.to_string()))
+        } else {
+          (specifier.to_string(), None)
+        }
+      } else {
+        let pkg = &specifier[..slash_idx];
+        let sub = &specifier[slash_idx + 1..];
+        (pkg.to_string(), Some(sub.to_string()))
+      }
+    } else {
+      (specifier.to_string(), None)
+    }
   }
 
   fn resolve_node_module_entry(dir: &Path) -> Option<PathBuf> {
@@ -446,6 +520,38 @@ impl ModuleResolver {
   // ── Full Resolution ──────────────────────────────────────────────────────
 
   pub fn resolve(&self, specifier: &str, base: &Path) -> Result<ModuleResolution, LoaderError> {
+    // Check cache first
+    let cache_key = format!("{}:{}", specifier, base.display());
+    {
+      if let Ok(cache) = RESOLVE_CACHE.lock() {
+        if let Some(Some(cached_path)) = cache.get(&cache_key) {
+          let format = Self::detect_format(cached_path);
+          let kind = Self::detect_kind(cached_path);
+          let url = Url::from_file_path(cached_path).unwrap_or_else(|_| Url::parse("file:///").unwrap());
+          return Ok(ModuleResolution {
+            resolved_url: url,
+            resolved_path: cached_path.clone(),
+            format,
+            kind,
+            package_json: None,
+          });
+        }
+      }
+    }
+
+    let result = self.resolve_inner(specifier, base);
+
+    // Cache success results
+    if let Ok(ref resolution) = result {
+      if let Ok(mut cache) = RESOLVE_CACHE.lock() {
+        cache.insert(cache_key, Some(resolution.resolved_path.clone()));
+      }
+    }
+
+    result
+  }
+
+  fn resolve_inner(&self, specifier: &str, base: &Path) -> Result<ModuleResolution, LoaderError> {
     // 1. Try import map first
     let base_url = Url::from_file_path(base).ok();
     let referrer = base_url.as_ref().map(|u| u.as_str());
@@ -515,7 +621,35 @@ impl ModuleResolver {
       });
     }
 
-    // 3. Relative or absolute path
+    if specifier.starts_with("npm:") {
+      let package = specifier.strip_prefix("npm:").unwrap_or(specifier);
+      let start = if base.is_file() { base.parent().unwrap_or(base) } else { base };
+      let resolved = Self::resolve_bare_specifier(package, start)?;
+      let url = Url::from_file_path(&resolved).unwrap_or_else(|_| Url::parse("file:///").unwrap());
+      let format = Self::detect_format(&resolved);
+      let kind = Self::detect_kind(&resolved);
+      return Ok(ModuleResolution {
+        resolved_url: url,
+        resolved_path: resolved,
+        format,
+        kind,
+        package_json: None,
+      });
+    }
+
+    // 3. data: URLs
+    if specifier.starts_with("data:") {
+      let url = Url::parse(specifier).map_err(|e| LoaderError::InvalidSpecifier(e.to_string()))?;
+      return Ok(ModuleResolution {
+        resolved_url: url.clone(),
+        resolved_path: PathBuf::from(url.path()),
+        format: ModuleFormat::ESM,
+        kind: ModuleKind::JavaScript,
+        package_json: None,
+      });
+    }
+
+    // 4. Relative or absolute path
     if specifier.starts_with('.') || specifier.starts_with('/') {
       let base_dir = if base.is_file() {
         base.parent().unwrap_or(base)
@@ -598,7 +732,7 @@ impl ModuleResolver {
       return Err(LoaderError::ModuleNotFound(format!("Cannot resolve '{specifier}' from '{}'", base.display())));
     }
 
-    // 4. Bare specifier (node_modules)
+    // 5. Bare specifier (node_modules)
     let start = if base.is_file() {
       base.parent().unwrap_or(base)
     } else {

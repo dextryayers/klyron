@@ -5,10 +5,9 @@ pub mod color;
 
 pub(crate) use commands::helpers::*;
 pub(crate) use scaffold_inline::*;
-pub(crate) use color::Color;
+pub(crate) use color::{Color, style_success};
 
 use std::path::{Path, PathBuf};
-use std::io::Write;
 use clap::{Parser, Subcommand, Args, CommandFactory};
 use klyron_adapter::AdapterRegistry;
 use klyron_adapter::adapters::register_all;
@@ -727,17 +726,14 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>, json_outpu
         Commands::Telemetry { action } => commands::utils::run_telemetry(action),
         Commands::Config { args } => commands::utils::run_config(args.key, args.value),
         Commands::Serve { host, port, dir, watch } => {
-            let serve_dir = dir.unwrap_or_else(|| std::env::current_dir().unwrap());
-            log_info(format!("Klyron dev server: http://{host}:{port}"));
-            log_info(format!("Serving: {}", serve_dir.display()));
-            if watch {
-                let serve_dir_clone = serve_dir.clone();
-                let host_clone = host.clone();
-                watch_file(&serve_dir_clone, move || {
-                    log_info(format!("Directory change detected, server running at http://{host_clone}:{port}"));
-                });
-            }
-            start_dev_server(&host, port, &serve_dir)
+            commands::dev::run_dev(commands::dev::DevArgs {
+                dir: dir.unwrap_or_else(|| std::env::current_dir().unwrap()),
+                port: Some(port),
+                host: Some(host),
+                watch,
+                hot: watch,
+                no_hmr_inject: false,
+            })
         }
         Commands::Completions { shell } => {
             let mut cmd = <Cli as CommandFactory>::command();

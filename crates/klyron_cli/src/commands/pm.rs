@@ -139,11 +139,12 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
 
     if project == "node" {
         let (framework, version) = crate::detect_framework_from_pkg(&dir);
+        let version_display = version.as_deref().unwrap_or("");
         crate::log_info(format!(
             "{} {} {}",
             crate::Color::MAGENTA.paint("\u{2699}"),
             crate::Color::BOLD.paint("Detected framework:"),
-            crate::Color::CYAN.paint(format!("{} {}", framework, version.as_deref().unwrap_or("")))
+            crate::Color::CYAN.paint(format!("{} {}", framework, version_display))
         ));
 
         let config_path = dir.join("klyron.json");
@@ -153,11 +154,33 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
                 .and_then(|n| n.to_str())
                 .unwrap_or("my-app")
                 .to_string();
+
+            // Framework-specific config values
+            let (dev_port, build_dir) = match framework.as_str() {
+                "Next.js" => (3000, ".next"),
+                "Vue" | "Nuxt" => (5173, "dist"),
+                "Svelte" | "SvelteKit" => (5173, "build"),
+                "React" => (3000, "dist"),
+                "Angular" => (4200, "dist"),
+                "Astro" => (4321, "dist"),
+                "NestJS" => (3000, "dist"),
+                "Express" => (3000, "dist"),
+                "Fastify" => (3000, "dist"),
+                "Hono" => (3000, "dist"),
+                "Solid" => (3000, "dist"),
+                "Gatsby" => (8000, "public"),
+                "Remix" => (3000, "build"),
+                "Preact" => (5173, "dist"),
+                "Lit" => (5173, "dist"),
+                _ => (3000, "dist"),
+            };
+
             let config = serde_json::json!({
                 "name": project_name,
                 "version": "0.1.0",
                 "type": "node",
                 "framework": framework,
+                "frameworkVersion": version_display,
                 "language": language,
                 "compiler": {
                     "target": "esnext",
@@ -166,11 +189,11 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
                     "sourcemap": false
                 },
                 "dev": {
-                    "port": 3000,
+                    "port": dev_port,
                     "hmr": true
                 },
                 "build": {
-                    "outDir": "dist",
+                    "outDir": build_dir,
                     "minify": true
                 }
             });
@@ -179,7 +202,7 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
             crate::log_info(format!(
                 "{} {}",
                 crate::Color::GREEN.paint("\u{2713}"),
-                format!("Generated {}", config_path.display())
+                format!("Generated {} ({framework} config)", config_path.display())
             ));
         }
 

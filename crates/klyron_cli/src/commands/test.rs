@@ -68,7 +68,7 @@ pub fn run_test(args: TestArgs) -> anyhow::Result<()> {
         parallel: !args.shuffle,
         ..Default::default()
     };
-    let runner = TestRunner::with_config(config);
+    let _runner = TestRunner::with_config(config);
 
     if args.ui || args.e2e || args.unit || args.integration {
         let category = if args.ui { "ui" } else if args.e2e { "e2e" } else if args.unit { "unit" } else { "integration" };

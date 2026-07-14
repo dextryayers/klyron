@@ -580,7 +580,6 @@ fn percentile(sorted: &[f64], p: usize) -> f64 {
 // ── Lockfile Benchmarks ─────────────────────────────────────────────────────
 
 use klyron_pm::lockfile::{KlyronLockfile, LockfilePackage};
-use std::collections::HashMap;
 
 pub fn generate_test_lockfile(package_count: usize) -> KlyronLockfile {
     let mut lock = KlyronLockfile::new();

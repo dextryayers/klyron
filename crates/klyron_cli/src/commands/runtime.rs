@@ -48,6 +48,16 @@ pub struct RunArgs {
 }
 
 pub fn run_eval(code: &str, _module: bool, extensions: Vec<deno_core::Extension>) -> anyhow::Result<()> {
+    let dir = std::env::current_dir()?;
+    crate::load_dotenv(&dir);
+
+    if let Some(tsconfig) = crate::detect_tsconfig(&dir) {
+        let opts = crate::apply_tsconfig_compiler_options(&tsconfig);
+        if !opts.is_empty() {
+            crate::log_debug(format!("tsconfig.json options: {}", opts.join(" ")));
+        }
+    }
+
     let runtime = Runtime::builder()
         .async_(true)
         .enable_typescript(true)
@@ -63,7 +73,7 @@ pub fn run_eval(code: &str, _module: bool, extensions: Vec<deno_core::Extension>
 pub fn run_eval_typescript(code: &str, jsx: bool) -> anyhow::Result<()> {
     use klyron_transpiler::{transpile_ts_to_js, TranspileOptions, Lang, Target};
     let lang = if jsx { Lang::Tsx } else { Lang::TypeScript };
-    let options = TranspileOptions { lang, target: Target::EsNext, minify: false, sourcemap: false };
+    let _options = TranspileOptions { lang, target: Target::EsNext, minify: false, sourcemap: false };
     let js_code = transpile_ts_to_js(code)?;
     let js_code = if js_code.is_empty() { code.to_string() } else { js_code };
 
@@ -324,6 +334,16 @@ pub fn shell_loop() -> anyhow::Result<()> {
 }
 
 pub fn eval_with_args(args: EvalArgs) -> anyhow::Result<()> {
+    let dir = std::env::current_dir()?;
+    crate::load_dotenv(&dir);
+
+    if let Some(tsconfig) = crate::detect_tsconfig(&dir) {
+        let opts = crate::apply_tsconfig_compiler_options(&tsconfig);
+        if !opts.is_empty() {
+            crate::log_debug(format!("tsconfig.json options: {}", opts.join(" ")));
+        }
+    }
+
     if args.typescript || args.jsx {
         return run_eval_typescript(&args.code, args.jsx);
     }

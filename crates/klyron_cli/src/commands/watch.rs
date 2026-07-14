@@ -28,12 +28,13 @@ pub fn run_watch(args: WatchArgs) -> anyhow::Result<()> {
     let parts = shell_split(&script);
 
     eprintln!(
-        "{} klyron watch — watching {} for changes",
+        "{} klyron watch \u{2014} watching {} for changes",
         crate::Color::CYAN.paint("\u{1F50D}"),
         dir.display()
     );
     eprintln!("  {} Running: {}", crate::Color::GREEN.paint("\u{25B6}"), script);
     eprintln!("  {} Press Ctrl+C to stop", crate::Color::DIM.paint("i"));
+    eprintln!("  {} Ignoring: node_modules, .git, target, .klyron", crate::Color::DIM.paint("i"));
 
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
@@ -42,10 +43,13 @@ pub fn run_watch(args: WatchArgs) -> anyhow::Result<()> {
     })
     .map_err(|e| anyhow::anyhow!("Failed to set Ctrl+C handler: {e}"))?;
 
+    let changed = Arc::new(AtomicBool::new(false));
+
     let watch_dir = dir.clone();
     let running_watch = running.clone();
+    let changed_watch = changed.clone();
 
-    let watcher_handle = std::thread::spawn(move || {
+    let _watcher_handle = std::thread::spawn(move || {
         let mut builder = klyron_watcher::WatcherBuilder::new()
             .add_path(watch_dir.to_str().unwrap_or("."))
             .recursive(true)
@@ -55,6 +59,7 @@ pub fn run_watch(args: WatchArgs) -> anyhow::Result<()> {
             "node_modules/*", ".git/*", "target/*", ".klyron/*",
             "*.lock", ".DS_Store", "*.swp", "*.swo",
             ".vscode/*", ".idea/*", "dist/*", "build/*",
+            ".cache/*", ".next/*", ".nuxt/*",
         ] {
             builder = builder.ignore(pat);
         }
@@ -64,19 +69,19 @@ pub fn run_watch(args: WatchArgs) -> anyhow::Result<()> {
         }
 
         if let Ok(watcher) = builder.build() {
-            let changed = Arc::new(AtomicBool::new(false));
-            let c = changed.clone();
-            let _ = watcher.start(move |_event| {
+            let c = changed_watch.clone();
+            let _ = watcher.start_hmr(move |_update| {
                 c.store(true, Ordering::SeqCst);
             });
 
             while running_watch.load(Ordering::SeqCst) {
-                std::thread::sleep(Duration::from_millis(500));
+                std::thread::sleep(Duration::from_millis(200));
             }
         }
     });
 
-    let running_child = running.clone();
+    let changed_child = changed.clone();
+
     while running.load(Ordering::SeqCst) {
         let mut child = run_script_detached(&runner, &parts, &dir)?;
 
@@ -98,19 +103,21 @@ pub fn run_watch(args: WatchArgs) -> anyhow::Result<()> {
                         let _ = child.wait();
                         return Ok(());
                     }
-                    std::thread::sleep(Duration::from_millis(200));
+                    if changed_child.swap(false, Ordering::SeqCst) {
+                        eprintln!(
+                            "\n{} {}",
+                            crate::Color::YELLOW.paint("\u{1F504}"),
+                            crate::Color::BOLD.paint("File change detected. Restarting...")
+                        );
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        std::thread::sleep(Duration::from_millis(300));
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
                 }
                 Err(e) => anyhow::bail!("Failed to wait for script: {e}"),
             }
-        }
-
-        if running.load(Ordering::SeqCst) {
-            eprintln!(
-                "\n{} {}",
-                crate::Color::YELLOW.paint("\u{1F504}"),
-                crate::Color::BOLD.paint("File change detected. Restarting...")
-            );
-            std::thread::sleep(Duration::from_millis(500));
         }
     }
 
