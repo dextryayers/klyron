@@ -418,8 +418,14 @@ fn percentile(sorted: &[f64], p: usize) -> f64 {
   if sorted.is_empty() {
     return 0.0;
   }
-  let k = ((sorted.len() - 1) * p / 100).max(0);
-  sorted[k.min(sorted.len() - 1)]
+  let rank = (p as f64 / 100.0) * (sorted.len() - 1) as f64;
+  let k = rank.floor() as usize;
+  let frac = rank - k as f64;
+  if k + 1 < sorted.len() {
+    sorted[k] + frac * (sorted[k + 1] - sorted[k])
+  } else {
+    sorted[k]
+  }
 }
 
 #[cfg(test)]

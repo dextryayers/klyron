@@ -472,8 +472,9 @@ impl CompatChecker {
       return (CompatStatus::Compatible, None);
     }
     if let Ok(req) = VersionReq::parse(range) {
-      let min_ver = semver::Version::new(18, 0, 0);
-      if req.matches(&min_ver) {
+      let ver_18 = semver::Version::new(18, 0, 0);
+      let ver_17 = semver::Version::new(17, 0, 0);
+      if req.matches(&ver_18) && !req.matches(&ver_17) {
         return (CompatStatus::Compatible, None);
       }
       return (CompatStatus::Partial, Some(format!("Upgrade Node.js to satisfy {}", range)));
@@ -765,7 +766,7 @@ mod tests {
     let dir = temp_dir();
     let src = dir.join("src");
     fs::create_dir_all(&src).unwrap();
-    fs::write(src.join("server.js"), "require('child_process')").unwrap();
+    fs::write(src.join("server.js"), "require('napi')").unwrap();
     write_package_json(&dir, r#"{"name":"test"}"#);
     let report = CompatChecker::check_project(&dir).expect("Check failed");
     assert!(!report.suggestions.is_empty());
