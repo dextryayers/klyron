@@ -1,18 +1,22 @@
-# The MIT License (MIT)
+MIT License
+===========
 
-**Copyright © 2026 [Klyron Contributors](https://github.com/aniipid/klyronjs)**
+*Copyright © 2026 [Dextry Ayers](https://github.com/dextryayers) & Contributors*
 
 ---
 
-Permission is hereby granted, **free of charge**, to any person obtaining a copy
-of this software and associated documentation files (the **"Software"**), to deal
-in the Software **without restriction**, including without limitation the rights
-to **use**, **copy**, **modify**, **merge**, **publish**, **distribute**, **sublicense**,
-and/or **sell** copies of the Software, and to permit persons to whom the
-Software is furnished to do so, subject to the following conditions:
+### ✅ You are free to:
 
-### The above copyright notice and this permission notice
-shall be included in all copies or substantial portions of the Software.
+- **Use** this software for any purpose, personal or commercial
+- **Modify** it to fit your needs
+- **Distribute** copies, modified versions, or incorporated it into your own projects
+- **Sublicense** under different terms if you wish
+- **Sell** copies as part of your own software
+
+### 📋 Under one condition:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
 ---
 
