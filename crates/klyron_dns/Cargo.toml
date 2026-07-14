@@ -6,3 +6,4 @@ license.workspace = true
 
 [dependencies]
 anyhow = "1"
+hickory-resolver = "0.24"
