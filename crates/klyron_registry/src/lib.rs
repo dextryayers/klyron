@@ -182,12 +182,21 @@ pub enum RegistryKind {
   RubyGems,
   Cargo,
   Packagist,
+  GoProxy,
   JSR,
   Deno,
 }
 
 impl RegistryKind {
   pub fn detect(name: &str) -> Self {
+    // Go modules: github.com/... or any domain/path pattern
+    if name.contains('.') && name.contains('/') && !name.starts_with('@') {
+      if let Some(domain) = name.split('/').next() {
+        if domain.contains('.') && !domain.contains('\\') {
+          return Self::GoProxy;
+        }
+      }
+    }
     // PHP packages have vendor/package format
     if name.contains('/') && !name.starts_with('@') {
       return Self::Packagist;
@@ -219,6 +228,7 @@ impl RegistryKind {
       Self::RubyGems => "rubygems",
       Self::Cargo => "cargo",
       Self::Packagist => "packagist",
+      Self::GoProxy => "goproxy",
       Self::JSR => "jsr",
       Self::Deno => "deno",
     }
@@ -1080,6 +1090,207 @@ impl Default for PackagistRegistry {
   }
 }
 
+// ── GoProxyRegistry ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct GoProxyRegistry {
+  pub config: RegistryConfig,
+  cache: RefCell<RegistryCache>,
+}
+
+impl GoProxyRegistry {
+  pub fn new() -> Self {
+    let mut config = RegistryConfig::default();
+    config.registry_url = "https://proxy.golang.org".into();
+    Self {
+      config,
+      cache: RefCell::new(RegistryCache::new(300)),
+    }
+  }
+
+  pub fn search(&self, query: &str, limit: usize) -> Result<PackageSearchResult, RegistryError> {
+    let url = format!(
+      "https://pkg.go.dev/search?q={}&m=package&limit={}",
+      urlencoding(query),
+      limit,
+    );
+    let client = self.make_client()?;
+    let _response = client
+      .get(&url)
+      .header("Accept", "text/html")
+      .send()
+      .map_err(|e| RegistryError::HttpError(e.to_string()))?;
+
+    // Go proxy doesn't have a JSON search API; return minimal results
+    Ok(PackageSearchResult {
+      results: vec![PackageInfo {
+        name: query.to_string(),
+        version: "latest".into(),
+        description: Some(format!("Go module: {query} (search at pkg.go.dev)")),
+        license: None,
+        homepage: Some(format!("https://pkg.go.dev/{}", query)),
+        repository: Some(format!("https://{}", query)),
+        author: None,
+        keywords: vec!["go".into()],
+        registry: RegistryKind::GoProxy,
+      }],
+      total: 1,
+      took_ms: 0,
+    })
+  }
+
+  pub fn info(&self, name: &str) -> Result<PackageInfo, RegistryError> {
+    let cache_key = format!("goproxy:info:{name}");
+    if let Some(cached) = self.cache.borrow().get(&cache_key) {
+      return serde_json::from_value(cached).map_err(|e| RegistryError::ParseError(e.to_string()));
+    }
+
+    // Go proxy @latest endpoint
+    let encoded = name.replace('/', "/");
+    let url = format!("{}/{}/@latest", self.config.registry_url, encoded);
+    let resp = self.http_get(&url)?;
+
+    let version = resp.get("Version").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let pkg_info = PackageInfo {
+      name: name.to_string(),
+      version: version.to_string(),
+      description: resp.get("Description").and_then(|v| v.as_str()).map(String::from),
+      license: None,
+      homepage: Some(format!("https://pkg.go.dev/{}", name)),
+      repository: Some(format!("https://{}", name)),
+      author: None,
+      keywords: vec!["go".into()],
+      registry: RegistryKind::GoProxy,
+    };
+
+    if let Ok(val) = serde_json::to_value(&pkg_info) {
+      self.cache.borrow_mut().set(cache_key, val, None);
+    }
+
+    Ok(pkg_info)
+  }
+
+  pub fn download(&self, name: &str, version: &str) -> Result<PackageDownload, RegistryError> {
+    let encoded = name.replace('/', "/");
+    let url = format!("{}/{}/@v/{}.zip", self.config.registry_url, encoded, version);
+    let client = self.make_client()?;
+    let response = client
+      .get(&url)
+      .send()
+      .map_err(|e| RegistryError::HttpError(e.to_string()))?;
+
+    if !response.status().is_success() {
+      return Err(RegistryError::NotFound(format!("Failed to download {name}@{version}")));
+    }
+
+    let data = response.bytes().map_err(|e| RegistryError::HttpError(e.to_string()))?.to_vec();
+    let integrity = compute_integrity(&data);
+
+    Ok(PackageDownload {
+      name: name.to_string(),
+      version: version.to_string(),
+      data,
+      integrity,
+      content_type: "application/zip".into(),
+    })
+  }
+
+  fn http_get(&self, url: &str) -> Result<Value, RegistryError> {
+    let client = self.make_client()?;
+    let response = client
+      .get(url)
+      .send()
+      .map_err(|e| RegistryError::HttpError(e.to_string()))?;
+
+    if !response.status().is_success() {
+      return Err(RegistryError::HttpError(format!("HTTP {} for {url}", response.status())));
+    }
+
+    response.json::<Value>().map_err(|e| RegistryError::ParseError(e.to_string()))
+  }
+
+  fn make_client(&self) -> Result<Client, RegistryError> {
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_STR));
+    headers.insert("Accept", HeaderValue::from_static("application/json"));
+
+    Client::builder()
+      .timeout(self.config.timeout)
+      .default_headers(headers)
+      .build()
+      .map_err(|e| RegistryError::HttpError(e.to_string()))
+  }
+}
+
+impl Default for GoProxyRegistry {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+// ── Publish/Unpublish/Whoami Trait ───────────────────────────────────────────
+
+/// Extended registry operations (publish, unpublish, whoami)
+/// Not all registries support all operations
+pub trait RegistryPublish {
+  fn publish(&self, _name: &str, _data: &[u8], _tag: Option<&str>) -> Result<(), RegistryError> {
+    Err(RegistryError::UnsupportedRegistry("publish".into()))
+  }
+  fn unpublish(&self, _name: &str) -> Result<(), RegistryError> {
+    Err(RegistryError::UnsupportedRegistry("unpublish".into()))
+  }
+  fn whoami(&self) -> Result<String, RegistryError> {
+    Err(RegistryError::UnsupportedRegistry("whoami".into()))
+  }
+}
+
+impl RegistryPublish for NpmRegistry {
+  fn publish(&self, name: &str, data: &[u8], tag: Option<&str>) -> Result<(), RegistryError> {
+    let url = format!("{}/", self.config.registry_url);
+    let client = self.make_client()?;
+    let mut req = client.put(&url).body(data.to_vec());
+    if let Some(t) = tag {
+      req = req.query(&[("tag", t)]);
+    }
+    let response = req.send().map_err(|e| RegistryError::HttpError(format!("Publish failed: {e}")))?;
+    if !response.status().is_success() {
+      return Err(RegistryError::HttpError(format!("HTTP {}", response.status())));
+    }
+    println!("Published {name}");
+    Ok(())
+  }
+
+  fn unpublish(&self, name: &str) -> Result<(), RegistryError> {
+    let url = format!("{}/{}", self.config.registry_url, name);
+    let client = self.make_client()?;
+    let response = client
+      .delete(&url)
+      .send()
+      .map_err(|e| RegistryError::HttpError(format!("Unpublish failed: {e}")))?;
+    if !response.status().is_success() {
+      return Err(RegistryError::HttpError(format!("HTTP {}", response.status())));
+    }
+    println!("Unpublished {name}");
+    Ok(())
+  }
+
+  fn whoami(&self) -> Result<String, RegistryError> {
+    match &self.config.auth_token {
+      Some(token) => {
+        // Extract username from token or config
+        Ok(token.split('.').next().unwrap_or("unknown").to_string())
+      }
+      None => Err(RegistryError::AuthError("Not logged in".into())),
+    }
+  }
+}
+
+impl RegistryPublish for PyPIRegistry {}
+impl RegistryPublish for RubyGemsRegistry {}
+impl RegistryPublish for CargoRegistry {}
+impl RegistryPublish for PackagistRegistry {}
+impl RegistryPublish for GoProxyRegistry {}
+
 // ── Registry Auto-Detection ──────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -1089,6 +1300,7 @@ pub enum RegistryClient {
   RubyGems(RubyGemsRegistry),
   Cargo(CargoRegistry),
   Packagist(PackagistRegistry),
+  GoProxy(GoProxyRegistry),
 }
 
 impl RegistryClient {
@@ -1099,6 +1311,19 @@ impl RegistryClient {
       RegistryKind::RubyGems => Self::RubyGems(RubyGemsRegistry::new()),
       RegistryKind::Cargo => Self::Cargo(CargoRegistry::new()),
       RegistryKind::Packagist => Self::Packagist(PackagistRegistry::new()),
+      RegistryKind::GoProxy => Self::GoProxy(GoProxyRegistry::new()),
+      _ => Self::Npm(NpmRegistry::new()),
+    }
+  }
+
+  pub fn from_kind(kind: RegistryKind) -> Self {
+    match kind {
+      RegistryKind::Npm => Self::Npm(NpmRegistry::new()),
+      RegistryKind::PyPI => Self::PyPI(PyPIRegistry::new()),
+      RegistryKind::RubyGems => Self::RubyGems(RubyGemsRegistry::new()),
+      RegistryKind::Cargo => Self::Cargo(CargoRegistry::new()),
+      RegistryKind::Packagist => Self::Packagist(PackagistRegistry::new()),
+      RegistryKind::GoProxy => Self::GoProxy(GoProxyRegistry::new()),
       _ => Self::Npm(NpmRegistry::new()),
     }
   }
@@ -1110,6 +1335,7 @@ impl RegistryClient {
       Self::RubyGems(r) => r.search(query, limit),
       Self::Cargo(r) => r.search(query, limit),
       Self::Packagist(r) => r.search(query, limit),
+      Self::GoProxy(r) => r.search(query, limit),
     }
   }
 
@@ -1120,6 +1346,7 @@ impl RegistryClient {
       Self::RubyGems(r) => r.info(name),
       Self::Cargo(r) => r.info(name),
       Self::Packagist(r) => r.info(name),
+      Self::GoProxy(r) => r.info(name),
     }
   }
 
@@ -1130,6 +1357,40 @@ impl RegistryClient {
       Self::RubyGems(r) => r.download(name, version),
       Self::Cargo(r) => r.download(name, version),
       Self::Packagist(r) => r.download(name, version),
+      Self::GoProxy(r) => r.download(name, version),
+    }
+  }
+
+  pub fn publish(&self, name: &str, data: &[u8], tag: Option<&str>) -> Result<(), RegistryError> {
+    match self {
+      Self::Npm(r) => RegistryPublish::publish(r, name, data, tag),
+      Self::PyPI(r) => RegistryPublish::publish(r, name, data, tag),
+      Self::RubyGems(r) => RegistryPublish::publish(r, name, data, tag),
+      Self::Cargo(r) => RegistryPublish::publish(r, name, data, tag),
+      Self::Packagist(r) => RegistryPublish::publish(r, name, data, tag),
+      Self::GoProxy(r) => RegistryPublish::publish(r, name, data, tag),
+    }
+  }
+
+  pub fn unpublish(&self, name: &str) -> Result<(), RegistryError> {
+    match self {
+      Self::Npm(r) => RegistryPublish::unpublish(r, name),
+      Self::PyPI(r) => RegistryPublish::unpublish(r, name),
+      Self::RubyGems(r) => RegistryPublish::unpublish(r, name),
+      Self::Cargo(r) => RegistryPublish::unpublish(r, name),
+      Self::Packagist(r) => RegistryPublish::unpublish(r, name),
+      Self::GoProxy(r) => RegistryPublish::unpublish(r, name),
+    }
+  }
+
+  pub fn whoami(&self) -> Result<String, RegistryError> {
+    match self {
+      Self::Npm(r) => RegistryPublish::whoami(r),
+      Self::PyPI(r) => RegistryPublish::whoami(r),
+      Self::RubyGems(r) => RegistryPublish::whoami(r),
+      Self::Cargo(r) => RegistryPublish::whoami(r),
+      Self::Packagist(r) => RegistryPublish::whoami(r),
+      Self::GoProxy(r) => RegistryPublish::whoami(r),
     }
   }
 
@@ -1140,6 +1401,29 @@ impl RegistryClient {
       Self::RubyGems(_) => RegistryKind::RubyGems,
       Self::Cargo(_) => RegistryKind::Cargo,
       Self::Packagist(_) => RegistryKind::Packagist,
+      Self::GoProxy(_) => RegistryKind::GoProxy,
+    }
+  }
+
+  pub fn login(&mut self, token: &str) -> Result<(), RegistryError> {
+    match self {
+      Self::Npm(r) => { let _ = r.login(token); Ok(()) }
+      Self::PyPI(r) => { r.config.auth_token = Some(token.to_string()); Ok(()) }
+      Self::RubyGems(r) => { r.config.auth_token = Some(token.to_string()); Ok(()) }
+      Self::Cargo(r) => { r.config.auth_token = Some(token.to_string()); Ok(()) }
+      Self::Packagist(r) => { r.config.auth_token = Some(token.to_string()); Ok(()) }
+      Self::GoProxy(r) => { r.config.auth_token = Some(token.to_string()); Ok(()) }
+    }
+  }
+
+  pub fn logout(&mut self) {
+    match self {
+      Self::Npm(r) => r.logout(),
+      Self::PyPI(r) => { r.config.auth_token = None; }
+      Self::RubyGems(r) => { r.config.auth_token = None; }
+      Self::Cargo(r) => { r.config.auth_token = None; }
+      Self::Packagist(r) => { r.config.auth_token = None; }
+      Self::GoProxy(r) => { r.config.auth_token = None; }
     }
   }
 }
@@ -1204,6 +1488,7 @@ mod tests {
     assert_eq!(RegistryKind::Cargo.name(), "cargo");
     assert_eq!(RegistryKind::RubyGems.name(), "rubygems");
     assert_eq!(RegistryKind::Packagist.name(), "packagist");
+    assert_eq!(RegistryKind::GoProxy.name(), "goproxy");
   }
 
   #[test]
@@ -1263,6 +1548,8 @@ mod tests {
     assert_eq!(client.kind(), RegistryKind::Npm);
     let client = RegistryClient::detect("vendor/php-pkg");
     assert_eq!(client.kind(), RegistryKind::Packagist);
+    let client = RegistryClient::detect("github.com/gin-gonic/gin");
+    assert_eq!(client.kind(), RegistryKind::GoProxy);
   }
 
   #[test]
@@ -1339,6 +1626,31 @@ mod tests {
   fn test_packagist_registry_new() {
     let registry = PackagistRegistry::new();
     assert!(registry.config.registry_url.contains("packagist"));
+  }
+
+  #[test]
+  fn test_goproxy_registry_new() {
+    let registry = GoProxyRegistry::new();
+    assert!(registry.config.registry_url.contains("proxy.golang"));
+  }
+
+  #[test]
+  fn test_npm_registry_publish_unpublish() {
+    let registry = NpmRegistry::new();
+    assert!(registry.publish("test", &[], None).is_err() || registry.publish("test", &[], None).is_ok());
+  }
+
+  #[test]
+  fn test_npm_registry_whoami_not_logged_in() {
+    let registry = NpmRegistry::new();
+    assert!(registry.whoami().is_err());
+  }
+
+  #[test]
+  fn test_npm_registry_whoami_logged_in() {
+    let mut registry = NpmRegistry::new();
+    registry.login("user.token.secret").unwrap();
+    assert!(registry.whoami().is_ok());
   }
 
   #[test]

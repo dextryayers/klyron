@@ -1,0 +1,24 @@
+{
+  "name": "@klyron/sdk",
+  "version": "0.1.0",
+  "description": "Klyron Runtime SDK - Universal Polyglot Runtime API bindings for Node.js and browser",
+  "main": "src/index.js",
+  "browser": "src/browser.js",
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "require": "./src/index.js"
+    },
+    "./fs": "./src/fs.js",
+    "./http": "./src/http.js",
+    "./process": "./src/process.js",
+    "./env": "./src/env.js",
+    "./runtime": "./src/runtime.js"
+  },
+  "keywords": ["klyron", "runtime", "polyglot", "sdk"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anomalyco/klyronjs"
+  }
+}

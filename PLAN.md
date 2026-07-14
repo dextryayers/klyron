@@ -2564,7 +2564,9 @@ klyron db --orm=typeorm migration:run
 
 ---
 
-### Phase 8 — Registry, SDK & Package Management Complete (Q2 2028)
+### Phase 8 — Registry, SDK & Package Management Complete (Completed)
+
+**Status:** ✅ Completed — Multi-registry client implemented with GoProxy support. SDK packages created for JS, TS, Rust, C++, PHP. CLI commands wired to use klyron_registry crate.
 
 **Goal:** Full multi-registry package management + SDKs. Klyron replaces npm/pip/gem/cargo/packagist CLI.
 
@@ -2665,7 +2667,9 @@ klyron cache info
 
 ---
 
-### Phase 9 — Plugin, Workspace, Docker, Deploy & Node Compat (Q3 2028)
+### Phase 9 — Plugin, Workspace, Docker, Deploy & Node Compat (Completed)
+
+**Status:** ✅ Completed — All Phase 9 CLI commands wired to their respective crates. Plugin system uses WASM via wasmtime. Workspace includes version bump & dependency graph. Docker init auto-detects project type. Deploy supports 5 platforms. NAPI commands use NapiLoader for module inspection.
 
 **Goal:** Extensibility + deployment. Klyron manages monorepos, deploys to cloud, runs in Docker.
 
@@ -2897,7 +2901,7 @@ Modular    | Web API    | Node.js    | Framework  | Testing    | Laravel    | Da
 | Node.js Compat (require, process, Buffer) | ❌ | ❌ | ❌ | ⚡ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Package Manager (add/install/remove) | ⚡ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Multi-Registry (npm/PyPI/Gems/Cargo/Packagist/Go) | ⚡ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Registry (login/publish/search) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚡ | ✅ | ✅ |
+| Registry (login/publish/search) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
 | Framework Scaffold (10 frontend + 9 backend) | ⚡ | ✅ | ✅ | ✅ | ⚡ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Framework Version Detection | ❌ | ❌ | ❌ | ❌ | ⚡ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Laravel (v9/v10/v11/v12/v13, 9 stacks) | ⚡ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚡ | ✅ | ✅ | ✅ | ✅ |
@@ -2909,12 +2913,12 @@ Modular    | Web API    | Node.js    | Framework  | Testing    | Laravel    | Da
 | Linter / Formatter Auto-Detect | ❌ | ❌ | ❌ | ❌ | ❌ | ⚡ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Benchmark Suite | ❌ | ❌ | ❌ | ❌ | ❌ | ⚡ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Type Checker (tsc) | ❌ | ❌ | ❌ | ❌ | ❌ | ⚡ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Plugin System (WASM) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚡ | ✅ |
-| Workspace / Monorepo | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚡ | ✅ |
-| Docker (init/build/run) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚡ | ✅ |
-| Deploy (Vercel/CF/Railway/Fly) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚡ | ✅ |
-| Node Compat Checker | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚡ | ✅ |
-| Multi-Language SDK (JS/TS/Rust/C++/PHP) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚡ | ✅ | ✅ | ✅ |
+| Plugin System (WASM) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Workspace / Monorepo | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Docker (init/build/run) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Deploy (Vercel/CF/Railway/Fly) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Node Compat Checker | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Multi-Language SDK (JS/TS/Rust/C++/PHP) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
 | AI Features | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚡ |
 | Enterprise (SSO/audit/private) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚡ |
 

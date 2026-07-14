@@ -1,0 +1,21 @@
+{
+    "name": "klyron/sdk",
+    "description": "PHP SDK for the Klyron runtime - universal polyglot runtime",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Klyron\\": "src/"
+        }
+    },
+    "require": {
+        "php": ">=8.1",
+        "ext-json": "*"
+    },
+    "keywords": ["klyron", "runtime", "php", "sdk"],
+    "authors": [
+        {
+            "name": "Klyron Contributors"
+        }
+    ]
+}

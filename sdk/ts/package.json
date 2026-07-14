@@ -1,0 +1,20 @@
+{
+  "name": "@klyron/types",
+  "version": "0.1.0",
+  "description": "Klyron TypeScript type definitions",
+  "types": "src/index.d.ts",
+  "main": "src/index.d.ts",
+  "exports": {
+    ".": "./src/index.d.ts",
+    "./fs": "./src/fs.d.ts",
+    "./http": "./src/http.d.ts",
+    "./process": "./src/process.d.ts",
+    "./runtime": "./src/runtime.d.ts"
+  },
+  "keywords": ["klyron", "typescript", "types", "sdk"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anomalyco/klyronjs"
+  }
+}

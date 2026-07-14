@@ -17,6 +17,10 @@ klyron_deploy = { path = "../klyron_deploy" }
 klyron_docker = { path = "../klyron_docker" }
 klyron_template = { path = "../klyron_template" }
 klyron_workspace = { path = "../klyron_workspace" }
+klyron_registry = { path = "../klyron_registry" }
+klyron_pm = { path = "../klyron_pm" }
+klyron_plugin = { path = "../klyron_plugin" }
+klyron_napi = { path = "../klyron_napi" }
 klyron_watcher = { path = "../klyron_watcher" }
 klyron_bundler = { path = "../klyron_bundler" }
 klyron_runtime = { path = "../klyron_runtime" }
@@ -45,4 +49,6 @@ tokio = { version = "1", features = ["full"] }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["fs"] }
 clap_complete = "4.5"
+toml = { workspace = true }
 dirs = "5"
+ureq = "2"
