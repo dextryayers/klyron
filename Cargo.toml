@@ -63,7 +63,7 @@ license = "MIT"
 authors = ["Klyron Contributors"]
 description = "Klyron - Universal Polyglot Runtime for JavaScript, TypeScript, PHP, Python, Ruby, Go, Zig, Rust, C, C++"
 homepage = "https://klyron.dev"
-repository = "https://github.com/aniipid/klyronjs"
+repository = "https://github.com/dextryayers/klyron"
 readme = "README.md"
 
 [workspace.dependencies]

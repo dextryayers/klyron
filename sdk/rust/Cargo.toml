@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Rust SDK for the Klyron runtime - build plugins and extensions"
 license = "MIT"
-repository = "https://github.com/anomalyco/klyronjs"
+repository = "https://github.com/dextryayers/klyron"
 keywords = ["klyron", "plugin", "runtime", "sdk"]
 
 [dependencies]

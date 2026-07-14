@@ -2941,8 +2941,8 @@ Modular    | Web API    | Node.js    | Framework  | Testing    | Laravel    | Da
 ### 17.2 Development Setup
 
 ```bash
-git clone https://github.com/anomalyco/klyronjs
-cd klyronjs
+git clone https://github.com/dextryayers/klyron
+cd klyron
 
 # Build
 cargo build -p klyron

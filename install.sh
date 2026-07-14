@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="aniipid/klyronjs"
+REPO="dextryayers/klyron"
 BIN_NAME="klyron"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 

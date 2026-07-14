@@ -54,7 +54,7 @@ pub fn run_upgrade() -> anyhow::Result<()> {
     if is_cargo {
         eprintln!("  Detected: cargo install");
         let result = Command::new("cargo")
-            .args(["install", "--git", "https://github.com/anomalyco/klyronjs", "klyron", "--force"])
+            .args(["install", "--git", "https://github.com/dextryayers/klyron", "klyron", "--force"])
             .status();
         match result {
             Ok(s) if s.success() => { println!("✅ Klyron upgraded successfully"); Ok(()) }
@@ -83,7 +83,7 @@ pub fn run_upgrade() -> anyhow::Result<()> {
     } else {
         eprintln!("  Using cargo install (default)...");
         let result = Command::new("cargo")
-            .args(["install", "--git", "https://github.com/anomalyco/klyronjs", "klyron", "--force"])
+            .args(["install", "--git", "https://github.com/dextryayers/klyron", "klyron", "--force"])
             .status();
         match result {
             Ok(s) if s.success() => { println!("✅ Klyron upgraded successfully"); Ok(()) }

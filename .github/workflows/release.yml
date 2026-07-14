@@ -122,7 +122,7 @@ jobs:
 
             ### Installation
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/aniipid/klyronjs/main/install.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/dextryayers/klyron/main/install.sh | bash
             ```
 
             ### What's New
