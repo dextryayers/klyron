@@ -1,0 +1,14 @@
+// klyron_runtime — Core runtime
+export * from "./types.ts";
+export * from "./client.ts";
+export * from "./errors.ts";
+export * from "./config.ts";
+export * from "./utils.ts";
+
+import { Klyron::RuntimeClient } from "./client.ts";
+import { loadConfig } from "./config.ts";
+
+export function createClient(endpoint: string, configPath?: string): Klyron::RuntimeClient {
+  const _config = loadConfig(configPath);
+  return new Klyron::RuntimeClient(endpoint);
+}

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use clap::Args;
 use klyron_adapter::{AdapterRegistry, ScaffoldOptions};
 use klyron_adapter::adapters::register_all;
@@ -11,9 +12,74 @@ pub struct ScaffoldArgs {
     pub dir: PathBuf,
     #[arg(long)]
     pub version: Option<String>,
+    #[arg(long)]
+    pub external: bool,
+    #[arg(long)]
+    pub stack: Option<String>,
 }
 
-fn scaffold_via_adapter(args: &ScaffoldArgs, framework: &str) -> anyhow::Result<()> {
+pub fn scaffold_via_external_cli(framework: &str, args: &ScaffoldArgs) -> anyhow::Result<()> {
+    let project_dir = args.dir.join(&args.name);
+    if project_dir.exists() {
+        anyhow::bail!("Directory exists: {}", project_dir.display());
+    }
+    let name = &args.name;
+    let dir = &args.dir;
+    let version_flag = args.version.as_deref().map(|v| format!("--version {v}")).unwrap_or_default();
+
+    let (cmd, base_args): (&str, Vec<String>) = match framework {
+        "react" => ("npx", vec!["create-vite@latest".into(), name.into(), "--template".into(), "react-ts".into()]),
+        "vue" => ("npm", vec!["create".into(), "vue@latest".into(), name.into()]),
+        "next" => {
+            let mut a = vec!["create-next-app@latest".into(), name.into()];
+            if let Some(v) = &args.version { a.push("--version".into()); a.push(v.into()); }
+            ("npx", a)
+        }
+        "astro" => ("npm", vec!["create".into(), "astro@latest".into(), name.into()]),
+        "nuxt" => ("npx", vec!["nuxi@latest".into(), "init".into(), name.into()]),
+        "sveltekit" => ("npm", vec!["create".into(), "svelte@latest".into(), name.into()]),
+        "remix" => ("npx", vec!["create-remix@latest".into(), name.into()]),
+        "angular" => ("ng", vec!["new".into(), name.into()]),
+        "express" => {
+            std::fs::create_dir_all(&project_dir)?;
+            std::fs::write(project_dir.join("package.json"), format!(r#"{{"name":"{name}","private":true,"scripts":{{"start":"node index.js"}},"dependencies":{{"express":"^4.21"}}}}"#))?;
+            std::fs::write(project_dir.join("index.js"), r#"const express = require('express'); const app = express(); app.get('/', (req, res) => res.send('Hello!')); app.listen(3000);"#)?;
+            println!("Express app created: {}", project_dir.display());
+            return Ok(());
+        }
+        "fastify" => ("npm", vec!["create".into(), "fastify@latest".into(), name.into()]),
+        "nest" => ("nest", vec!["new".into(), name.into()]),
+        "hono" => ("npm", vec!["create".into(), "hono@latest".into(), name.into()]),
+        "solid" => ("npm", vec!["create".into(), "solid@latest".into(), name.into()]),
+        "qwik" => ("npm", vec!["create".into(), "qwik@latest".into(), name.into()]),
+        "preact" => ("npx", vec!["create-vite@latest".into(), name.into(), "--template".into(), "preact-ts".into()]),
+        "svelte" => ("npx", vec!["create-vite@latest".into(), name.into(), "--template".into(), "svelte-ts".into()]),
+        "lit" => ("npx", vec!["create-vite@latest".into(), name.into(), "--template".into(), "lit-ts".into()]),
+        "laravel" => ("composer", vec!["create-project".into(), "laravel/laravel".into(), name.into()]),
+        "django" => ("django-admin", vec!["startproject".into(), name.into()]),
+        "rails" => ("rails", vec!["new".into(), name.into()]),
+        _ => anyhow::bail!("Unknown framework for external CLI: {framework}"),
+    };
+
+    let status = Command::new(cmd)
+        .args(&base_args)
+        .current_dir(dir)
+        .status()
+        .map_err(|e| anyhow::anyhow!("Failed to run {cmd}: {e}"))?;
+
+    if !status.success() {
+        anyhow::bail!("{cmd} exited with code {}", status);
+    }
+
+    println!("{} app created via external CLI: {}", framework, project_dir.display());
+    Ok(())
+}
+
+pub fn scaffold_via_adapter(args: &ScaffoldArgs, framework: &str) -> anyhow::Result<()> {
+    if args.external {
+        return scaffold_via_external_cli(framework, args);
+    }
+
     let mut registry = AdapterRegistry::new();
     register_all(&mut registry);
 
@@ -26,10 +92,15 @@ fn scaffold_via_adapter(args: &ScaffoldArgs, framework: &str) -> anyhow::Result<
         anyhow::bail!("Directory exists: {}", project_dir.display());
     }
 
+    let mut template_vars = HashMap::from([("name".to_string(), args.name.clone())]);
+    if let Some(stack) = &args.stack {
+        template_vars.insert("stack".to_string(), stack.clone());
+    }
+
     let options = ScaffoldOptions {
         dir: args.dir.clone(),
         version: args.version.clone(),
-        template_vars: HashMap::from([("name".to_string(), args.name.clone())]),
+        template_vars,
     };
 
     let rt = tokio::runtime::Runtime::new()?;
@@ -142,6 +213,9 @@ pub fn scaffold_svelte(args: &ScaffoldArgs) -> anyhow::Result<()> {
 }
 
 pub fn scaffold_tauri(args: &ScaffoldArgs) -> anyhow::Result<()> {
+    if args.external {
+        return scaffold_via_external_cli("tauri", args);
+    }
     let pd = project_dir(args);
     if pd.exists() {
         anyhow::bail!("Directory exists: {}", pd.display());
@@ -214,6 +288,9 @@ fn main() { tauri_app::run(); }"#,
 }
 
 pub fn scaffold_leptos(args: &ScaffoldArgs) -> anyhow::Result<()> {
+    if args.external {
+        return scaffold_via_external_cli("leptos", args);
+    }
     let pd = project_dir(args);
     if pd.exists() {
         anyhow::bail!("Directory exists: {}", pd.display());

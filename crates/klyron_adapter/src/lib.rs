@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub mod adapters;
+pub mod js_versions;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,9 @@ pub enum FrameworkKind {
     Backend,
     Fullstack,
     Polyglot,
+    MetaFramework,
+    StaticSiteGenerator,
+    ApiFramework,
 }
 
 #[async_trait]

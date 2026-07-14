@@ -16,8 +16,8 @@ impl FrameworkAdapter for HonoAdapter {
             .map(|c| c.contains("\"hono\"")).unwrap_or(false)
     }
 
-    fn supported_versions(&self) -> Vec<&'static str> { vec!["4.6", "5.0"] }
-    fn default_version(&self) -> &'static str { "4.6" }
+    fn supported_versions(&self) -> Vec<&'static str> { vec!["4.6", "4.7"] }
+    fn default_version(&self) -> &'static str { "4.7" }
     fn kind(&self) -> FrameworkKind { FrameworkKind::Backend }
 
     async fn dev(&self, dir: &Path, port: Option<u16>) -> Result<()> {
@@ -47,6 +47,12 @@ impl FrameworkAdapter for HonoAdapter {
     }
 
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
+        if options.template_vars.get("external").map(|s| s == "true").unwrap_or(false) {
+            let status = std::process::Command::new("npx")
+                .args(["create-hono@latest", name]).current_dir(&options.dir).status()?;
+            if !status.success() { anyhow::bail!("External scaffolding failed"); }
+            return Ok(());
+        }
         let project_dir = options.dir.join(name);
         std::fs::create_dir_all(&project_dir)?;
         std::fs::create_dir_all(project_dir.join("src/routes"))?;
@@ -55,86 +61,36 @@ impl FrameworkAdapter for HonoAdapter {
 
         std::fs::write(project_dir.join("package.json"),
             klyron_template::TemplateEngine::render(r#"{
-  "name": "{{ name }}",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
-    "test": "vitest run",
-    "lint": "eslint .",
-    "format": "prettier --write ."
-  },
-  "dependencies": {
-    "hono": "^4.6.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.6.0",
-    "tsx": "^4.19.0",
-    "vitest": "^2.1.0",
-    "eslint": "^9.0.0",
-    "prettier": "^3.4.0"
-  }
+  "name": "{{ name }}", "version": "1.0.0", "private": true, "type": "module",
+  "scripts": { "dev": "tsx watch src/index.ts", "start": "tsx src/index.ts", "test": "vitest run", "lint": "eslint .", "format": "prettier --write ." },
+  "dependencies": { "hono": "^4.7.0" },
+  "devDependencies": { "typescript": "^5.7.0", "tsx": "^4.19.0", "vitest": "^3.0.0", "eslint": "^9.20.0", "prettier": "^3.5.0" }
 }"#, vars))?;
 
         std::fs::write(project_dir.join("tsconfig.json"),
-            r#"{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "skipLibCheck": true,
-    "noEmit": true,
-    "isolatedModules": true
-  },
-  "include": ["src"]
-}"#)?;
+            r#"{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"bundler","strict":true,"skipLibCheck":true,"noEmit":true,"isolatedModules":true},"include":["src"]}"#)?;
 
         std::fs::write(project_dir.join("src/index.ts"),
             klyron_template::TemplateEngine::render(r#"import { Hono } from 'hono'
 import routes from './routes/index.js'
-
 const app = new Hono()
-const port = process.env.PORT || 3000
-
 app.route('/', routes)
-
-export default {
-  port,
-  fetch: app.fetch,
-}
-
-console.log(`{{ name }} running on http://localhost:${port}`)
+export default { port: process.env.PORT || 3000, fetch: app.fetch }
+console.log(`{{ name }} running on http://localhost:${process.env.PORT || 3000}`)
 "#, vars))?;
 
         std::fs::write(project_dir.join("src/routes/index.ts"),
             r#"import { Hono } from 'hono'
-
 const router = new Hono()
-
 router.get('/', (c) => c.json({ message: 'Hello World' }))
-
-export default router
-"#)?;
+export default router"#)?;
 
         std::fs::write(project_dir.join(".gitignore"), "node_modules\n.DS_Store\n")?;
-        std::fs::write(project_dir.join(".prettierrc"),
-            r#"{"semi": true, "singleQuote": true, "tabWidth": 2, "trailingComma": "es5", "printWidth": 100}"#)?;
+        std::fs::write(project_dir.join(".prettierrc"), r#"{"semi": true, "singleQuote": true, "tabWidth": 2, "trailingComma": "es5", "printWidth": 100}"#)?;
         std::fs::write(project_dir.join("eslint.config.js"),
-            r#"import js from '@eslint/js'
-import tseslint from 'typescript-eslint'
-export default tseslint.config(js.configs.recommended, ...tseslint.configs.recommended, { ignores: ['node_modules'] })"#)?;
+            r#"import js from '@eslint/js'\nimport tseslint from 'typescript-eslint'\nexport default tseslint.config(js.configs.recommended, ...tseslint.configs.recommended, { ignores: ['node_modules'] })"#)?;
         std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render(r#"# {{ name }}
-
-Hono API
-
-## Getting Started
-
-npm run dev
-"#, vars))?;
+            klyron_template::TemplateEngine::render(r#"# {{ name }}\nHono API\nnpm run dev"#, vars))?;
 
         Ok(())
     }

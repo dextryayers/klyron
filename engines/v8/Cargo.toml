@@ -1,0 +1,15 @@
+[package]
+name = "klyron-engine-v8"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+v8 = { version = "132", features = ["rusty_v8"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+name = "klyron_engine_v8"
+path = "src/lib.rs"

@@ -1,0 +1,23 @@
+#ifndef KLYRON_TEST_H
+#define KLYRON_TEST_H
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct {
+    bool enabled;
+    bool verbose;
+} klyron_test_config_t;
+
+uint32_t klyron_test_version(void);
+klyron_test_config_t klyron_test_config_default(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* KLYRON_TEST_H */

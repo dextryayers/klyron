@@ -5,8 +5,10 @@ pub mod scaffold_inline;
 pub(crate) use commands::helpers::*;
 pub(crate) use scaffold_inline::*;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, Args};
 use klyron_core::Runtime;
+use klyron_adapter::AdapterRegistry;
+use klyron_adapter::adapters::register_all;
 use std::path::{Path, PathBuf};
 use tracing_subscriber::EnvFilter;
 
@@ -15,6 +17,24 @@ use tracing_subscriber::EnvFilter;
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
+}
+
+#[derive(Args)]
+pub struct CreateArgs {
+    #[arg(long)]
+    pub list: bool,
+    #[arg(long)]
+    pub versions: bool,
+    pub framework: Option<String>,
+    #[arg(long)]
+    pub version: Option<String>,
+    pub name: Option<String>,
+    #[arg(short, long, default_value = ".")]
+    pub dir: PathBuf,
+    #[arg(long)]
+    pub external: bool,
+    #[arg(long)]
+    pub stack: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -38,6 +58,7 @@ pub enum Commands {
     Composer { #[command(flatten)] args: commands::artisan::ComposerArgs },
     Blade { #[command(flatten)] args: commands::artisan::BladeArgs },
     Tinker { #[command(flatten)] args: commands::artisan::TinkerArgs },
+    Create { #[command(flatten)] args: CreateArgs },
     CreateNextApp { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
     CreateReactApp { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
     CreateAngular { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
@@ -127,6 +148,68 @@ pub enum Commands {
     Completions { shell: clap_complete::Shell },
 }
 
+fn list_frameworks() {
+    let mut registry = AdapterRegistry::new();
+    register_all(&mut registry);
+    let mut names: Vec<&str> = registry.names().into_iter().collect();
+    names.sort();
+    println!("Available frameworks ({}):", names.len());
+    for name in names {
+        let adapter = registry.get(name).unwrap();
+        let versions = adapter.supported_versions();
+        let default = adapter.default_version();
+        println!("  {:<12} versions: {:?} (default: {})", name, versions, default);
+    }
+    println!();
+    println!("Additional frameworks available via --external:");
+    println!("  express, nest, django, rails, sveltekit, remix, angular");
+}
+
+fn handle_create(args: CreateArgs) -> anyhow::Result<()> {
+    if args.list {
+        list_frameworks();
+        return Ok(());
+    }
+
+    let framework = args.framework.as_deref().unwrap_or("");
+    if framework.is_empty() {
+        list_frameworks();
+        return Ok(());
+    }
+
+    if args.versions {
+        let mut registry = AdapterRegistry::new();
+        register_all(&mut registry);
+        if let Some(adapter) = registry.get(framework) {
+            let versions = adapter.supported_versions();
+            let default = adapter.default_version();
+            println!("{} supported versions: {:?} (default: {})", framework, versions, default);
+        } else {
+            println!("{} is not in the adapter registry. Use --external to scaffold via official CLI.", framework);
+        }
+        return Ok(());
+    }
+
+    let name = args.name.as_deref().unwrap_or("");
+    if name.is_empty() {
+        anyhow::bail!("Missing project name. Usage: klyron create <framework> <name> [options]");
+    }
+
+    let scaffold_args = commands::scaffold::ScaffoldArgs {
+        name: name.to_string(),
+        dir: args.dir,
+        version: args.version,
+        external: args.external,
+        stack: args.stack,
+    };
+
+    if args.external {
+        return commands::scaffold::scaffold_via_external_cli(framework, &scaffold_args);
+    }
+
+    commands::scaffold::scaffold_via_adapter(&scaffold_args, framework)
+}
+
 pub fn run_cli() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
@@ -210,6 +293,7 @@ pub fn dispatch_command(cmd: Commands) -> anyhow::Result<()> {
         Commands::Composer { args } => commands::artisan::run_composer(&args.args, args.project.as_deref()),
         Commands::Blade { args } => commands::artisan::run_blade(&args.view, args.data.as_deref(), args.project.as_deref()),
         Commands::Tinker { args } => commands::artisan::run_tinker(args.project.as_deref()),
+        Commands::Create { args } => handle_create(args),
         Commands::CreateNextApp { args } => commands::scaffold::scaffold_next(&args),
         Commands::CreateReactApp { args } => commands::scaffold::scaffold_react(&args),
         Commands::CreateAngular { args } => commands::scaffold::scaffold_angular(&args),
