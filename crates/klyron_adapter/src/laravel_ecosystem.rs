@@ -236,6 +236,86 @@ impl LaravelEcosystem {
         sail_cmd(dir, &args)
     }
 
+    // ── Additional Artisan Commands ────────────────────────────────────────
+
+    pub fn route_list(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["route:list"])
+    }
+
+    pub fn route_cache(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["route:cache"])
+    }
+
+    pub fn route_clear(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["route:clear"])
+    }
+
+    pub fn config_cache(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["config:cache"])
+    }
+
+    pub fn config_clear(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["config:clear"])
+    }
+
+    pub fn cache_clear(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["cache:clear"])
+    }
+
+    pub fn optimize(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["optimize"])
+    }
+
+    pub fn optimize_clear(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["optimize:clear"])
+    }
+
+    pub fn storage_link(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["storage:link"])
+    }
+
+    pub fn key_generate(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["key:generate"])
+    }
+
+    pub fn migrate(dir: &Path, fresh: bool, seed: bool) -> anyhow::Result<()> {
+        let mut args = vec!["migrate"];
+        if fresh { args.push("--force"); }
+        if seed { args.push("--seed"); }
+        Self::artisan(dir, &args)
+    }
+
+    pub fn migrate_fresh(dir: &Path, seed: bool) -> anyhow::Result<()> {
+        let mut args = vec!["migrate:fresh"];
+        if seed { args.push("--seed"); }
+        Self::artisan(dir, &args)
+    }
+
+    pub fn migrate_rollback(dir: &Path, step: Option<usize>) -> anyhow::Result<()> {
+        let mut args: Vec<String> = vec!["migrate:rollback".into()];
+        if let Some(s) = step { args.push("--step".into()); args.push(s.to_string()); }
+        let args_refs: Vec<&str> = args.iter().map(|a| a.as_str()).collect();
+        Self::artisan(dir, &args_refs)
+    }
+
+    pub fn db_seed(dir: &Path, class: Option<&str>) -> anyhow::Result<()> {
+        let mut args = vec!["db:seed"];
+        if let Some(c) = class { args.push("--class"); args.push(c); }
+        Self::artisan(dir, &args)
+    }
+
+    pub fn tinker(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["tinker"])
+    }
+
+    pub fn queue_work(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["queue:work"])
+    }
+
+    pub fn queue_table(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["queue:table"])
+    }
+
     // ── Artisan Make Commands ──────────────────────────────────────────────
 
     pub fn make_command(dir: &Path, name: &str) -> anyhow::Result<()> {
@@ -363,6 +443,98 @@ impl LaravelEcosystem {
         if unit { args.push("--unit"); }
         if pest { args.push("--pest"); }
         Self::artisan(dir, &args)
+    }
+
+    // ── Extended Make Commands ──────────────────────────────────────────────
+
+    pub fn make_exception(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["make:exception", name])
+    }
+
+    pub fn make_enum(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["make:enum", name])
+    }
+
+    pub fn make_interface(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["make:interface", name])
+    }
+
+    pub fn make_trait(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["make:trait", name])
+    }
+
+    pub fn make_class(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["make:class", name])
+    }
+
+    // ── Livewire ────────────────────────────────────────────────────────────
+
+    pub fn make_livewire(dir: &Path, name: &str, inline: bool) -> anyhow::Result<()> {
+        let mut args = vec!["make:livewire", name];
+        if inline { args.push("--inline"); }
+        Self::artisan(dir, &args)
+    }
+
+    pub fn make_volt(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["make:volt", name])
+    }
+
+    // ── Filament ────────────────────────────────────────────────────────────
+
+    pub fn make_filament_resource(dir: &Path, name: &str, simple: bool) -> anyhow::Result<()> {
+        let mut args = vec!["make:filament-resource", name];
+        if simple { args.push("--simple"); }
+        Self::artisan(dir, &args)
+    }
+
+    pub fn make_filament_widget(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["make:filament-widget", name])
+    }
+
+    pub fn make_filament_user(dir: &Path) -> anyhow::Result<()> {
+        Self::artisan(dir, &["make:filament-user"])
+    }
+
+    // ── Laravel Actions ─────────────────────────────────────────────────────
+
+    pub fn make_action(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["make:action", name])
+    }
+
+    // ── Laravel Data ────────────────────────────────────────────────────────
+
+    pub fn make_dto(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["make:dto", name])
+    }
+
+    // ── Nova ────────────────────────────────────────────────────────────────
+
+    pub fn make_nova_resource(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["nova:resource", name])
+    }
+
+    pub fn make_nova_action(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["nova:action", name])
+    }
+
+    pub fn make_nova_filter(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["nova:filter", name])
+    }
+
+    pub fn make_nova_lens(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["nova:lens", name])
+    }
+
+    pub fn make_nova_dashboard(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["nova:dashboard", name])
+    }
+
+    pub fn make_nova_tool(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["nova:tool", name])
+    }
+
+    pub fn make_nova_field(dir: &Path, name: &str) -> anyhow::Result<()> {
+        Self::artisan(dir, &["nova:field", name])
     }
 }
 

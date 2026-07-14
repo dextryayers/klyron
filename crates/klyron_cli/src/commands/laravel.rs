@@ -232,6 +232,132 @@ pub enum LaravelCommand {
         #[arg(long)]
         pest: bool,
     },
+    /// Create an exception
+    MakeException {
+        name: String,
+    },
+    /// Create an enum
+    MakeEnum {
+        name: String,
+    },
+    /// Create an interface
+    MakeInterface {
+        name: String,
+    },
+    /// Create a trait
+    MakeTrait {
+        name: String,
+    },
+    /// Create a class
+    MakeClass {
+        name: String,
+    },
+    /// Create a Livewire component
+    MakeLivewire {
+        name: String,
+        #[arg(long)]
+        inline: bool,
+    },
+    /// Create a Volt functional component
+    MakeVolt {
+        name: String,
+    },
+    /// Create a Filament resource
+    MakeFilamentResource {
+        name: String,
+        #[arg(long)]
+        simple: bool,
+    },
+    /// Create a Filament widget
+    MakeFilamentWidget {
+        name: String,
+    },
+    /// Create a Filament user
+    MakeFilamentUser,
+    /// Create a Laravel Action
+    MakeAction {
+        name: String,
+    },
+    /// Create a Laravel DTO
+    MakeDto {
+        name: String,
+    },
+    /// Create a Nova resource
+    MakeNovaResource {
+        name: String,
+    },
+    /// Create a Nova action
+    MakeNovaAction {
+        name: String,
+    },
+    /// Create a Nova filter
+    MakeNovaFilter {
+        name: String,
+    },
+    /// Create a Nova lens
+    MakeNovaLens {
+        name: String,
+    },
+    /// Create a Nova dashboard
+    MakeNovaDashboard {
+        name: String,
+    },
+    /// Create a Nova tool
+    MakeNovaTool {
+        name: String,
+    },
+    /// Create a Nova field
+    MakeNovaField {
+        name: String,
+    },
+    /// List all registered routes
+    RouteList,
+    /// Cache routes
+    RouteCache,
+    /// Clear route cache
+    RouteClear,
+    /// Cache config
+    ConfigCache,
+    /// Clear config cache
+    ConfigClear,
+    /// Clear application cache
+    CacheClear,
+    /// Optimize the application
+    Optimize,
+    /// Clear all optimizations
+    OptimizeClear,
+    /// Create a symbolic link from public/storage to storage/app/public
+    StorageLink,
+    /// Generate a new application key
+    KeyGenerate,
+    /// Run database migrations
+    Migrate {
+        #[arg(long)]
+        fresh: bool,
+        #[arg(long)]
+        seed: bool,
+    },
+    /// Fresh migrate the database
+    MigrateFresh {
+        #[arg(long)]
+        seed: bool,
+    },
+    /// Rollback database migrations
+    MigrateRollback {
+        #[arg(long)]
+        step: Option<usize>,
+    },
+    /// Seed the database
+    DbSeed {
+        #[arg(long)]
+        class: Option<String>,
+    },
+    /// Open Tinker REPL
+    Tinker,
+    /// Start processing jobs on the queue
+    QueueWork,
+    /// Create a queue table migration
+    QueueTable,
 }
 
 pub fn run_laravel(cmd: LaravelCommand) -> anyhow::Result<()> {
@@ -291,5 +417,41 @@ pub fn run_laravel(cmd: LaravelCommand) -> anyhow::Result<()> {
         LaravelCommand::MakeComponent { name, inline } => LaravelEcosystem::make_component(&dir, &name, inline),
         LaravelCommand::MakeView { name } => LaravelEcosystem::make_view(&dir, &name),
         LaravelCommand::MakeTest { name, unit, pest } => LaravelEcosystem::make_test(&dir, &name, unit, pest),
+        LaravelCommand::MakeException { name } => LaravelEcosystem::make_exception(&dir, &name),
+        LaravelCommand::MakeEnum { name } => LaravelEcosystem::make_enum(&dir, &name),
+        LaravelCommand::MakeInterface { name } => LaravelEcosystem::make_interface(&dir, &name),
+        LaravelCommand::MakeTrait { name } => LaravelEcosystem::make_trait(&dir, &name),
+        LaravelCommand::MakeClass { name } => LaravelEcosystem::make_class(&dir, &name),
+        LaravelCommand::MakeLivewire { name, inline } => LaravelEcosystem::make_livewire(&dir, &name, inline),
+        LaravelCommand::MakeVolt { name } => LaravelEcosystem::make_volt(&dir, &name),
+        LaravelCommand::MakeFilamentResource { name, simple } => LaravelEcosystem::make_filament_resource(&dir, &name, simple),
+        LaravelCommand::MakeFilamentWidget { name } => LaravelEcosystem::make_filament_widget(&dir, &name),
+        LaravelCommand::MakeFilamentUser => LaravelEcosystem::make_filament_user(&dir),
+        LaravelCommand::MakeAction { name } => LaravelEcosystem::make_action(&dir, &name),
+        LaravelCommand::MakeDto { name } => LaravelEcosystem::make_dto(&dir, &name),
+        LaravelCommand::MakeNovaResource { name } => LaravelEcosystem::make_nova_resource(&dir, &name),
+        LaravelCommand::MakeNovaAction { name } => LaravelEcosystem::make_nova_action(&dir, &name),
+        LaravelCommand::MakeNovaFilter { name } => LaravelEcosystem::make_nova_filter(&dir, &name),
+        LaravelCommand::MakeNovaLens { name } => LaravelEcosystem::make_nova_lens(&dir, &name),
+        LaravelCommand::MakeNovaDashboard { name } => LaravelEcosystem::make_nova_dashboard(&dir, &name),
+        LaravelCommand::MakeNovaTool { name } => LaravelEcosystem::make_nova_tool(&dir, &name),
+        LaravelCommand::MakeNovaField { name } => LaravelEcosystem::make_nova_field(&dir, &name),
+        LaravelCommand::RouteList => LaravelEcosystem::route_list(&dir),
+        LaravelCommand::RouteCache => LaravelEcosystem::route_cache(&dir),
+        LaravelCommand::RouteClear => LaravelEcosystem::route_clear(&dir),
+        LaravelCommand::ConfigCache => LaravelEcosystem::config_cache(&dir),
+        LaravelCommand::ConfigClear => LaravelEcosystem::config_clear(&dir),
+        LaravelCommand::CacheClear => LaravelEcosystem::cache_clear(&dir),
+        LaravelCommand::Optimize => LaravelEcosystem::optimize(&dir),
+        LaravelCommand::OptimizeClear => LaravelEcosystem::optimize_clear(&dir),
+        LaravelCommand::StorageLink => LaravelEcosystem::storage_link(&dir),
+        LaravelCommand::KeyGenerate => LaravelEcosystem::key_generate(&dir),
+        LaravelCommand::Migrate { fresh, seed } => LaravelEcosystem::migrate(&dir, fresh, seed),
+        LaravelCommand::MigrateFresh { seed } => LaravelEcosystem::migrate_fresh(&dir, seed),
+        LaravelCommand::MigrateRollback { step } => LaravelEcosystem::migrate_rollback(&dir, step),
+        LaravelCommand::DbSeed { class } => LaravelEcosystem::db_seed(&dir, class.as_deref()),
+        LaravelCommand::Tinker => LaravelEcosystem::tinker(&dir),
+        LaravelCommand::QueueWork => LaravelEcosystem::queue_work(&dir),
+        LaravelCommand::QueueTable => LaravelEcosystem::queue_table(&dir),
     }
 }

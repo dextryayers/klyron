@@ -5,14 +5,14 @@ use crate::{FrameworkAdapter, BuildOptions, ScaffoldOptions, FrameworkKind};
 
 pub struct SymfonyAdapter;
 
-fn version_deps(version: &str) -> (&'static str, &'static str, &'static str, &'static str) {
+fn version_deps(version: &str) -> (&'static str, &'static str) {
     match version {
-        "5.4" => ("5.4.*", "^7.4|^8.0", "^5.4", "^9.5"),
-        "6.4" => ("6.4.*", "^8.1", "^6.4", "^10.5"),
-        "7.0" => ("7.0.*", "^8.2", "^7.0", "^11.0"),
-        "7.1" => ("7.1.*", "^8.2", "^7.1", "^11.0"),
-        "7.2" => ("7.2.*", "^8.3", "^7.2", "^11.5"),
-        _ => ("7.1.*", "^8.2", "^7.1", "^11.0"),
+        "5.4" => ("5.4.*", "^7.4|^8.0"),
+        "6.4" => ("6.4.*", "^8.1"),
+        "7.0" => ("7.0.*", "^8.2"),
+        "7.1" => ("7.1.*", "^8.2"),
+        "7.2" => ("7.2.*", "^8.3"),
+        _ => ("7.1.*", "^8.2"),
     }
 }
 
@@ -39,9 +39,10 @@ impl FrameworkAdapter for SymfonyAdapter {
     fn kind(&self) -> FrameworkKind { FrameworkKind::Backend }
 
     async fn dev(&self, dir: &Path, port: Option<u16>) -> Result<()> {
-        let mut cmd = tokio::process::Command::new("symfony");
-        cmd.args(["server:start"]).current_dir(dir);
-        if let Some(p) = port { cmd.arg(format!("--port={}", p)); }
+        let port = port.unwrap_or(8000);
+        let mut cmd = tokio::process::Command::new("php");
+        cmd.args(["-S", &format!("0.0.0.0:{}", port), "-t", "public"])
+            .current_dir(dir);
         cmd.status().await?; Ok(())
     }
 
@@ -93,7 +94,7 @@ impl FrameworkAdapter for SymfonyAdapter {
         }
 
         let version = options.version.as_deref().unwrap_or("7.1");
-        let (fw_dep, php_req, _f, _p) = version_deps(version);
+        let (fw_dep, php_req) = version_deps(version);
         let vars = &options.template_vars;
         let project_dir = options.dir.join(name);
 
