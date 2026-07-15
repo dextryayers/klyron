@@ -1,449 +1,480 @@
+pub mod manifest;
+pub mod hooks;
+pub mod runtime;
+pub mod sandbox;
+
 use anyhow::{Context, Result};
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use serde::{Deserialize, Serialize};
+use chrono::Utc;
+use manifest::{default_compat, PluginInfo, PluginMarketplaceEntry, KLYRON_API_VERSION};
+use hooks::{HookHandler, HookRegistry, HookResult};
+use runtime::{hash_wasm, verify_compatibility, LoadedPlugin, PluginLoadResult, PluginRuntime};
+use sandbox::{Sandbox, SandboxLimits, SandboxTestHarness};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::info;
-use wasmtime::{Engine, Instance, Linker, Module, Store, ResourceLimiter};
-use wasmtime_wasi::preview1::{self, WasiP1Ctx};
-use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView, DirPerms, FilePerms};
+use std::time::Instant;
+use tracing::{info, warn};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginManifest {
-    pub name: String,
-    pub version: String,
-    pub description: Option<String>,
-    pub authors: Option<Vec<String>>,
-    pub license: Option<String>,
-    pub permissions: Vec<String>,
-    pub dependencies: Option<Vec<PluginDependency>>,
-    pub hooks: Option<PluginHooks>,
-    pub sandbox: Option<SandboxConfig>,
-}
+pub use manifest::{HookPhase, PluginDependency, PluginManifest, SandboxConfig};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginDependency {
-    pub name: String,
-    pub version: String,
-    pub optional: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginHooks {
-    pub on_load: Option<String>,
-    pub on_init: Option<String>,
-    pub on_start: Option<String>,
-    pub on_stop: Option<String>,
-    pub on_destroy: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SandboxConfig {
-    pub max_memory_bytes: Option<u64>,
-    pub max_fuel: Option<u64>,
-    pub allowed_domains: Option<Vec<String>>,
-    pub allowed_paths: Option<Vec<String>>,
-}
+const PLUGINS_DIR_NAME: &str = "plugins";
 
 #[derive(Debug, Clone)]
 pub enum PluginEvent {
-    Load { name: String, version: String },
-    Unload { name: String },
-    Init { name: String },
-    Start { name: String },
-    Stop { name: String },
-    Destroy { name: String },
-    Call { name: String, method: String },
-    HotReload { name: String, new_hash: String },
+    Installed { name: String, version: String },
+    Removed { name: String },
+    Enabled { name: String },
+    Disabled { name: String },
+    HookExecuted { name: String, phase: String, duration_ms: u64 },
+    HookFailed { name: String, phase: String, error: String },
+    RolledBack { name: String, phase: String },
+    Updated { name: String, old_version: String, new_version: String },
     Error { name: String, error: String },
 }
 
-type EventCallback = Arc<dyn Fn(PluginEvent) + Send + Sync + 'static>;
-
-struct MemoryLimiter {
-    max_memory_bytes: u64,
+pub struct PluginRegistry {
+    plugins: HashMap<String, LoadedPlugin>,
+    runtime: PluginRuntime,
+    hook_registry: HookRegistry,
+    sandbox: Arc<Sandbox>,
+    plugins_dir: PathBuf,
+    listeners: Vec<Arc<dyn Fn(PluginEvent) + Send + Sync>>,
+    installed_info: HashMap<String, PluginInfo>,
+    rollback_stack: Vec<RollbackEntry>,
+    no_rollback: bool,
 }
 
-impl ResourceLimiter for MemoryLimiter {
-    fn memory_growing(&mut self, current: usize, desired: usize, _maximum: Option<usize>) -> Result<bool> {
-        Ok((desired as u64) <= self.max_memory_bytes || (current as u64) <= self.max_memory_bytes)
-    }
-
-    fn table_growing(&mut self, _current: usize, _desired: usize, _maximum: Option<usize>) -> Result<bool> {
-        Ok(true)
-    }
+enum RollbackEntry {
+    Install {
+        name: String,
+        wasm_path: PathBuf,
+        manifest_path: PathBuf,
+    },
+    Enable {
+        name: String,
+        was_enabled: bool,
+    },
 }
 
-struct PluginCtx {
-    table: ResourceTable,
-    wasi: WasiP1Ctx,
-    limiter: Option<MemoryLimiter>,
-}
-
-impl WasiView for PluginCtx {
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
-    }
-
-    fn ctx(&mut self) -> &mut WasiCtx {
-        self.wasi.ctx()
-    }
-}
-
-impl ResourceLimiter for PluginCtx {
-    fn memory_growing(&mut self, current: usize, desired: usize, maximum: Option<usize>) -> Result<bool> {
-        if let Some(ref mut limiter) = self.limiter {
-            limiter.memory_growing(current, desired, maximum)
-        } else {
-            Ok(true)
-        }
-    }
-
-    fn table_growing(&mut self, current: usize, desired: usize, maximum: Option<usize>) -> Result<bool> {
-        if let Some(ref mut limiter) = self.limiter {
-            limiter.table_growing(current, desired, maximum)
-        } else {
-            Ok(true)
-        }
-    }
-}
-
-struct PluginInstance {
-    manifest: PluginManifest,
-    instance: Instance,
-    store: Store<PluginCtx>,
-    wasm_path: PathBuf,
-    wasm_hash: Vec<u8>,
-    initialized: AtomicBool,
-    started: AtomicBool,
-}
-
-impl PluginInstance {
-    fn call_hook(&mut self, name: &str) -> Result<()> {
-        let hook_name = match name {
-            "on_load" => self.manifest.hooks.as_ref().and_then(|h| h.on_load.as_deref()),
-            "on_init" => self.manifest.hooks.as_ref().and_then(|h| h.on_init.as_deref()),
-            "on_start" => self.manifest.hooks.as_ref().and_then(|h| h.on_start.as_deref()),
-            "on_stop" => self.manifest.hooks.as_ref().and_then(|h| h.on_stop.as_deref()),
-            "on_destroy" => self.manifest.hooks.as_ref().and_then(|h| h.on_destroy.as_deref()),
-            _ => None,
-        };
-
-        if let Some(hook) = hook_name {
-            if let Some(func) = self.instance.get_func(&mut self.store, hook) {
-                let typed = func.typed::<(), ()>(&self.store)
-                    .map_err(|e| anyhow::anyhow!("Failed to type hook '{}': {}", hook, e))?;
-                typed.call(&mut self.store, ())
-                    .map_err(|e| anyhow::anyhow!("Hook '{}' failed: {}", hook, e))?;
-            }
-        }
-        Ok(())
-    }
-}
-
-pub struct PluginManager {
-    plugins: HashMap<String, PluginInstance>,
-    engine: Engine,
-    event_listeners: Vec<EventCallback>,
-    _watcher: Option<RecommendedWatcher>,
-    dependencies: HashMap<String, Vec<String>>,
-}
-
-impl PluginManager {
+impl PluginRegistry {
     pub fn new() -> Result<Self> {
-        let mut config = wasmtime::Config::new();
-        config.wasm_multi_value(true);
-        config.wasm_component_model(false);
-        config.consume_fuel(true);
-        let engine = Engine::new(&config).context("Failed to create WASM engine")?;
+        let sandbox = Arc::new(Sandbox::with_defaults());
+        let runtime = PluginRuntime::new(Some(sandbox.clone()))?;
+
+        let plugins_dir = dirs::home_dir()
+            .map(|p| p.join(".klyron").join(PLUGINS_DIR_NAME))
+            .unwrap_or_else(|| PathBuf::from("/tmp/klyron-plugins"));
 
         Ok(Self {
             plugins: HashMap::new(),
-            engine,
-            event_listeners: Vec::new(),
-            _watcher: None,
-            dependencies: HashMap::new(),
+            runtime,
+            hook_registry: HookRegistry::new(),
+            sandbox,
+            plugins_dir,
+            listeners: Vec::new(),
+            installed_info: HashMap::new(),
+            rollback_stack: Vec::new(),
+            no_rollback: false,
         })
     }
 
-    pub fn new_with_limits(_max_fuel: u64, _max_memory: u64) -> Result<Self> {
-        let mut config = wasmtime::Config::new();
-        config.wasm_multi_value(true);
-        config.wasm_component_model(false);
-        config.consume_fuel(true);
-        config.max_wasm_stack(512 * 1024);
-        let engine = Engine::new(&config).context("Failed to create WASM engine")?;
+    pub fn with_plugins_dir(mut self, dir: PathBuf) -> Self {
+        self.plugins_dir = dir;
+        self
+    }
 
-        Ok(Self {
-            plugins: HashMap::new(),
-            engine,
-            event_listeners: Vec::new(),
-            _watcher: None,
-            dependencies: HashMap::new(),
-        })
+    pub fn with_no_rollback(mut self) -> Self {
+        self.no_rollback = true;
+        self
+    }
+
+    pub fn with_limits(mut self, max_fuel: u64, max_memory: u64, max_cpu_ms: u64) -> Self {
+        let limits = SandboxLimits {
+            max_memory_bytes: max_memory,
+            max_fuel,
+            max_cpu_ms,
+            ..SandboxLimits::default()
+        };
+        self.sandbox = Arc::new(Sandbox::new(limits));
+        self.runtime = PluginRuntime::new(Some(self.sandbox.clone()))
+            .expect("Failed to create runtime with custom limits");
+        self
     }
 
     pub fn on_event<F>(&mut self, callback: F)
     where
         F: Fn(PluginEvent) + Send + Sync + 'static,
     {
-        self.event_listeners.push(Arc::new(callback));
+        self.listeners.push(Arc::new(callback));
     }
 
     fn emit(&self, event: PluginEvent) {
-        for listener in &self.event_listeners {
+        for listener in &self.listeners {
             listener(event.clone());
         }
     }
 
-    pub fn load(&mut self, path: &str) -> Result<String> {
-        let wasm_bytes = std::fs::read(path)
-            .with_context(|| format!("Failed to read WASM file: {}", path))?;
+    // ── Dependency Graph ────────────────────────────────────────────────
 
-        let hash = Sha256::digest(&wasm_bytes).to_vec();
+    pub fn resolve_dependency_order(&self) -> Result<Vec<String>> {
+        let mut visited = HashSet::new();
+        let mut in_stack = HashSet::new();
+        let mut order = Vec::new();
 
-        let module =
-            Module::new(&self.engine, &wasm_bytes).context("Failed to compile WASM module")?;
+        let names: Vec<String> = self.plugins.keys().cloned().collect();
+        for name in &names {
+            if !visited.contains(name) {
+                self.dfs_topological(name, &mut visited, &mut in_stack, &mut order)?;
+            }
+        }
 
-        let manifest = Self::parse_manifest(path)?;
+        Ok(order)
+    }
 
-        let sandbox = manifest.sandbox.clone().unwrap_or_default();
-        let mut builder = WasiCtxBuilder::new();
+    fn dfs_topological(
+        &self,
+        name: &str,
+        visited: &mut HashSet<String>,
+        in_stack: &mut HashSet<String>,
+        order: &mut Vec<String>,
+    ) -> Result<()> {
+        visited.insert(name.to_string());
+        in_stack.insert(name.to_string());
 
-        let max_fuel = sandbox.max_fuel.unwrap_or(1_000_000);
+        let deps = self
+            .plugins
+            .get(name)
+            .and_then(|p| p.manifest.dependencies.clone())
+            .unwrap_or_default();
 
-        if let Some(paths) = &sandbox.allowed_paths {
-            for p in paths {
-                let _ = builder.preopened_dir(
-                    Path::new(p),
-                    p,
-                    DirPerms::all(),
-                    FilePerms::all(),
+        for dep in &deps {
+            if in_stack.contains(&dep.name) {
+                anyhow::bail!(
+                    "Dependency cycle detected: {} -> {}",
+                    name,
+                    dep.name
                 );
             }
-        }
-
-        for perm in &manifest.permissions {
-            match perm.as_str() {
-                "stdio" => {
-                    builder.inherit_stdout().inherit_stderr();
+            if !visited.contains(&dep.name) {
+                if self.plugins.contains_key(&dep.name) {
+                    self.dfs_topological(&dep.name, visited, in_stack, order)?;
+                } else if !dep.optional.unwrap_or(false) {
+                    anyhow::bail!(
+                        "Required dependency '{}' for plugin '{}' is not installed",
+                        dep.name,
+                        name
+                    );
                 }
-                "net" => {
-                    builder.inherit_stdio();
-                }
-                "env" => {
-                    builder.inherit_env();
-                }
-                "fs_read" | "fs_write" | "fs_all" => {
-                    builder.inherit_stdio();
-                }
-                _ => {}
             }
         }
 
-        let wasi_p1 = builder.build_p1();
-        let table = ResourceTable::new();
+        in_stack.remove(name);
+        order.push(name.to_string());
+        Ok(())
+    }
 
-        let limiter = sandbox.max_memory_bytes.map(|max_mem| MemoryLimiter { max_memory_bytes: max_mem });
+    pub fn detect_cycles(&self) -> Vec<String> {
+        let mut cycles = Vec::new();
+        let names: Vec<String> = self.plugins.keys().cloned().collect();
 
-        let mut store = Store::new(
-            &self.engine,
-            PluginCtx {
-                table,
-                wasi: wasi_p1,
-                limiter,
-            },
-        );
+        for name in &names {
+            let mut visited = HashSet::new();
+            let mut stack = Vec::new();
+            if self.detect_cycle_recursive(name, &mut visited, &mut stack) {
+                cycles.push(name.clone());
+            }
+        }
 
-        store.set_fuel(max_fuel)?;
+        cycles
+    }
 
-        let mut linker: Linker<PluginCtx> = Linker::new(&self.engine);
-        preview1::add_to_linker_sync(&mut linker, |ctx| &mut ctx.wasi)
-            .context("Failed to add WASI to linker")?;
+    fn detect_cycle_recursive(
+        &self,
+        name: &str,
+        visited: &mut HashSet<String>,
+        stack: &mut Vec<String>,
+    ) -> bool {
+        if stack.contains(&name.to_string()) {
+            return true;
+        }
+        if visited.contains(name) {
+            return false;
+        }
 
-        let instance = linker
-            .instantiate(&mut store, &module)
-            .context("Failed to instantiate WASM module")?;
+        visited.insert(name.to_string());
+        stack.push(name.to_string());
+
+        let deps = self
+            .plugins
+            .get(name)
+            .and_then(|p| p.manifest.dependencies.clone())
+            .unwrap_or_default();
+
+        for dep in &deps {
+            if self.plugins.contains_key(&dep.name) {
+                if self.detect_cycle_recursive(&dep.name, visited, stack) {
+                    return true;
+                }
+            }
+        }
+
+        stack.pop();
+        false
+    }
+
+    // ── Install / Load / Unload ─────────────────────────────────────────
+
+    pub fn install(&mut self, source: &Path, force: bool) -> Result<PluginLoadResult> {
+        let wasm_bytes = std::fs::read(source)
+            .with_context(|| format!("Failed to read plugin file: {}", source.display()))?;
+
+        let manifest = self.parse_manifest(source)?;
+        let compat = verify_compatibility(&manifest, force)?;
+        let wasm_hash = hash_wasm(&wasm_bytes);
+        let size_bytes = wasm_bytes.len() as u64;
+
+        std::fs::create_dir_all(&self.plugins_dir)?;
+
+        let plugin_dir = self.plugins_dir.join(&manifest.name);
+        std::fs::create_dir_all(&plugin_dir)?;
+
+        let wasm_dest = plugin_dir.join(format!("{}.wasm", manifest.name));
+        std::fs::copy(source, &wasm_dest)?;
+
+        let manifest_path = plugin_dir.join("klyron-plugin.json");
+        let manifest_json = serde_json::to_string_pretty(&manifest)?;
+        std::fs::write(&manifest_path, &manifest_json)?;
+
+        let load_result = PluginLoadResult {
+            name: manifest.name.clone(),
+            version: manifest.version.clone(),
+            manifest: manifest.clone(),
+            wasm_hash: hex::encode(&wasm_hash),
+            compat: compat.clone(),
+            is_compatible: true,
+            size_bytes,
+            load_duration_ms: 0,
+        };
+
+        let info = PluginInfo {
+            manifest: manifest.clone(),
+            enabled: true,
+            install_path: plugin_dir.to_string_lossy().to_string(),
+            installed_at: Utc::now().to_rfc3339(),
+            wasm_hash: hex::encode(&wasm_hash),
+            size_bytes,
+            compat: compat.clone(),
+        };
+        self.installed_info.insert(manifest.name.clone(), info);
+
+        if !self.no_rollback {
+            self.rollback_stack.push(RollbackEntry::Install {
+                name: manifest.name.clone(),
+                wasm_path: wasm_dest,
+                manifest_path,
+            });
+        }
+
+        let (instance, store) = self.runtime.instantiate(&wasm_bytes, &manifest)?;
+
+        let loaded = LoadedPlugin {
+            manifest: manifest.clone(),
+            instance,
+            store,
+            wasm_path: wasm_dest,
+            wasm_hash,
+            compat,
+            enabled: true,
+            load_time: Instant::now(),
+        };
+
+        self.plugins.insert(manifest.name.clone(), loaded);
+
+        self.emit(PluginEvent::Installed {
+            name: manifest.name.clone(),
+            version: manifest.version.clone(),
+        });
+
+        info!("Installed plugin: {} v{}", manifest.name, manifest.version);
+        Ok(load_result)
+    }
+
+    pub fn load(&mut self, path: &str, force: bool) -> Result<String> {
+        let source = Path::new(path);
+        let wasm_bytes = std::fs::read(source)
+            .with_context(|| format!("Failed to read WASM file: {}", source.display()))?;
+
+        let manifest = self.parse_manifest(source)?;
+        let compat = verify_compatibility(&manifest, force)?;
+        let wasm_hash = hash_wasm(&wasm_bytes);
+
+        let (instance, store) = self.runtime.instantiate(&wasm_bytes, &manifest)?;
 
         let name = manifest.name.clone();
-
-        let mut plugin = PluginInstance {
+        let loaded = LoadedPlugin {
             manifest,
             instance,
             store,
-            wasm_path: PathBuf::from(path),
-            wasm_hash: hash,
-            initialized: AtomicBool::new(false),
-            started: AtomicBool::new(false),
+            wasm_path: source.to_path_buf(),
+            wasm_hash,
+            compat,
+            enabled: true,
+            load_time: Instant::now(),
         };
 
-        plugin.call_hook("on_load")?;
+        self.register_hooks_for_plugin(&loaded);
 
-        self.plugins.insert(name.clone(), plugin);
-
-        if let Some(deps) = self.plugins.get(&name).and_then(|p| p.manifest.dependencies.clone()) {
-            let dep_names: Vec<String> = deps.into_iter().map(|d| d.name).collect();
-            self.dependencies.insert(name.clone(), dep_names);
-        }
-
-        self.emit(PluginEvent::Load {
-            name: name.clone(),
-            version: "0.1.0".to_string(),
-        });
-
+        self.plugins.insert(name.clone(), loaded);
         info!("Loaded plugin: {}", name);
         Ok(name)
     }
 
-    pub fn init(&mut self, name: &str) -> Result<()> {
-        let plugin = self.plugins.get_mut(name)
-            .ok_or_else(|| anyhow::anyhow!("Plugin '{}' not found", name))?;
-
-        plugin.call_hook("on_init")?;
-        plugin.initialized.store(true, Ordering::SeqCst);
-
-        self.emit(PluginEvent::Init {
-            name: name.to_string(),
-        });
-
-        Ok(())
-    }
-
-    pub fn start(&mut self, name: &str) -> Result<()> {
-        let plugin = self.plugins.get_mut(name)
-            .ok_or_else(|| anyhow::anyhow!("Plugin '{}' not found", name))?;
-
-        plugin.call_hook("on_start")?;
-        plugin.started.store(true, Ordering::SeqCst);
-
-        self.emit(PluginEvent::Start {
-            name: name.to_string(),
-        });
-
-        Ok(())
-    }
-
-    pub fn stop(&mut self, name: &str) -> Result<()> {
-        let plugin = self.plugins.get_mut(name)
-            .ok_or_else(|| anyhow::anyhow!("Plugin '{}' not found", name))?;
-
-        plugin.call_hook("on_stop")?;
-        plugin.started.store(false, Ordering::SeqCst);
-
-        self.emit(PluginEvent::Stop {
-            name: name.to_string(),
-        });
-
-        Ok(())
-    }
-
     pub fn unload(&mut self, name: &str) -> Result<()> {
-        let mut plugin = self.plugins.remove(name)
-            .ok_or_else(|| anyhow::anyhow!("Plugin '{}' not found", name))?;
+        if let Some(plugin) = self.plugins.remove(name) {
+            self.hook_registry.unregister(name);
 
-        plugin.call_hook("on_destroy")?;
+            self.emit(PluginEvent::Removed {
+                name: name.to_string(),
+            });
 
-        self.emit(PluginEvent::Destroy {
-            name: name.to_string(),
-        });
-
-        self.dependencies.remove(name);
-        info!("Unloaded plugin: {}", name);
-        Ok(())
+            info!("Unloaded plugin: {}", name);
+            Ok(())
+        } else {
+            anyhow::bail!("Plugin '{}' not found", name)
+        }
     }
 
-    pub fn resolve_dependencies(&self, name: &str) -> Result<Vec<String>> {
-        let mut resolved = Vec::new();
-        let mut visited = std::collections::HashSet::new();
-        self.resolve_deps_recursive(name, &mut resolved, &mut visited)?;
-        Ok(resolved)
-    }
+    pub fn remove(&mut self, name: &str) -> Result<()> {
+        self.unload(name)?;
 
-    fn resolve_deps_recursive(
-        &self,
-        name: &str,
-        resolved: &mut Vec<String>,
-        visited: &mut std::collections::HashSet<String>,
-    ) -> Result<()> {
-        if !visited.insert(name.to_string()) {
-            return Ok(());
+        let plugin_dir = self.plugins_dir.join(name);
+        if plugin_dir.exists() {
+            std::fs::remove_dir_all(&plugin_dir)?;
         }
 
-        if let Some(deps) = self.dependencies.get(name) {
-            for dep in deps {
-                self.resolve_deps_recursive(dep, resolved, visited)?;
+        self.installed_info.remove(name);
+        info!("Removed plugin: {}", name);
+        Ok(())
+    }
+
+    fn parse_manifest(&self, wasm_path: &Path) -> Result<PluginManifest> {
+        let wasm_dir = wasm_path.parent().unwrap_or(Path::new("."));
+
+        for manifest_name in &[
+            "klyron-plugin.json",
+            "klyron-plugin.toml",
+            "plugin.toml",
+            "klyron.json",
+        ] {
+            let manifest_path = wasm_dir.join(manifest_name);
+            if manifest_path.exists() {
+                let content = std::fs::read_to_string(&manifest_path)?;
+                if manifest_name.ends_with(".json") {
+                    return Ok(serde_json::from_str(&content)?);
+                } else {
+                    return Ok(toml::from_str(&content)?);
+                }
             }
         }
 
-        resolved.push(name.to_string());
-        Ok(())
+        Ok(PluginManifest {
+            name: wasm_path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            version: "0.1.0".to_string(),
+            description: None,
+            authors: None,
+            license: None,
+            klyron_api: Some(KLYRON_API_VERSION.to_string()),
+            permissions: Vec::new(),
+            dependencies: None,
+            hooks: None,
+            sandbox: None,
+        })
     }
 
-    #[inline]
-    pub fn call(&mut self, name: &str, method: &str, args: &[u8]) -> Result<Vec<u8>> {
-        let plugin = self
-            .plugins
-            .get_mut(name)
-            .ok_or_else(|| anyhow::anyhow!("Plugin '{}' not found", name))?;
-
-        let fuel_before = plugin.store.get_fuel().unwrap_or(0);
-        if fuel_before == 0 {
-            anyhow::bail!("Plugin '{}' has exhausted its fuel allocation", name);
+    fn register_hooks_for_plugin(&mut self, plugin: &LoadedPlugin) {
+        if let Some(ref hooks) = plugin.manifest.hooks {
+            for hook_name in hooks {
+                let phase = HookPhase::from_str(hook_name);
+                if let Some(phase) = phase {
+                    let plugin_name = plugin.manifest.name.clone();
+                    let handler = Arc::new(move |name: &str, ctx: &[u8]| -> Result<Vec<u8>> {
+                        if name == plugin_name {
+                            Ok(ctx.to_vec())
+                        } else {
+                            Ok(Vec::new())
+                        }
+                    });
+                    self.hook_registry.register(HookHandler {
+                        plugin_name: plugin.manifest.name.clone(),
+                        phase,
+                        handler,
+                    });
+                }
+            }
         }
-
-        let func = plugin
-            .instance
-            .get_func(&mut plugin.store, method)
-            .ok_or_else(|| {
-                anyhow::anyhow!("Method '{}' not found in plugin '{}'", method, name)
-            })?;
-
-        let func_typed = func
-            .typed::<(i32, i32), i32>(&plugin.store)
-            .map_err(|e| anyhow::anyhow!("Failed to type function: {}", e))?;
-
-        let memory = plugin
-            .instance
-            .get_memory(&mut plugin.store, "memory")
-            .ok_or_else(|| anyhow::anyhow!("No memory export in plugin '{}'", name))?;
-
-        if !args.is_empty() {
-            let data = memory.data_mut(&mut plugin.store);
-            let end = args.len().min(data.len());
-            data[..end].copy_from_slice(&args[..end]);
-        }
-
-        let result_ptr = func_typed
-            .call(&mut plugin.store, (0, args.len() as i32))
-            .map_err(|e| anyhow::anyhow!("Plugin call failed: {}", e))?;
-
-        let data = memory.data(&plugin.store);
-        let result_len_pos = result_ptr as usize;
-        let result_len = if result_len_pos + 4 <= data.len() {
-            let mut len_bytes = [0u8; 4];
-            len_bytes.copy_from_slice(&data[result_len_pos..result_len_pos + 4]);
-            i32::from_le_bytes(len_bytes) as usize
-        } else {
-            0
-        };
-
-        let mut result = Vec::new();
-        if result_len > 0 {
-            let start = (result_ptr + 4) as usize;
-            let end = (start + result_len).min(data.len());
-            result.extend_from_slice(&data[start..end]);
-        }
-
-        self.emit(PluginEvent::Call {
-            name: name.to_string(),
-            method: method.to_string(),
-        });
-
-        Ok(result)
     }
+
+    // ── Hook Execution ──────────────────────────────────────────────────
+
+    pub fn execute_hooks(&self, phase: &HookPhase, context: &[u8]) -> Vec<HookResult> {
+        self.hook_registry
+            .execute_phase_with_rollback(phase, context)
+    }
+
+    pub fn execute_hooks_with_rollback(
+        &mut self,
+        phase: &HookPhase,
+        context: &[u8],
+    ) -> Vec<HookResult> {
+        let results = self.hook_registry.execute_phase(phase, context);
+        let has_failure = results.iter().any(|r| matches!(r, HookResult::Failure { .. }));
+
+        if has_failure && !self.no_rollback {
+            for result in &results {
+                if let HookResult::Failure { ref plugin, ref error, .. } = result {
+                    warn!("Rolling back hook {} for plugin {}: {}", phase.as_str(), plugin, error);
+                    self.emit(PluginEvent::RolledBack {
+                        name: plugin.clone(),
+                        phase: phase.as_str().to_string(),
+                    });
+                }
+                if let HookResult::Success { ref plugin, .. } = result {
+                    self.emit(PluginEvent::RolledBack {
+                        name: plugin.clone(),
+                        phase: phase.as_str().to_string(),
+                    });
+                }
+            }
+        }
+
+        for result in &results {
+            match result {
+                HookResult::Success { plugin, duration, .. } => {
+                    self.emit(PluginEvent::HookExecuted {
+                        name: plugin.clone(),
+                        phase: phase.as_str().to_string(),
+                        duration_ms: duration.as_millis() as u64,
+                    });
+                }
+                HookResult::Failure { plugin, error, .. } => {
+                    self.emit(PluginEvent::HookFailed {
+                        name: plugin.clone(),
+                        phase: phase.as_str().to_string(),
+                        error: error.clone(),
+                    });
+                }
+            }
+        }
+
+        results
+    }
+
+    // ── Query ───────────────────────────────────────────────────────────
 
     pub fn list(&self) -> Vec<&str> {
         self.plugins.keys().map(|s| s.as_str()).collect()
@@ -453,8 +484,201 @@ impl PluginManager {
         self.plugins.get(name).map(|p| &p.manifest)
     }
 
+    pub fn get_info(&self, name: &str) -> Option<&PluginInfo> {
+        self.installed_info.get(name)
+    }
+
+    pub fn get_all_info(&self) -> Vec<&PluginInfo> {
+        self.installed_info.values().collect()
+    }
+
+    pub fn is_loaded(&self, name: &str) -> bool {
+        self.plugins.contains_key(name)
+    }
+
+    pub fn is_enabled(&self, name: &str) -> bool {
+        self.installed_info
+            .get(name)
+            .map(|i| i.enabled)
+            .unwrap_or(false)
+    }
+
+    pub fn toggle(&mut self, name: &str) -> Result<bool> {
+        let info = self
+            .installed_info
+            .get_mut(name)
+            .ok_or_else(|| anyhow::anyhow!("Plugin '{}' not found", name))?;
+
+        info.enabled = !info.enabled;
+
+        if !self.no_rollback {
+            self.rollback_stack.push(RollbackEntry::Enable {
+                name: name.to_string(),
+                was_enabled: !info.enabled,
+            });
+        }
+
+        if info.enabled {
+            self.emit(PluginEvent::Enabled {
+                name: name.to_string(),
+            });
+        } else {
+            self.emit(PluginEvent::Disabled {
+                name: name.to_string(),
+            });
+        }
+
+        Ok(info.enabled)
+    }
+
+    pub fn rollback(&mut self) -> Result<()> {
+        while let Some(entry) = self.rollback_stack.pop() {
+            match entry {
+                RollbackEntry::Install { name, wasm_path, manifest_path } => {
+                    self.plugins.remove(&name);
+                    self.installed_info.remove(&name);
+                    self.hook_registry.unregister(&name);
+                    if wasm_path.exists() {
+                        let _ = std::fs::remove_file(&wasm_path);
+                    }
+                    if manifest_path.exists() {
+                        let _ = std::fs::remove_file(&manifest_path);
+                    }
+                    let plugin_dir = wasm_path.parent().unwrap_or(Path::new(""));
+                    if plugin_dir.exists() {
+                        let _ = std::fs::remove_dir(plugin_dir);
+                    }
+                    warn!("Rolled back install of plugin: {}", name);
+                }
+                RollbackEntry::Enable { name, was_enabled } => {
+                    if let Some(info) = self.installed_info.get_mut(&name) {
+                        info.enabled = was_enabled;
+                    }
+                    warn!("Rolled back toggle of plugin: {}", name);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // ── Update ──────────────────────────────────────────────────────────
+
+    pub fn update(&mut self, name: &str, new_source: &Path, force: bool) -> Result<PluginLoadResult> {
+        let old_info = self
+            .installed_info
+            .get(name)
+            .ok_or_else(|| anyhow::anyhow!("Plugin '{}' is not installed", name))?;
+
+        let old_version = old_info.manifest.version.clone();
+
+        self.remove(name)?;
+        let result = self.install(new_source, force)?;
+
+        self.emit(PluginEvent::Updated {
+            name: name.to_string(),
+            old_version,
+            new_version: result.version.clone(),
+        });
+
+        Ok(result)
+    }
+
+    // ── Search ──────────────────────────────────────────────────────────
+
+    pub fn search(&self, _query: &str) -> Vec<PluginMarketplaceEntry> {
+        Vec::new()
+    }
+
+    pub fn refresh_installed(&mut self) -> Result<()> {
+        if !self.plugins_dir.exists() {
+            return Ok(());
+        }
+
+        for entry in std::fs::read_dir(&self.plugins_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                if !self.installed_info.contains_key(&name) {
+                    let manifest_path = path.join("klyron-plugin.json");
+                    let wasm_path = path.join(format!("{}.wasm", name));
+
+                    if manifest_path.exists() && wasm_path.exists() {
+                        if let Ok(content) = std::fs::read_to_string(&manifest_path) {
+                            if let Ok(manifest) = serde_json::from_str::<PluginManifest>(&content) {
+                                let wasm_bytes = std::fs::read(&wasm_path).unwrap_or_default();
+                                let wasm_hash = hash_wasm(&wasm_bytes);
+
+                                let info = PluginInfo {
+                                    manifest,
+                                    enabled: true,
+                                    install_path: path.to_string_lossy().to_string(),
+                                    installed_at: "unknown".to_string(),
+                                    wasm_hash: hex::encode(&wasm_hash),
+                                    size_bytes: wasm_bytes.len() as u64,
+                                    compat: default_compat(),
+                                };
+                                self.installed_info.insert(name, info);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    // ── Sandbox Testing ─────────────────────────────────────────────────
+
+    pub fn test_plugin(
+        &mut self,
+        name: &str,
+        wasm_bytes: Vec<u8>,
+        hooks_to_test: &[&str],
+    ) -> Vec<manifest::SandboxTestReport> {
+        let config = self
+            .installed_info
+            .get(name)
+            .map(|i| i.manifest.sandbox.clone().unwrap_or_default())
+            .unwrap_or_default();
+
+        let mut harness = SandboxTestHarness::new(name, wasm_bytes, config);
+
+        let mut reports = Vec::new();
+        for hook_name in hooks_to_test {
+            let report = harness.run_test(hook_name, |bytes| {
+                let manifest = PluginManifest {
+                    name: name.to_string(),
+                    version: "0.1.0".to_string(),
+                    description: None,
+                    authors: None,
+                    license: None,
+                    klyron_api: Some(KLYRON_API_VERSION.to_string()),
+                    permissions: Vec::new(),
+                    dependencies: None,
+                    hooks: Some(hooks_to_test.iter().map(|s| s.to_string()).collect()),
+                    sandbox: None,
+                };
+                let (instance, mut store) = self.runtime.instantiate(bytes, &manifest)?;
+                self.runtime.call_hook(&instance, &mut store, hook_name, &[])
+            });
+            reports.push(report);
+        }
+
+        reports
+    }
+
+    // ── Hot Reload ──────────────────────────────────────────────────────
+
     pub fn reload(&mut self, name: &str) -> Result<()> {
-        let wasm_path = self.plugins.get(name)
+        let wasm_path = self
+            .plugins
+            .get(name)
             .map(|p| p.wasm_path.clone())
             .ok_or_else(|| anyhow::anyhow!("Plugin '{}' not found", name))?;
 
@@ -468,132 +692,65 @@ impl PluginManager {
             return Ok(());
         }
 
-        let old_manifest = self.plugins.get(name).map(|p| p.manifest.name.clone())
-            .unwrap_or_default();
-
+        let manifest = self.parse_manifest(&wasm_path)?;
         self.unload(name)?;
-        let new_name = self.load(wasm_path.to_str().unwrap())?;
 
-        self.emit(PluginEvent::HotReload {
-            name: new_name.clone(),
-            new_hash: hex::encode(&new_hash),
-        });
+        let (instance, store) = self.runtime.instantiate(&new_bytes, &manifest)?;
 
-        info!("Hot-reloaded plugin: {} (was: {})", new_name, old_manifest);
-        Ok(())
-    }
+        let loaded = LoadedPlugin {
+            manifest,
+            instance,
+            store,
+            wasm_path,
+            wasm_hash: new_hash,
+            compat: default_compat(),
+            enabled: true,
+            load_time: Instant::now(),
+        };
 
-    fn parse_manifest(path: &str) -> Result<PluginManifest> {
-        let wasm_dir = Path::new(path).parent().unwrap_or(Path::new("."));
+        self.register_hooks_for_plugin(&loaded);
+        self.plugins.insert(name.to_string(), loaded);
 
-        for manifest_name in &["klyron-plugin.toml", "plugin.toml"] {
-            let manifest_path = wasm_dir.join(manifest_name);
-            if manifest_path.exists() {
-                let content = std::fs::read_to_string(&manifest_path)?;
-                let manifest: PluginManifest = toml::from_str(&content)?;
-                return Ok(manifest);
-            }
-        }
-
-        Ok(PluginManifest {
-            name: Path::new(path)
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
-            version: "0.1.0".to_string(),
-            description: None,
-            authors: None,
-            license: None,
-            permissions: Vec::new(),
-            dependencies: None,
-            hooks: None,
-            sandbox: None,
-        })
-    }
-
-    pub fn watch_hot_reload(&mut self, dir: &str) -> Result<()> {
-        let path = PathBuf::from(dir);
-        let _manager_ref = std::sync::Mutex::new(std::ptr::null_mut::<PluginManager>());
-
-        let mut watcher: RecommendedWatcher =
-            notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
-                if let Ok(event) = res {
-                    if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
-                        for wasm_path in event.paths.iter().filter(|p| {
-                            p.extension().map_or(false, |ext| ext == "wasm")
-                        }) {
-                            if let Some(path_str) = wasm_path.to_str() {
-                                info!("Hot-reload detected: {}", path_str);
-                            }
-                        }
-                    }
-                }
-            })?;
-
-        watcher.watch(&path, RecursiveMode::Recursive)?;
-
-        self._watcher = Some(watcher);
-        info!("Watching directory for hot-reload: {}", dir);
-
-        Ok(())
-    }
-
-    pub fn watch_hot_reload_with_manager(&mut self, dir: &str) -> Result<()> {
-        let path = PathBuf::from(dir);
-        let plugins_dir = path.clone();
-        let plugin_names: Vec<String> = self.plugins.keys().cloned().collect();
-
-        let mut watcher: RecommendedWatcher =
-            notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
-                if let Ok(event) = res {
-                    if matches!(event.kind, EventKind::Modify(_)) {
-                        for changed_path in event.paths.iter().filter(|p| {
-                            p.extension().map_or(false, |ext| ext == "wasm")
-                        }) {
-                            if let Some(name) = changed_path.file_stem()
-                                .and_then(|s| s.to_str())
-                                .map(|s| s.to_string())
-                            {
-                                if plugin_names.contains(&name) {
-                                    info!("Hot-reload triggered for plugin: {}", name);
-                                }
-                            }
-                        }
-                    }
-                }
-            })?;
-
-        watcher.watch(&plugins_dir, RecursiveMode::Recursive)?;
-        self._watcher = Some(watcher);
-        info!("Watching directory for plugin hot-reload: {}", dir);
+        info!("Hot-reloaded plugin: {}", name);
         Ok(())
     }
 
     pub fn total_fuel_consumed(&self, name: &str) -> Result<u64> {
-        let plugin = self.plugins.get(name)
+        let plugin = self
+            .plugins
+            .get(name)
             .ok_or_else(|| anyhow::anyhow!("Plugin '{}' not found", name))?;
-        let initial: u64 = plugin.manifest.sandbox.as_ref()
+        let initial: u64 = plugin
+            .manifest
+            .sandbox
+            .as_ref()
             .and_then(|s| s.max_fuel)
             .unwrap_or(1_000_000);
         let remaining = plugin.store.get_fuel().unwrap_or(0);
         Ok(initial.saturating_sub(remaining))
     }
-}
 
-impl Default for SandboxConfig {
-    fn default() -> Self {
-        Self {
-            max_memory_bytes: Some(64 * 1024 * 1024),
-            max_fuel: Some(1_000_000),
-            allowed_domains: None,
-            allowed_paths: None,
-        }
+    pub fn hook_registry(&self) -> &HookRegistry {
+        &self.hook_registry
+    }
+
+    pub fn plugins_dir(&self) -> &Path {
+        &self.plugins_dir
+    }
+
+    pub fn runtime(&self) -> &PluginRuntime {
+        &self.runtime
     }
 }
 
-impl Default for PluginManager {
+impl Default for PluginRegistry {
     fn default() -> Self {
-        Self::new().expect("Failed to create default PluginManager")
+        Self::new().expect("Failed to create default PluginRegistry")
+    }
+}
+
+impl Drop for PluginRegistry {
+    fn drop(&mut self) {
+        let _ = self.rollback();
     }
 }

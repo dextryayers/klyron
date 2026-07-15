@@ -16,12 +16,6 @@ pub enum TelemetryAction {
     View,
 }
 
-#[derive(Args)]
-pub struct ConfigArgs {
-    pub key: Option<String>,
-    pub value: Option<String>,
-}
-
 fn get_config_dir() -> std::path::PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
     home.join(".klyron")
@@ -496,24 +490,6 @@ fn fs_available_space(_path: &std::path::Path) -> Option<f64> {
 
 pub fn run_version() -> anyhow::Result<()> {
     println!("Klyron v{}", env!("CARGO_PKG_VERSION"));
-    Ok(())
-}
-
-pub fn run_config(key: Option<String>, value: Option<String>) -> anyhow::Result<()> {
-    match (key, value) {
-        (Some(k), Some(v)) => println!("  Config set: {} = {}", k, v),
-        (Some(k), None) => println!("  Config get: {} = <value>", k),
-        (None, None) => {
-            let config_path = std::env::current_dir()?.join("klyron.toml");
-            if config_path.exists() {
-                println!("Config file: {}", config_path.display());
-                println!("{}", std::fs::read_to_string(&config_path)?);
-            } else {
-                println!("No klyron.toml found. Run `klyron init` to create one.");
-            }
-        }
-        _ => unreachable!(),
-    }
     Ok(())
 }
 

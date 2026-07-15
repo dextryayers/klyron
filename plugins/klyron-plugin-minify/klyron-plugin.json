@@ -1,0 +1,16 @@
+{
+  "name": "klyron-minify",
+  "version": "1.0.0",
+  "description": "Minify JS/CSS files on afterBuild hook",
+  "authors": ["Klyron Contributors"],
+  "license": "MIT",
+  "klyron_api": "1.0.0",
+  "permissions": ["fs_read", "fs_write", "stdio"],
+  "hooks": ["onAfterBuild"],
+  "sandbox": {
+    "max_memory_bytes": 67108864,
+    "max_fuel": 1000000,
+    "max_cpu_ms": 15000,
+    "allowed_paths": ["."]
+  }
+}

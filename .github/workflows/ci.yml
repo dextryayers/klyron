@@ -11,41 +11,108 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  check:
-    name: Check
+  msrv:
+    name: MSRV (1.85.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: rustc, cargo
+      - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace
 
-  test:
-    name: Test
-    runs-on: ubuntu-latest
+  check:
+    name: Check (${{ matrix.os }}, ${{ matrix.rust }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest]
+        rust: [stable, beta]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustc, cargo, clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace -- -D warnings
+      - run: cargo fmt --check
+
+  test:
+    name: Test (${{ matrix.os }}, ${{ matrix.rust }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable, beta]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustc, cargo
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
 
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
+  clippy:
+    name: Clippy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace -- -D warnings
 
-  build:
-    name: Build
+  fmt:
+    name: Rustfmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release --workspace
-      - run: strip target/release/klyron
-      - uses: actions/upload-artifact@v4
         with:
-          name: klyron-linux-x86_64
-          path: target/release/klyron
+          components: rustfmt
+      - run: cargo fmt --check
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories
+
+  quality:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for forbidden patterns
+        run: |
+          set +e
+          has_issues=0
+          todos=$(grep -rn "TODO\|FIXME\|HACK\|XXX" --include="*.rs" --include="*.js" --include="*.ts" --include="*.toml" --include="*.json" --include="*.md" . | grep -v "node_modules/" | grep -v "target/" | grep -v ".github/" | grep -v "CHANGELOG.md" | grep -v "LICENSE" | grep -v "\.git/" || true)
+          if [ -n "$todos" ]; then
+            echo "::warning::Found TODO/FIXME/HACK/XXX comments:"
+            echo "$todos"
+          fi
+          ds_store=$(find . -name ".DS_Store" -o -name "Thumbs.db" 2>/dev/null)
+          if [ -n "$ds_store" ]; then
+            echo "::error::Found .DS_Store or Thumbs.db files:"
+            echo "$ds_store"
+            has_issues=1
+          fi
+          exit $has_issues

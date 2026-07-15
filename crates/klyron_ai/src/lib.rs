@@ -349,3 +349,69 @@ impl AiEngine {
         cache.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ai_config_defaults() {
+        let config = AiConfig::default();
+        assert_eq!(config.model, "gpt-4");
+        assert_eq!(config.temperature as i32, 0);
+        assert_eq!(config.max_tokens, 4096);
+    }
+
+    #[test]
+    fn test_cache_key_generation() {
+        let key = AiEngine::cache_key("system", "user prompt");
+        assert_eq!(key.len(), 64);
+    }
+
+    #[test]
+    fn test_cache_key_deterministic() {
+        let k1 = AiEngine::cache_key("test", "hello");
+        let k2 = AiEngine::cache_key("test", "hello");
+        assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn test_cache_key_different_inputs() {
+        let k1 = AiEngine::cache_key("a", "b");
+        let k2 = AiEngine::cache_key("a", "c");
+        assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn test_ai_config_model() {
+        let config = AiConfig {
+            model: "gpt-3.5-turbo".into(),
+            ..Default::default()
+        };
+        assert_eq!(config.model, "gpt-3.5-turbo");
+    }
+
+    #[test]
+    fn test_ai_config_endpoint() {
+        let config = AiConfig {
+            endpoint: "https://custom.api.com/v1".into(),
+            ..Default::default()
+        };
+        assert_eq!(config.endpoint, "https://custom.api.com/v1");
+    }
+
+    #[test]
+    fn test_cache_empty_on_new() {
+        let config = AiConfig::default();
+        let engine = AiEngine::new(config);
+        assert_eq!(engine.cache_size(), 0);
+    }
+
+    #[test]
+    fn test_cache_clear() {
+        let config = AiConfig::default();
+        let engine = AiEngine::new(config);
+        engine.clear_cache();
+        assert_eq!(engine.cache_size(), 0);
+    }
+}

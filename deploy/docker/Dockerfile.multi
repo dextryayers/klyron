@@ -1,0 +1,31 @@
+# =============================================================================
+# Klyron Multi-Stage Build: rust:alpine → distroless
+# =============================================================================
+
+# ---- Build Stage ----
+FROM rust:1.78-alpine AS chef
+RUN apk add --no-cache musl-dev pkgconfig openssl-dev
+RUN cargo install cargo-chef --version 0.1.68
+WORKDIR /app
+
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+COPY . .
+RUN cargo build --release --locked
+
+# ---- Runtime Stage (distroless) ----
+FROM gcr.io/distroless/cc-debian12:nonroot
+COPY --from=builder /app/target/release/klyron /usr/local/bin/klyron
+COPY --from=builder /app/target/release/klyron_cli /usr/local/bin/klyron_cli
+COPY --from=builder /app/assets /app/assets
+WORKDIR /app
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD ["/usr/local/bin/klyron", "health"]
+ENTRYPOINT ["/usr/local/bin/klyron"]
+CMD ["serve"]

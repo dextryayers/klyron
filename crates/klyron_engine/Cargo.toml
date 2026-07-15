@@ -14,9 +14,13 @@ tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 bincode = "1"
 sha2 = "0.10"
+blake3 = "1"
 lru = "0.12"
 parking_lot = "0.12"
 dirs = "5"
+regex = "1"
+chrono = "0.4"
+inferno = { version = "0.11", optional = true }
 
 [features]
 v8 = ["dep:klyron-engine-v8"]
@@ -24,6 +28,7 @@ boa = ["dep:klyron-engine-boa"]
 quickjs = ["dep:klyron-engine-quickjs"]
 jsc = ["dep:klyron-engine-jsc"]
 all-engines = ["v8", "boa", "quickjs", "jsc"]
+inferno = ["dep:inferno"]
 default = []
 
 [dependencies.klyron-engine-v8]

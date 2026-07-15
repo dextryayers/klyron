@@ -1,0 +1,27 @@
+[package]
+name = "klyron-fuzz"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.klyron_pm]
+path = "../crates/klyron_pm"
+
+[dependencies.klyron_loader]
+path = "../crates/klyron_loader"
+
+[dependencies.klyron_registry]
+path = "../crates/klyron_registry"
+
+[dependencies.serde_json]
+workspace = true
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]

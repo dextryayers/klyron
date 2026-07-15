@@ -1,0 +1,5 @@
+[build]
+jobs = 0
+
+[env]
+CARGO_PROFILE_RELEASE_LTO = "fat"

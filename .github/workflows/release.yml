@@ -3,11 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version'
+        description: Release version
         required: true
 
 env:
@@ -19,16 +19,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: x86_64-unknown-linux-gnu
-      - name: Check
-        run: cargo check --workspace
-      - name: Lint
-        run: cargo clippy --workspace -- -D warnings 2>&1 || true
-      - name: Test
-        run: cargo test --workspace --no-fail-fast
+          components: rustc, cargo, clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace -- -D warnings
+      - run: cargo fmt --check
 
   build:
     name: Build ${{ matrix.target }}
@@ -41,44 +39,45 @@ jobs:
             os: ubuntu-latest
             arch: x86_64
             os_name: linux
-            cross: false
+            archive_ext: .tar.gz
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             arch: aarch64
             os_name: linux
+            archive_ext: .tar.gz
             cross: true
           - target: x86_64-apple-darwin
             os: macos-latest
             arch: x86_64
             os_name: macos
-            cross: false
+            archive_ext: .tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
             arch: aarch64
             os_name: macos
-            cross: false
+            archive_ext: .tar.gz
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             arch: x86_64
             os_name: windows
-            cross: false
+            archive_ext: .zip
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: ${{ matrix.target }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
       - name: Install cross
-        if: ${{ matrix.cross }}
+        if: matrix.cross
         run: cargo install cross
       - name: Build (cross)
-        if: ${{ matrix.cross }}
+        if: matrix.cross
         run: cross build --release --target ${{ matrix.target }} --features all-engines
       - name: Build (native)
         if: ${{ !matrix.cross }}
         run: cargo build --release --target ${{ matrix.target }} --features all-engines
-      - name: Prepare binary
+      - name: Prepare archive
         shell: bash
         run: |
           BIN="klyron"
@@ -87,7 +86,12 @@ jobs:
             SRC="${SRC}.exe"
           fi
           mkdir -p dist
-          cp "$SRC" "dist/${BIN}-${{ matrix.os_name }}-${{ matrix.arch }}${{ matrix.os_name == 'windows' && '.exe' || '' }}"
+          ARCHIVE_NAME="klyron-${{ matrix.os_name }}-${{ matrix.arch }}${{ matrix.archive_ext }}"
+          if [ "${{ matrix.os_name }}" = "windows" ]; then
+            7z a "dist/${ARCHIVE_NAME}" "$SRC"
+          else
+            tar czf "dist/${ARCHIVE_NAME}" -C "$(dirname "$SRC")" "$BIN"
+          fi
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -106,12 +110,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist/
-      - name: Generate checksums
+      - name: Generate SHA256SUMS
         run: |
           cd dist
-          for f in */klyron-*; do
-            sha256sum "$f" > "$f.sha256"
-          done
+          find . -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec sha256sum {} \; | tee SHA256SUMS
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -122,18 +124,18 @@ jobs:
 
             ### Installation
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/dextryayers/klyron/main/install.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
             ```
 
-            ### What's New
-            See [CHANGELOG.md](CHANGELOG.md) for full release notes.
+            ### What's Changed
+            ${{ github.event.head_commit.message }}
 
             ### Assets
-            - **Linux x86_64**: `klyron-linux-x86_64`
-            - **Linux ARM64**: `klyron-linux-aarch64`
-            - **macOS x86_64**: `klyron-macos-x86_64`
-            - **macOS ARM64**: `klyron-macos-aarch64`
-            - **Windows x86_64**: `klyron-windows-x86_64.exe`
-          files: dist/*/klyron-*
-          draft: false
+            See below for platform-specific binaries.
+          files: |
+            dist/**/*.tar.gz
+            dist/**/*.zip
+            dist/**/SHA256SUMS
+          draft: true
           prerelease: false
+          generate_release_notes: true

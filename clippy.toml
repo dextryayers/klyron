@@ -1,0 +1,9 @@
+allow-unwrap-in-tests = true
+cognitive-complexity-threshold = 25
+too-many-arguments-threshold = 6
+too-many-lines-threshold = 500
+large-enum-variant = 100
+cyclomatic-complexity-threshold = 30
+missing-docs-in-crate-items = "deny"
+struct-excessive-bools = 5
+type-complexity-threshold = 250

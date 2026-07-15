@@ -1,0 +1,16 @@
+{
+  "name": "klyron-livereload",
+  "version": "1.0.0",
+  "description": "Inject SSE live-reload script into HTML on afterBuild",
+  "authors": ["Klyron Contributors"],
+  "license": "MIT",
+  "klyron_api": "1.0.0",
+  "permissions": ["fs_read", "fs_write", "stdio"],
+  "hooks": ["onAfterBuild"],
+  "sandbox": {
+    "max_memory_bytes": 33554432,
+    "max_fuel": 500000,
+    "max_cpu_ms": 5000,
+    "allowed_paths": ["."]
+  }
+}

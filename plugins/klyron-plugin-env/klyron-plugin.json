@@ -1,0 +1,16 @@
+{
+  "name": "klyron-env-validator",
+  "version": "1.0.0",
+  "description": "Validate required environment variables on beforeServe hook",
+  "authors": ["Klyron Contributors"],
+  "license": "MIT",
+  "klyron_api": "1.0.0",
+  "permissions": ["env", "stdio"],
+  "hooks": ["onBeforeServe"],
+  "sandbox": {
+    "max_memory_bytes": 16777216,
+    "max_fuel": 500000,
+    "max_cpu_ms": 3000,
+    "allowed_env": ["PATH", "HOME", "NODE_ENV", "PORT", "HOST", "DATABASE_URL", "API_KEY", "SECRET"]
+  }
+}

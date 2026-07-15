@@ -1,0 +1,17 @@
+{
+  "name": "klyron-typescript",
+  "version": "1.0.0",
+  "description": "Compile TypeScript files on beforeBuild hook",
+  "authors": ["Klyron Contributors"],
+  "license": "MIT",
+  "klyron_api": "1.0.0",
+  "permissions": ["fs_read", "fs_write", "stdio"],
+  "hooks": ["onBeforeBuild"],
+  "sandbox": {
+    "max_memory_bytes": 134217728,
+    "max_fuel": 2000000,
+    "max_cpu_ms": 10000,
+    "allowed_paths": ["."],
+    "allowed_env": ["PATH", "HOME"]
+  }
+}

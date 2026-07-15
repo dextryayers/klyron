@@ -1,0 +1,29 @@
+# =============================================================================
+# Klyron Production-Optimized Dockerfile
+# =============================================================================
+
+FROM rust:1.78-slim-bookworm AS builder
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src && echo "fn main() {}" > src/main.rs && \
+    cargo build --release 2>/dev/null; true
+COPY . .
+RUN cargo build --release --locked && \
+    strip target/release/klyron && \
+    strip target/release/klyron_cli
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN groupadd -r klyron && useradd -r -g klyron -d /app -s /sbin/nologin klyron
+COPY --from=builder /app/target/release/klyron /usr/local/bin/klyron
+COPY --from=builder /app/target/release/klyron_cli /usr/local/bin/klyron_cli
+COPY --from=builder /app/assets /app/assets
+RUN mkdir -p /app/data && chown -R klyron:klyron /app
+USER klyron
+WORKDIR /app
+EXPOSE 3000
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+  CMD ["/usr/local/bin/klyron", "health"] || exit 1
+ENTRYPOINT ["/usr/local/bin/klyron"]
+CMD ["serve", "--port", "3000"]

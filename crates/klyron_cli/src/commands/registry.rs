@@ -1,4 +1,4 @@
-use clap::Args;
+use clap::{Args, Subcommand};
 use klyron_registry::{RegistryClient, RegistryKind};
 use klyron_pm;
 
@@ -24,6 +24,8 @@ pub struct UnpublishArgs {
 #[derive(Args)]
 pub struct LoginArgs {
     pub registry: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
 }
 
 #[derive(Args)]
@@ -31,11 +33,49 @@ pub struct LogoutArgs {
     pub registry: Option<String>,
 }
 
+fn auth_store_path() -> std::path::PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("~/.config"))
+        .join("klyron")
+        .join("auth.json")
+}
+
+fn load_auth() -> serde_json::Value {
+    let path = auth_store_path();
+    if path.exists() {
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_else(|| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    }
+}
+
+fn save_auth(auth: &serde_json::Value) -> anyhow::Result<()> {
+    let path = auth_store_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(auth)?)?;
+    Ok(())
+}
+
 #[derive(Args)]
 pub struct SearchArgs {
     pub query: String,
     #[arg(long)]
     pub registry: Option<String>,
+    #[arg(long)]
+    pub exact: bool,
+    #[arg(long)]
+    pub author: Option<String>,
+    #[arg(long)]
+    pub page: Option<u32>,
+    #[arg(long)]
+    pub limit: Option<u32>,
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args)]
@@ -45,6 +85,30 @@ pub struct InfoArgs {
     pub version: Option<String>,
     #[arg(long)]
     pub registry: Option<String>,
+}
+
+#[derive(Subcommand)]
+pub enum RegistryAction {
+    Add {
+        name: String,
+        url: String,
+    },
+    Remove {
+        name: String,
+    },
+    List,
+    Ping {
+        url: String,
+    },
+    MapScope {
+        scope: String,
+        registry: String,
+    },
+    UnmapScope {
+        scope: String,
+    },
+    ListScopes,
+    GenerateKeypair,
 }
 
 fn resolve_registry(name: Option<&str>) -> RegistryClient {
@@ -108,24 +172,67 @@ pub fn run_unpublish(name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn run_login(registry: Option<&str>) -> anyhow::Result<()> {
-    let reg = registry.unwrap_or("npm");
-    match reg {
-        "npm" => crate::run_cmd("npm", &["login"], &std::env::current_dir()?),
-        "pypi" => crate::run_cmd("python3", &["-m", "twine", "login"], &std::env::current_dir()?),
-        _ => crate::run_cmd("npm", &["login"], &std::env::current_dir()?),
+pub fn run_login(args: LoginArgs) -> anyhow::Result<()> {
+    if let Some(token) = args.token {
+        let mut auth = load_auth();
+        let reg = args.registry.as_deref().unwrap_or("npm");
+        let user = format!("token-user-{}", &token[..token.len().min(8)]);
+        auth[reg] = serde_json::json!({
+            "token": token,
+            "user": user,
+        });
+        save_auth(&auth)?;
+        let user = auth[reg]["user"].as_str().unwrap_or("unknown");
+        eprintln!(
+            "{} Logged in as {} (registry: {})",
+            crate::Color::GREEN.paint("\u{2705}"),
+            crate::Color::BOLD.paint(user),
+            reg,
+        );
+        Ok(())
+    } else {
+        let reg = args.registry.as_deref().unwrap_or("npm");
+        match reg {
+            "npm" => crate::run_cmd("npm", &["login"], &std::env::current_dir()?),
+            "pypi" => crate::run_cmd("python3", &["-m", "twine", "login"], &std::env::current_dir()?),
+            _ => crate::run_cmd("npm", &["login"], &std::env::current_dir()?),
+        }
     }
 }
 
-pub fn run_logout(registry: Option<&str>) -> anyhow::Result<()> {
-    let reg = registry.unwrap_or("npm");
-    match reg {
-        "npm" => crate::run_cmd("npm", &["logout"], &std::env::current_dir()?),
-        _ => crate::run_cmd("npm", &["logout"], &std::env::current_dir()?),
+pub fn run_logout(args: LogoutArgs) -> anyhow::Result<()> {
+    let reg = args.registry.as_deref().unwrap_or("npm");
+    let mut auth = load_auth();
+    if auth.as_object().map(|o| o.contains_key(reg)).unwrap_or(false) {
+        auth.as_object_mut().map(|o| o.remove(reg));
+        save_auth(&auth)?;
+        eprintln!(
+            "{} Logged out from registry: {}",
+            crate::Color::GREEN.paint("\u{2705}"),
+            reg,
+        );
+        Ok(())
+    } else {
+        match reg {
+            "npm" => crate::run_cmd("npm", &["logout"], &std::env::current_dir()?),
+            _ => crate::run_cmd("npm", &["logout"], &std::env::current_dir()?),
+        }
     }
 }
 
 pub fn run_whoami() -> anyhow::Result<()> {
+    let auth = load_auth();
+    if let Some(obj) = auth.as_object() {
+        if !obj.is_empty() {
+            for (reg, data) in obj {
+                if let Some(user) = data.get("user").and_then(|v| v.as_str()) {
+                    println!("{user} (registry: {reg})");
+                }
+            }
+            return Ok(());
+        }
+    }
+
     let registry = RegistryClient::from_kind(RegistryKind::Npm);
     match registry.whoami() {
         Ok(user) => {
@@ -138,16 +245,99 @@ pub fn run_whoami() -> anyhow::Result<()> {
     }
 }
 
-pub fn run_search(query: &str) -> anyhow::Result<()> {
-    let registry = RegistryClient::detect(query);
-    let result = registry.search(query, 20)?;
-    if result.results.is_empty() {
-        println!("No results found for '{query}'");
+pub fn run_search(args: &SearchArgs) -> anyhow::Result<()> {
+    let page = args.page.unwrap_or(1);
+    let limit = args.limit.unwrap_or(20);
+
+    let results = klyron_pm::search::search_packages(
+        &args.query,
+        args.exact,
+        args.author.as_deref(),
+        None,
+        page,
+        limit,
+    ).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+            "results": results.results,
+            "total": results.total,
+            "page": results.page,
+            "limit": results.limit,
+        }))?);
+    } else if results.results.is_empty() {
+        println!("No results found for '{}'", args.query);
     } else {
-        println!("Search results for '{query}' ({} total):", result.total);
-        for pkg in &result.results {
+        println!("Search results for '{}' ({} total, page {}):", args.query, results.total, results.page);
+        for pkg in &results.results {
             let desc = pkg.description.as_deref().unwrap_or("");
-            println!("  {}@{}  {}", pkg.name, pkg.version, desc);
+            let downloads = pkg.downloads.map(|d| format!(" ({}/mo)", d)).unwrap_or_default();
+            println!("  {}@{} {}{}", pkg.name, pkg.version, desc, downloads);
+        }
+    }
+    Ok(())
+}
+
+pub fn run_registry(action: RegistryAction) -> anyhow::Result<()> {
+    use klyron_pm::registry;
+    match action {
+        RegistryAction::Add { name, url } => {
+            registry::add_registry(&name, &url)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Added registry '{name}' -> {url}");
+        }
+        RegistryAction::Remove { name } => {
+            registry::remove_registry(&name)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Removed registry '{name}'");
+        }
+        RegistryAction::List => {
+            let regs = registry::list_registries();
+            if regs.is_empty() {
+                println!("No custom registries configured");
+            } else {
+                println!("Configured registries:");
+                for r in &regs {
+                    let tok = if r.token.is_some() { " (authenticated)" } else { "" };
+                    println!("  {} -> {} (priority: {}){}", r.name, r.url, r.priority, tok);
+                }
+            }
+        }
+        RegistryAction::Ping { url } => {
+            let ok = registry::ping_registry(&url);
+            if ok {
+                println!("Registry at {url} is reachable");
+            } else {
+                eprintln!("Registry at {url} is NOT reachable");
+            }
+        }
+        RegistryAction::MapScope { scope, registry: reg } => {
+            registry::map_scope(&scope, &reg)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Mapped scope {scope} -> registry {reg}");
+        }
+        RegistryAction::UnmapScope { scope } => {
+            registry::unmap_scope(&scope)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Unmapped scope {scope}");
+        }
+        RegistryAction::ListScopes => {
+            let scopes = registry::list_mapped_scopes();
+            if scopes.is_empty() {
+                println!("No scope mappings configured");
+            } else {
+                println!("Scope mappings:");
+                for (scope, reg) in &scopes {
+                    println!("  {scope} -> {reg}");
+                }
+            }
+        }
+        RegistryAction::GenerateKeypair => {
+            let keypair = klyron_pm::signing::generate_keypair();
+            klyron_pm::signing::save_keypair("default", &keypair)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("Generated keypair and saved to ~/.config/klyron/keys/");
+            println!("Public key:\n{}", keypair.public_key_pem);
         }
     }
     Ok(())

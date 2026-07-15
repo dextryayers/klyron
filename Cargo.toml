@@ -78,6 +78,9 @@ members = [
     "crates/klyron_watcher",
     "crates/klyron_web",
     "crates/klyron_workspace",
+    "crates/klyron_intern",
+    "crates/klyron_arena",
+    "crates/klyron_serde",
     "engines/common",
     "engines/v8",
     "engines/boa",
@@ -95,6 +98,17 @@ homepage = "https://klyron.dev"
 repository = "https://github.com/dextryayers/klyron"
 readme = "README.md"
 
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.bench]
+opt-level = 3
+lto = "fat"
+
 [workspace.dependencies]
 deno_core = "0.403"
 deno_error = "0.7"
@@ -111,6 +125,17 @@ lru = "0.12"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
 toml = "0.8"
 notify = "6"
+dashmap = "6"
+parking_lot = "0.12"
+once_cell = "1"
+tracing-flame = "0.2"
+tracing-chrome = "0.7"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+simd-json = "0.14"
+tikv-jemalloc-allocator = "0.6"
+mimalloc = "0.1"
+criterion = { version = "0.5", features = ["html_reports"] }
+http = "1"
 tempfile = "3"
 rustyline = "14"
 rustyline-derive = "0.10"

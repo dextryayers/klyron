@@ -1,0 +1,16 @@
+{
+  "name": "klyron-test-reporter",
+  "version": "1.0.0",
+  "description": "Format test results as HTML on afterTest hook",
+  "authors": ["Klyron Contributors"],
+  "license": "MIT",
+  "klyron_api": "1.0.0",
+  "permissions": ["fs_write", "stdio"],
+  "hooks": ["onAfterTest"],
+  "sandbox": {
+    "max_memory_bytes": 33554432,
+    "max_fuel": 500000,
+    "max_cpu_ms": 5000,
+    "allowed_paths": ["."]
+  }
+}

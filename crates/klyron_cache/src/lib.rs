@@ -1,3 +1,5 @@
+pub mod registry_cache;
+
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 

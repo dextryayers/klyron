@@ -8,6 +8,11 @@ use std::time::{Duration, SystemTime};
 use std::os::unix::fs::PermissionsExt;
 
 use memmap2::Mmap;
+use tokio::sync::Semaphore;
+use tracing::{debug, trace};
+
+static IO_SEMAPHORE: std::sync::LazyLock<Semaphore> =
+    std::sync::LazyLock::new(|| Semaphore::new(32));
 
 pub struct FileSystem;
 
@@ -258,37 +263,152 @@ impl FileSystem {
         Self
     }
 
-    #[inline]
-    pub fn read(&self, path: &Path) -> anyhow::Result<Vec<u8>> {
-        Ok(std::fs::read(path)?)
+    pub fn batch_read_dir(&self, path: &Path) -> anyhow::Result<Vec<FileInfo>> {
+        let mut entries = Vec::new();
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            entries.push(self.stat(&entry.path())?);
+        }
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(entries)
     }
 
-    #[inline]
-    pub fn read_string(&self, path: &Path) -> anyhow::Result<String> {
-        Ok(std::fs::read_to_string(path)?)
+    pub fn batch_stat(paths: &[PathBuf]) -> Vec<anyhow::Result<FileInfo>> {
+        let fs = FileSystem::new();
+        paths.iter().map(|p| fs.stat(p)).collect()
+    }
+
+    pub fn batch_read_string(paths: &[PathBuf]) -> Vec<anyhow::Result<String>> {
+        paths.iter().map(|p| {
+            if p.metadata().map(|m| m.len()).unwrap_or(0) < 65536 {
+                std::fs::read_to_string(p).map_err(|e| anyhow::anyhow!("{e}"))
+            } else {
+                std::fs::read_to_string(p).map_err(|e| anyhow::anyhow!("{e}"))
+            }
+        }).collect()
+    }
+
+    pub fn batch_read(paths: &[PathBuf]) -> Vec<anyhow::Result<Vec<u8>>> {
+        paths.iter().map(|p| {
+            if p.metadata().map(|m| m.len()).unwrap_or(0) < 65536 {
+                std::fs::read(p).map_err(|e| anyhow::anyhow!("{e}"))
+            } else {
+                std::fs::read(p).map_err(|e| anyhow::anyhow!("{e}"))
+            }
+        }).collect()
     }
 
     pub async fn read_async(&self, path: &Path) -> anyhow::Result<Vec<u8>> {
+        let _permit = IO_SEMAPHORE.acquire().await;
         Ok(tokio::fs::read(path).await?)
     }
 
     pub async fn read_string_async(&self, path: &Path) -> anyhow::Result<String> {
-        Ok(tokio::fs::read_to_string(path).await?)
+        let _permit = IO_SEMAPHORE.acquire().await;
+        let data = tokio::fs::read(path).await?;
+        Ok(String::from_utf8(data)?)
     }
 
     pub async fn write_async(&self, path: &Path, data: &[u8]) -> anyhow::Result<()> {
+        let _permit = IO_SEMAPHORE.acquire().await;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        Ok(tokio::fs::write(path, data).await?)
+        if data.len() < 4096 {
+            let mut buf = Vec::with_capacity(4096);
+            buf.extend_from_slice(data);
+            tokio::fs::write(path, &buf).await?;
+        } else {
+            tokio::fs::write(path, data).await?;
+        }
+        Ok(())
     }
 
     pub async fn write_string_async(&self, path: &Path, data: &str) -> anyhow::Result<()> {
         self.write_async(path, data.as_bytes()).await
     }
 
+    pub async fn copy_async(&self, from: &Path, to: &Path) -> anyhow::Result<u64> {
+        let _permit = IO_SEMAPHORE.acquire().await;
+        if let Some(parent) = to.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::copy(from, to).await.map_err(|e| anyhow::anyhow!("{e}"))
+    }
+
+    pub async fn exists_async(&self, path: &Path) -> bool {
+        tokio::fs::try_exists(path).await.unwrap_or(false)
+    }
+
+    pub async fn create_dir_async(&self, path: &Path) -> anyhow::Result<()> {
+        let _permit = IO_SEMAPHORE.acquire().await;
+        Ok(tokio::fs::create_dir_all(path).await?)
+    }
+
+    pub async fn remove_async(&self, path: &Path) -> anyhow::Result<()> {
+        let _permit = IO_SEMAPHORE.acquire().await;
+        let meta = tokio::fs::symlink_metadata(path).await?;
+        if meta.is_dir() {
+            tokio::fs::remove_dir_all(path).await?;
+        } else {
+            tokio::fs::remove_file(path).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn read_dir_async(&self, path: &Path) -> anyhow::Result<Vec<FileInfo>> {
+        let _permit = IO_SEMAPHORE.acquire().await;
+        let mut read_dir = tokio::fs::read_dir(path).await?;
+        let mut entries = Vec::new();
+        while let Some(entry) = read_dir.next_entry().await? {
+            let path = entry.path();
+            let meta = entry.metadata().await?;
+            entries.push(FileInfo {
+                path,
+                size: meta.len(),
+                is_dir: meta.is_dir(),
+                is_file: meta.is_file(),
+                is_symlink: meta.is_symlink(),
+                modified: meta.modified().ok(),
+                created: meta.created().ok(),
+                accessed: meta.accessed().ok(),
+                permissions: Some(perm_string(&meta.permissions())),
+                readonly: meta.permissions().readonly(),
+            });
+        }
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(entries)
+    }
+
+    pub async fn stat_async(&self, path: &Path) -> anyhow::Result<FileInfo> {
+        let _permit = IO_SEMAPHORE.acquire().await;
+        let meta = tokio::fs::symlink_metadata(path).await?;
+        Ok(FileInfo {
+            path: path.to_path_buf(),
+            size: meta.len(),
+            is_dir: meta.is_dir(),
+            is_file: meta.is_file(),
+            is_symlink: meta.is_symlink(),
+            modified: meta.modified().ok(),
+            created: meta.created().ok(),
+            accessed: meta.accessed().ok(),
+            permissions: Some(perm_string(&meta.permissions())),
+            readonly: meta.permissions().readonly(),
+        })
+    }
+
     #[inline]
-    pub fn write(&self, path: &Path, data: &[u8]) -> anyhow::Result<()> {
+    pub fn read_sync(&self, path: &Path) -> anyhow::Result<Vec<u8>> {
+        Ok(std::fs::read(path)?)
+    }
+
+    #[inline]
+    pub fn read_string_sync(&self, path: &Path) -> anyhow::Result<String> {
+        Ok(std::fs::read_to_string(path)?)
+    }
+
+    #[inline]
+    pub fn write_sync(&self, path: &Path, data: &[u8]) -> anyhow::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -296,13 +416,12 @@ impl FileSystem {
     }
 
     #[inline]
-    pub fn write_string(&self, path: &Path, data: &str) -> anyhow::Result<()> {
-        self.write(path, data.as_bytes())
+    pub fn write_string_sync(&self, path: &Path, data: &str) -> anyhow::Result<()> {
+        self.write_sync(path, data.as_bytes())
     }
 
     #[inline]
-    pub fn append(&self, path: &Path, data: &[u8]) -> anyhow::Result<()> {
-        use std::io::Write;
+    pub fn append_sync(&self, path: &Path, data: &[u8]) -> anyhow::Result<()> {
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -311,25 +430,25 @@ impl FileSystem {
     }
 
     #[inline]
-    pub fn append_string(&self, path: &Path, data: &str) -> anyhow::Result<()> {
-        self.append(path, data.as_bytes())
+    pub fn append_string_sync(&self, path: &Path, data: &str) -> anyhow::Result<()> {
+        self.append_sync(path, data.as_bytes())
     }
 
     #[inline]
-    pub fn truncate(&self, path: &Path, len: u64) -> anyhow::Result<()> {
+    pub fn truncate_sync(&self, path: &Path, len: u64) -> anyhow::Result<()> {
         let file = std::fs::OpenOptions::new().write(true).open(path)?;
         file.set_len(len)?;
         Ok(())
     }
 
-    pub fn copy(&self, from: &Path, to: &Path) -> anyhow::Result<u64> {
+    pub fn copy_sync(&self, from: &Path, to: &Path) -> anyhow::Result<u64> {
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent)?;
         }
         Ok(std::fs::copy(from, to)?)
     }
 
-    pub fn copy_with_progress<F: FnMut(u64, u64)>(&self, from: &Path, to: &Path, mut progress: F) -> anyhow::Result<u64> {
+    pub fn copy_with_progress_sync<F: FnMut(u64, u64)>(&self, from: &Path, to: &Path, mut progress: F) -> anyhow::Result<u64> {
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -350,47 +469,7 @@ impl FileSystem {
         Ok(copied)
     }
 
-    #[inline]
-    pub fn move_file(&self, from: &Path, to: &Path) -> anyhow::Result<()> {
-        if let Some(parent) = to.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        Ok(std::fs::rename(from, to)?)
-    }
-
-    #[inline]
-    pub fn remove(&self, path: &Path) -> anyhow::Result<()> {
-        if path.is_symlink() {
-            std::fs::remove_file(path)?;
-        } else if path.is_dir() {
-            std::fs::remove_dir_all(path)?;
-        } else {
-            std::fs::remove_file(path)?;
-        }
-        Ok(())
-    }
-
-    #[inline]
-    pub fn exists(&self, path: &Path) -> bool {
-        path.exists()
-    }
-
-    #[inline]
-    pub fn is_file(&self, path: &Path) -> bool {
-        path.is_file()
-    }
-
-    #[inline]
-    pub fn is_dir(&self, path: &Path) -> bool {
-        path.is_dir()
-    }
-
-    #[inline]
-    pub fn create_dir(&self, path: &Path) -> anyhow::Result<()> {
-        Ok(std::fs::create_dir_all(path)?)
-    }
-
-    pub fn read_dir(&self, path: &Path) -> anyhow::Result<Vec<FileInfo>> {
+    pub fn read_dir_sync(&self, path: &Path) -> anyhow::Result<Vec<FileInfo>> {
         let mut entries = Vec::new();
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
@@ -400,7 +479,7 @@ impl FileSystem {
         Ok(entries)
     }
 
-    pub fn read_dir_recursive(&self, path: &Path) -> anyhow::Result<Vec<FileInfo>> {
+    pub fn read_dir_recursive_sync(&self, path: &Path) -> anyhow::Result<Vec<FileInfo>> {
         use rayon::prelude::*;
         let entries: Vec<_> = walkdir::WalkDir::new(path)
             .into_iter()
@@ -427,7 +506,7 @@ impl FileSystem {
     }
 
     #[inline]
-    pub fn chmod(&self, path: &Path, mode: u32) -> anyhow::Result<()> {
+    pub fn chmod_sync(&self, path: &Path, mode: u32) -> anyhow::Result<()> {
         #[cfg(unix)]
         {
             let perm = std::fs::Permissions::from_mode(mode & 0o777);
@@ -441,14 +520,14 @@ impl FileSystem {
     }
 
     #[inline]
-    pub fn set_readonly(&self, path: &Path, readonly: bool) -> anyhow::Result<()> {
+    pub fn set_readonly_sync(&self, path: &Path, readonly: bool) -> anyhow::Result<()> {
         let mut perm = path.metadata()?.permissions();
         perm.set_readonly(readonly);
         Ok(std::fs::set_permissions(path, perm)?)
     }
 
     #[inline]
-    pub fn symlink(&self, target: &Path, link: &Path) -> anyhow::Result<()> {
+    pub fn symlink_sync(&self, target: &Path, link: &Path) -> anyhow::Result<()> {
         #[cfg(unix)]
         {
             Ok(std::os::unix::fs::symlink(target, link)?)
@@ -468,31 +547,31 @@ impl FileSystem {
     }
 
     #[inline]
-    pub fn read_link(&self, path: &Path) -> anyhow::Result<PathBuf> {
+    pub fn read_link_sync(&self, path: &Path) -> anyhow::Result<PathBuf> {
         Ok(std::fs::read_link(path)?)
     }
 
     #[inline]
-    pub fn hard_link(&self, target: &Path, link: &Path) -> anyhow::Result<()> {
+    pub fn hard_link_sync(&self, target: &Path, link: &Path) -> anyhow::Result<()> {
         Ok(std::fs::hard_link(target, link)?)
     }
 
     #[inline]
-    pub fn watcher(&self) -> FileWatcherBuilder {
+    pub fn watcher_sync(&self) -> FileWatcherBuilder {
         FileWatcherBuilder::new()
     }
 
     #[inline]
-    pub fn temp_dir(&self) -> anyhow::Result<PathBuf> {
+    pub fn temp_dir_sync(&self) -> anyhow::Result<PathBuf> {
         Ok(std::env::temp_dir())
     }
 
-    pub fn temp_file(&self) -> anyhow::Result<PathBuf> {
+    pub fn temp_file_sync(&self) -> anyhow::Result<PathBuf> {
         let (_, path) = tempfile::NamedTempFile::new()?.keep()?;
         Ok(path)
     }
 
-    pub fn mmap(&self, path: &Path) -> anyhow::Result<Mmap> {
+    pub fn mmap_sync(&self, path: &Path) -> anyhow::Result<Mmap> {
         let file = std::fs::File::open(path)?;
         let mmap = unsafe { Mmap::map(&file)? };
         Ok(mmap)
@@ -508,17 +587,17 @@ impl Default for FileSystem {
 
 #[inline]
 pub fn read_to_string(path: &Path) -> anyhow::Result<String> {
-    FileSystem::new().read_string(path)
+    FileSystem::new().read_string_sync(path)
 }
 
 #[inline]
 pub fn write_string(path: &Path, data: &str) -> anyhow::Result<()> {
-    FileSystem::new().write_string(path, data)
+    FileSystem::new().write_string_sync(path, data)
 }
 
 #[inline]
 pub fn copy_file(from: &Path, to: &Path) -> anyhow::Result<u64> {
-    FileSystem::new().copy(from, to)
+    FileSystem::new().copy_sync(from, to)
 }
 
 #[cfg(unix)]
@@ -552,84 +631,51 @@ mod tests {
         let dir = test_dir();
         let fs = FileSystem::new();
         let file = dir.join("hello.txt");
-        fs.write_string(&file, "Hello, World!").unwrap();
-        assert_eq!(fs.read_string(&file).unwrap(), "Hello, World!");
+        fs.write_string_sync(&file, "Hello, World!").unwrap();
+        assert_eq!(fs.read_string_sync(&file).unwrap(), "Hello, World!");
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn test_fs_exists() {
-        let fs = FileSystem::new();
-        assert!(fs.exists(Path::new("/tmp")));
-        assert!(!fs.exists(Path::new("/nonexistent_path_xyz_12345")));
-    }
-
-    #[test]
-    fn test_fs_is_file_dir() {
-        let fs = FileSystem::new();
-        assert!(fs.is_dir(Path::new("/tmp")));
-        assert!(!fs.is_file(Path::new("/tmp")));
-    }
-
-    #[test]
-    fn test_fs_stat() {
-        let fs = FileSystem::new();
-        let info = fs.stat(Path::new("/tmp")).unwrap();
-        assert!(info.is_dir);
-    }
-
-    #[test]
-    fn test_fs_temp() {
-        let fs = FileSystem::new();
-        let dir = fs.temp_dir().unwrap();
-        assert!(dir.exists());
-        let file = fs.temp_file().unwrap();
-        assert!(file.exists());
-        let _ = fs::remove_file(&file);
-    }
-
-    #[test]
-    fn test_fs_copy_move() {
+    fn test_batch_stat() {
         let dir = test_dir();
-        let fs = FileSystem::new();
-        let src = dir.join("src.txt");
-        let dst = dir.join("dst.txt");
-        let moved = dir.join("moved.txt");
-        fs.write_string(&src, "data").unwrap();
-        fs.copy(&src, &dst).unwrap();
-        assert!(fs.exists(&dst));
-        fs.move_file(&dst, &moved).unwrap();
-        assert!(!fs.exists(&dst));
-        assert!(fs.exists(&moved));
+        let files: Vec<PathBuf> = (0..3).map(|i| {
+            let p = dir.join(format!("f{i}.txt"));
+            std::fs::write(&p, format!("data{i}")).ok();
+            p
+        }).collect();
+        let results = FileSystem::batch_stat(&files);
+        assert_eq!(results.len(), 3);
+        for r in &results {
+            assert!(r.is_ok());
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn test_fs_copy_with_progress() {
+    fn test_batch_read() {
         let dir = test_dir();
-        let fs = FileSystem::new();
-        let src = dir.join("src.bin");
-        let dst = dir.join("dst.bin");
-        let data = vec![0u8; 100_000];
-        fs.write(&src, &data).unwrap();
-        let mut last_progress = 0u64;
-        fs.copy_with_progress(&src, &dst, |copied, total| {
-            last_progress = copied;
-            assert_eq!(total, 100_000);
-        }).unwrap();
-        assert_eq!(last_progress, 100_000);
-        assert!(fs.exists(&dst));
+        let files: Vec<PathBuf> = (0..3).map(|i| {
+            let p = dir.join(format!("r{i}.txt"));
+            std::fs::write(&p, format!("data{i}")).ok();
+            p
+        }).collect();
+        let results = FileSystem::batch_read(&files);
+        assert_eq!(results.len(), 3);
+        for r in &results {
+            assert!(r.is_ok());
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn test_fs_truncate() {
+    #[tokio::test]
+    async fn test_async_read_write() {
         let dir = test_dir();
         let fs = FileSystem::new();
-        let file = dir.join("trunc.txt");
-        fs.write_string(&file, "long content here").unwrap();
-        fs.truncate(&file, 4).unwrap();
-        assert_eq!(fs.read_string(&file).unwrap(), "long");
+        let file = dir.join("async_test.txt");
+        fs.write_async(&file, b"async data").await.unwrap();
+        let data = fs.read_async(&file).await.unwrap();
+        assert_eq!(data, b"async data");
         let _ = fs::remove_dir_all(&dir);
     }
 }

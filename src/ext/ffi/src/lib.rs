@@ -97,3 +97,32 @@ fn op_ffi_call(#[string] lib_id: String, #[string] fn_name: String, #[string] ar
     let result = func();
     Ok(result.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_init_returns_extension() {
+        let ext = init();
+        assert_eq!(ext.name, "klyron_ffi");
+    }
+
+    #[test]
+    fn test_ffi_open_nonexistent() {
+        let result = op_ffi_open("/tmp/nonexistent_lib_xyz.so".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_ffi_call_no_lib() {
+        let result = op_ffi_call("lib_99999".to_string(), "foo".to_string(), "[]".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_ffi_open_null_path() {
+        let result = op_ffi_open("lib\0test.so".to_string());
+        assert!(result.is_err());
+    }
+}

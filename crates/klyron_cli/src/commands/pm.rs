@@ -419,6 +419,39 @@ pub fn run_audit() -> anyhow::Result<()> {
     }
 }
 
+pub fn run_audit_licenses() -> anyhow::Result<()> {
+    let dir = std::env::current_dir()?;
+    let nm = dir.join("node_modules");
+    if !nm.exists() {
+        anyhow::bail!("node_modules not found in {}", dir.display());
+    }
+
+    let allowed = vec![
+        "MIT".to_string(),
+        "Apache-2.0".to_string(),
+        "ISC".to_string(),
+        "BSD-2-Clause".to_string(),
+        "BSD-3-Clause".to_string(),
+        "Unlicense".to_string(),
+        "CC0-1.0".to_string(),
+    ];
+
+    let deps = klyron_pm::license::scan_node_modules_for_licenses(&nm)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let violations = klyron_pm::license::check_license_compliance(&deps, &allowed);
+
+    if violations.is_empty() {
+        println!("All {} packages have approved licenses", deps.len());
+    } else {
+        println!("License compliance violations ({}):", violations.len());
+        for v in &violations {
+            let label = if v.required { "required" } else { "unknown" };
+            println!("  {}@{} - {} ({label})", v.package, v.version, v.license);
+        }
+    }
+    Ok(())
+}
+
 pub fn run_dedupe() -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     let project = crate::detect_project_type(&dir);

@@ -1,3 +1,5 @@
+pub mod pool;
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -5,6 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use tokio::net::TcpStream;
 use axum::http::Method;
 use axum::response::Json;
 use axum::routing::{any, delete, get, head, options, patch, post, put};
@@ -216,17 +219,37 @@ impl HttpServer {
         let listener = tokio::net::TcpListener::bind(self.addr).await?;
         println!("Klyron HTTP server listening on http://{}", self.addr);
 
-        if self.config.enable_http2 {
-            self.serve_h2(listener).await
-        } else {
-            axum::serve(listener, self.app).await?;
-            Ok(())
+        loop {
+            let (mut stream, peer) = listener.accept().await?;
+            let _ = stream.set_nodelay(true);
+            if !self.pool.try_acquire() {
+                eprintln!("Connection limit reached, dropping {peer}");
+                continue;
+            }
+            let app = self.app.clone();
+            let pool = self.pool.clone();
+
+            tokio::spawn(async move {
+                let io = hyper_util::rt::TokioIo::new(stream);
+                let svc = hyper_util::service::TowerToHyperService::new(app.into_service());
+                if let Err(e) = hyper::server::conn::http1::Builder::new()
+                    .keep_alive(true)
+                    .serve_connection(io, svc)
+                    .await
+                {
+                    if !e.is_incomplete_message() {
+                        eprintln!("Connection error from {peer}: {e}");
+                    }
+                }
+                pool.release();
+            });
         }
     }
 
     async fn serve_h2(self, listener: tokio::net::TcpListener) -> anyhow::Result<()> {
         loop {
-            let (stream, peer) = listener.accept().await?;
+            let (mut stream, peer) = listener.accept().await?;
+            let _ = stream.set_nodelay(true);
             if !self.pool.try_acquire() {
                 eprintln!("Connection limit reached, dropping {peer}");
                 continue;
@@ -270,7 +293,8 @@ impl HttpServer {
         println!("Klyron HTTPS server listening on https://{}", self.addr);
 
         loop {
-            let (stream, _) = listener.accept().await?;
+            let (mut stream, _) = listener.accept().await?;
+            let _ = stream.set_nodelay(true);
             let acceptor = acceptor.clone();
             let app = self.app.clone();
             let pool = self.pool.clone();

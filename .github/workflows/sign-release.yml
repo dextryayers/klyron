@@ -1,0 +1,78 @@
+name: Sign Release
+on:
+  release:
+    types: [published]
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Generate signing key (if not exists)
+        run: |
+          mkdir -p ~/.config/klyron/keys
+          if [ ! -f ~/.config/klyron/keys/release.pub ]; then
+            cargo run --release -- keys generate release
+          fi
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: true
+
+      - name: Sign binary
+        run: |
+          BINARY="target/release/klyron"
+          KEY_NAME="release"
+          SIG_FILE="${BINARY}.sig"
+
+          cargo run --release -- sign "$BINARY" "$KEY_NAME" || {
+            BINARY_HASH=$(sha256sum "$BINARY" | cut -d' ' -f1)
+            echo "$BINARY_HASH" | openssl pkeyutl -sign \
+              -inkey ~/.config/klyron/keys/$KEY_NAME.sec \
+              -out "$SIG_FILE"
+          }
+
+          echo "Binary signed. Signature file: $SIG_FILE"
+          ls -la "$BINARY" "$SIG_FILE"
+
+      - name: Upload signature
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./target/release/klyron.sig
+          asset_name: klyron-${{ github.ref_name }}.sig
+          asset_content_type: application/octet-stream
+
+      - name: Upload public key
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ~/.config/klyron/keys/release.pub
+          asset_name: klyron-${{ github.ref_name }}.pub
+          asset_content_type: application/octet-stream
+
+      - name: Verify signature
+        run: |
+          BINARY="target/release/klyron"
+          SIG_FILE="${BINARY}.sig"
+          PUB_KEY=~/.config/klyron/keys/release.pub
+
+          BINARY_HASH=$(sha256sum "$BINARY" | cut -d' ' -f1)
+          if command -v openssl &>/dev/null; then
+            echo "$BINARY_HASH" | openssl pkeyutl -verify \
+              -pubin -inkey "$PUB_KEY" \
+              -sigfile "$SIG_FILE" \
+              && echo "Signature verification: SUCCESS" \
+              || echo "Signature verification: FAILED"
+          fi

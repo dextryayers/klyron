@@ -84,3 +84,70 @@ fn op_net_close(state: &mut OpState, rid: i32) -> Result<(), JsErrorBox> {
     Err(JsErrorBox::generic(format!("connection {rid} not found")))
   }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::runtime::Runtime;
+
+    #[test]
+    fn test_init_returns_extension() {
+        let ext = init();
+        assert_eq!(ext.name, "klyron_net");
+    }
+
+    #[test]
+    fn test_net_connect_refused() {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+            let mut state = OpState::default();
+            state.put::<ConnStore>(Arc::new(Mutex::new(Vec::new())));
+            let result = op_net_connect(&mut state, "127.0.0.1:1".to_string());
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn test_net_close_invalid_rid() {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+            let mut state = OpState::default();
+            state.put::<ConnStore>(Arc::new(Mutex::new(Vec::new())));
+            let result = op_net_close(&mut state, 999);
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn test_net_send_invalid_rid() {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+            let mut state = OpState::default();
+            state.put::<ConnStore>(Arc::new(Mutex::new(Vec::new())));
+            let result = op_net_send(&mut state, 999, "data".to_string());
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn test_net_recv_invalid_rid() {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+            let mut state = OpState::default();
+            state.put::<ConnStore>(Arc::new(Mutex::new(Vec::new())));
+            let result = op_net_recv(&mut state, 999);
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn test_net_connect_empty_addr() {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+            let mut state = OpState::default();
+            state.put::<ConnStore>(Arc::new(Mutex::new(Vec::new())));
+            let result = op_net_connect(&mut state, "".to_string());
+            assert!(result.is_err());
+        });
+    }
+}

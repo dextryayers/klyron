@@ -741,23 +741,40 @@ if (typeof globalThis.require !== 'function') {
   }
 
   const nodeBuiltins = {
-    'fs': './node_fs.js',
-    'path': './node_path.js',
+    'assert': './node_assert.js',
+    'async_hooks': './node_async_hooks.js',
     'buffer': './node_buffer.js',
-    'events': './node_events.js',
-    'stream': './node_stream.js',
-    'http': './node_http.js',
-    'https': './node_https.js',
-    'crypto': './node_crypto.js',
-    'os': './node_os.js',
     'child_process': './node_child_process.js',
-    'timers': './timers.js',
+    'cluster': './node_cluster.js',
     'console': './console.js',
+    'crypto': './node_crypto.js',
+    'diagnostics_channel': './node_diagnostics_channel.js',
+    'dns': './node_dns.js',
+    'events': './node_events.js',
+    'fs': './node_fs.js',
+    'http': './node_http.js',
+    'http2': './node_http2.js',
+    'https': './node_https.js',
+    'inspector': './node_inspector.js',
+    'module': './node_module.js',
+    'net': './node_net.js',
+    'os': './node_os.js',
+    'path': './node_path.js',
+    'perf_hooks': './node_perf_hooks.js',
+    'querystring': './node_querystring.js',
+    'readline': './node_readline.js',
+    'repl': './node_repl.js',
+    'stream': './node_stream.js',
+    'string_decoder': './node_string_decoder.js',
+    'timers': './node_timers.js',
+    'trace_events': './node_trace_events.js',
+    'tty': './node_tty.js',
     'url': './url.js',
-    'querystring': './querystring.js',
-    'assert': './assert.js',
-    'util': './util.js',
-    'string_decoder': './string_decoder.js',
+    'util': './node_util.js',
+    'v8': './node_v8.js',
+    'vm': './node_vm.js',
+    'wasi': './node_wasi.js',
+    'worker_threads': './node_worker_threads.js',
   };
 
   function require(specifier) {
@@ -766,9 +783,11 @@ if (typeof globalThis.require !== 'function') {
       return moduleCache.get(cacheKey);
     }
 
-    if (nodeBuiltins[cacheKey]) {
+    const lookupKey = cacheKey.startsWith('node:') ? cacheKey.slice(5) : cacheKey;
+    if (nodeBuiltins[cacheKey] || nodeBuiltins[lookupKey]) {
+      const filePath = nodeBuiltins[cacheKey] || nodeBuiltins[lookupKey];
       try {
-        const mod = require('./' + nodeBuiltins[cacheKey]);
+        const mod = require('./' + filePath);
         moduleCache.set(cacheKey, mod);
         return mod;
       } catch (e) {

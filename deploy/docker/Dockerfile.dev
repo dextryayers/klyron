@@ -1,0 +1,18 @@
+# =============================================================================
+# Klyron Development Dockerfile: hot-reload
+# =============================================================================
+
+FROM rust:1.78-slim-bookworm AS dev
+RUN apt-get update && apt-get install -y \
+  inotify-tools \
+  pkg-config \
+  libssl-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN cargo install cargo-watch --version 8.5.1
+
+WORKDIR /app
+COPY . .
+EXPOSE 3000
+
+CMD ["cargo", "watch", "-x", "run", "-w", "src/"]

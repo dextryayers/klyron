@@ -1,0 +1,37 @@
+name: Daily Dependency Update
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    name: cargo update
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: cargo
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo update
+        run: cargo update
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: daily dependency update"
+          title: "chore: daily dependency update"
+          body: |
+            Automated daily `cargo update` to keep dependencies fresh.
+
+            ## Changes
+            - Ran `cargo update` to update all dependencies to latest compatible versions.
+          branch: deps/daily-update
+          base: main
+          labels: dependencies, automated

@@ -87,3 +87,114 @@ fn op_crypto_encrypt(#[string] _algorithm: String, #[serde] _data: Vec<u8>, #[st
 fn op_crypto_decrypt(#[string] _algorithm: String, #[serde] _data: Vec<u8>, #[string] _key: String) -> Result<String, JsErrorBox> {
   Err(JsErrorBox::generic("SubtleCrypto.decrypt not yet implemented"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_init_returns_extension() {
+        let ext = init();
+        assert_eq!(ext.name, "klyron_crypto");
+    }
+
+    #[test]
+    fn test_random_uuid_format() {
+        let uuid = op_crypto_random_uuid();
+        assert_eq!(uuid.len(), 36);
+        assert_eq!(uuid.chars().nth(8).unwrap(), '-');
+        assert_eq!(uuid.chars().nth(13).unwrap(), '-');
+        assert_eq!(uuid.chars().nth(18).unwrap(), '-');
+        assert_eq!(uuid.chars().nth(23).unwrap(), '-');
+    }
+
+    #[test]
+    fn test_random_uuid_version() {
+        let uuid = op_crypto_random_uuid();
+        let v4_byte_str = &uuid[14..16];
+        let v4_byte = u8::from_str_radix(v4_byte_str, 16).unwrap();
+        assert_eq!(v4_byte & 0xf0, 0x40);
+    }
+
+    #[test]
+    fn test_random_uuid_variant() {
+        let uuid = op_crypto_random_uuid();
+        let variant_byte_str = &uuid[19..21];
+        let variant_byte = u8::from_str_radix(variant_byte_str, 16).unwrap();
+        assert_eq!(variant_byte & 0xc0, 0x80);
+    }
+
+    #[test]
+    fn test_random_values_default_length() {
+        let values = op_crypto_random_values("32".to_string());
+        assert_eq!(values.len(), 64);
+    }
+
+    #[test]
+    fn test_random_values_variable() {
+        let values = op_crypto_random_values("16".to_string());
+        assert_eq!(values.len(), 32);
+    }
+
+    #[test]
+    fn test_random_values_zero_length() {
+        let values = op_crypto_random_values("0".to_string());
+        assert_eq!(values, "");
+    }
+
+    #[test]
+    fn test_sha256_hash() {
+        let hash = op_crypto_sha256("hello".to_string());
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_sha256_known() {
+        let hash = op_crypto_sha256("".to_string());
+        assert_eq!(hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    }
+
+    #[test]
+    fn test_hex_encode() {
+        let encoded = op_crypto_hex_encode(vec![0x48, 0x65, 0x6c, 0x6c, 0x6f]);
+        assert_eq!(encoded, "48656c6c6f");
+    }
+
+    #[test]
+    fn test_hex_encode_empty() {
+        let encoded = op_crypto_hex_encode(vec![]);
+        assert_eq!(encoded, "");
+    }
+
+    #[test]
+    fn test_digest_sha256() {
+        let result = op_crypto_digest("SHA-256".to_string(), b"test".to_vec());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 64);
+    }
+
+    #[test]
+    fn test_digest_unsupported() {
+        let result = op_crypto_digest("MD5".to_string(), b"test".to_vec());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_digest_sha256_short() {
+        let result = op_crypto_digest("SHA256".to_string(), b"data".to_vec());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_encrypt_not_implemented() {
+        let result = op_crypto_encrypt("AES-GCM".to_string(), vec![1, 2, 3], "key".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decrypt_not_implemented() {
+        let result = op_crypto_decrypt("AES-GCM".to_string(), vec![1, 2, 3], "key".to_string());
+        assert!(result.is_err());
+    }
+}
