@@ -12,7 +12,6 @@ default-members = [
     "src/ext/http",
     "src/ext/node",
     "src/ext/klyron",
-    "crates/klyron_cli",
     "crates/klyron_compat",
     "crates/klyron_config",
     "crates/klyron_engine",
@@ -86,10 +85,8 @@ members = [
     "crates/klyron_lsp",
     "crates/klyron_serde",
     "engines/common",
-    "engines/v8",
     "engines/boa",
     "engines/quickjs",
-    "engines/jsc",
 ]
 
 [workspace.package]

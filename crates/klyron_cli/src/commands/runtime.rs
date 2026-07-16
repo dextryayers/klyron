@@ -244,7 +244,7 @@ pub fn repl_loop_ext(engine: Option<klyron_engine::EngineRuntime>) -> anyhow::Re
                 println!("  .clear          Clear screen");
                 println!("  .version        Show version");
                 println!("  .engine         Show/switch engine");
-                println!("  .engine <name>  Switch to engine (v8, boa, quickjs, jsc, auto)");
+                println!("  .engine <name>  Switch to engine (boa, quickjs, auto)");
                 println!("  .color          Toggle colored output");
             }
             ".clear" => { print!("\x1B[2J\x1B[1;1H"); std::io::stdout().flush()?; }
@@ -254,17 +254,15 @@ pub fn repl_loop_ext(engine: Option<klyron_engine::EngineRuntime>) -> anyhow::Re
                     Some(e) => println!("Current engine: {}", e.kind()),
                     None => println!("Current engine: Deno Core (V8)"),
                 }
-                println!("Available: v8, boa, quickjs, jsc, auto. Use `.engine <name>` to switch.");
+                println!("Available: boa, quickjs, auto. Use `.engine <name>` to switch.");
             }
             s if s.starts_with(".engine ") => {
                 let name = s.trim_start_matches(".engine ").trim();
                 match name {
-                    "v8" | "boa" | "quickjs" | "jsc" | "auto" => {
+                    "boa" | "quickjs" | "auto" => {
                         let kind = match name {
-                            "v8" => klyron_engine::JsEngineKind::V8,
                             "boa" => klyron_engine::JsEngineKind::Boa,
                             "quickjs" => klyron_engine::JsEngineKind::QuickJS,
-                            "jsc" => klyron_engine::JsEngineKind::JSC,
                             "auto" => klyron_engine::detect_best_engine(),
                             _ => unreachable!(),
                         };
@@ -276,7 +274,7 @@ pub fn repl_loop_ext(engine: Option<klyron_engine::EngineRuntime>) -> anyhow::Re
                             Err(e) => eprintln!("Failed to switch to {name}: {e}"),
                         }
                     }
-                    other => eprintln!("Unknown engine '{other}'. Available: v8, boa, quickjs, jsc, auto"),
+                    other => eprintln!("Unknown engine '{other}'. Available: boa, quickjs, auto"),
                 }
             }
             "" => continue,

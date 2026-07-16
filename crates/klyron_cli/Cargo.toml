@@ -4,10 +4,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[[bin]]
-name = "klyron"
-path = "src/main.rs"
-
 [dependencies]
 klyron-core = { path = "../../src/core" }
 klyron_adapter = { path = "../klyron_adapter" }

@@ -339,7 +339,7 @@ pub enum Commands {
     Clean { #[arg(long)] yes: bool },
     Coverage { #[command(flatten)] args: commands::coverage::CoverageArgs },
     Telemetry { #[command(subcommand)] action: Option<commands::utils::TelemetryAction> },
-    Config { #[command(flatten)] args: commands::utils::ConfigArgs },
+    Config { #[command(subcommand)] action: commands::config::ConfigAction },
     Laravel { #[command(subcommand)] action: commands::laravel::LaravelCommand },
     Serve { #[arg(long, default_value = "localhost")] host: String, #[arg(long, default_value_t = 3000)] port: u16, #[arg(long)] dir: Option<PathBuf>, #[arg(long)] watch: bool },
     Completions { shell: clap_complete::Shell },
@@ -744,7 +744,7 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>, json_outpu
         Commands::Clean { yes } => commands::utils::run_clean(yes),
         Commands::Coverage { args } => commands::coverage::run_coverage(args),
         Commands::Telemetry { action } => commands::utils::run_telemetry(action),
-        Commands::Config { args } => commands::utils::run_config(args.key, args.value),
+        Commands::Config { action } => commands::config::run_config_action(action),
         Commands::Serve { host, port, dir, watch } => {
             commands::dev::run_dev(commands::dev::DevArgs {
                 dir: dir.unwrap_or_else(|| std::env::current_dir().unwrap()),

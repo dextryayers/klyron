@@ -1,4 +1,5 @@
 use crate::PmError;
+use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::HashMap;
@@ -160,7 +161,7 @@ impl KlyronLockfile {
 
     pub fn compute_integrity(data: &[u8]) -> String {
         let hash = Sha512::digest(data);
-        format!("sha512-{}", base64::encode(hash))
+        format!("sha512-{}", general_purpose::STANDARD.encode(hash))
     }
 
     pub fn compute_integrity_sha256(data: &[u8]) -> String {

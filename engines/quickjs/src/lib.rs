@@ -49,32 +49,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_quickjs_engine_new() {
-        match QuickJSEngine::new() {
-            Ok(engine) => {
-                let result = engine.eval("1 + 1");
-                assert!(result.is_ok() || result.is_err());
-            }
-            Err(_) => {}
+    fn test_quickjs_eval_addition() {
+        if let Ok(engine) = QuickJSEngine::new() {
+            let result = engine.eval("1 + 2");
+            assert_eq!(result.unwrap(), "3");
         }
     }
 
     #[test]
     fn test_quickjs_eval_string() {
         if let Ok(engine) = QuickJSEngine::new() {
-            let result = engine.eval("\"hello\" + \" world\"");
-            match result {
-                Ok(val) => assert!(val.contains("hello") || val.contains("\"hello world\"")),
-                Err(_) => {}
-            }
+            let result = engine.eval("\"hello\" + \" world\"").unwrap();
+            assert!(result.contains("hello world"), "got: {result}");
         }
     }
 
     #[test]
     fn test_quickjs_eval_number() {
         if let Ok(engine) = QuickJSEngine::new() {
-            let result = engine.eval("42");
-            assert!(result.is_ok() || result.is_err());
+            let result = engine.eval("42").unwrap();
+            assert_eq!(result, "42");
         }
     }
 
@@ -89,55 +83,32 @@ mod tests {
     #[test]
     fn test_quickjs_eval_object() {
         if let Ok(engine) = QuickJSEngine::new() {
-            let result = engine.eval("({a: 1})");
-            match result {
-                Ok(val) => assert!(!val.is_empty()),
-                Err(_) => {}
-            }
+            let result = engine.eval("({a: 1})").unwrap();
+            assert!(!result.is_empty());
         }
     }
 
     #[test]
     fn test_quickjs_execute_script() {
         if let Ok(engine) = QuickJSEngine::new() {
-            let result = engine.execute_script("test.js", "1 + 2");
-            match result {
-                Ok(val) => assert!(!val.is_empty()),
-                Err(_) => {}
-            }
-        }
-    }
-
-    #[test]
-    fn test_quickjs_execute_module() {
-        if let Ok(engine) = QuickJSEngine::new() {
-            let result = engine.execute_module("test.mjs", "export const x = 1;");
-            match result {
-                Ok(val) => assert!(!val.is_empty()),
-                Err(_) => {}
-            }
+            let result = engine.execute_script("test.js", "1 + 2").unwrap();
+            assert_eq!(result, "3");
         }
     }
 
     #[test]
     fn test_quickjs_function() {
         if let Ok(engine) = QuickJSEngine::new() {
-            let result = engine.eval("(function(x) { return x * 2; })(5)");
-            match result {
-                Ok(val) => assert!(!val.is_empty()),
-                Err(_) => {}
-            }
+            let result = engine.eval("(function(x) { return x * 2; })(5)").unwrap();
+            assert_eq!(result, "10");
         }
     }
 
     #[test]
     fn test_quickjs_array() {
         if let Ok(engine) = QuickJSEngine::new() {
-            let result = engine.eval("[1, 2, 3, 4].length");
-            match result {
-                Ok(val) => assert!(!val.is_empty()),
-                Err(_) => {}
-            }
+            let result = engine.eval("[1, 2, 3, 4].length").unwrap();
+            assert_eq!(result, "4");
         }
     }
 }

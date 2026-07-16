@@ -648,24 +648,216 @@ impl PackageManager {
     }
 
     pub fn install(&self, _opts: &InstallOptions) -> Result<Vec<InstallNode>, PmError> {
-        Ok(Vec::new())
+        let mut nodes = Vec::new();
+        let nm = self.dir.join("node_modules");
+        if !nm.exists() {
+            return Ok(nodes);
+        }
+        let entries = match std::fs::read_dir(&nm) {
+            Ok(e) => e,
+            Err(_) => return Ok(nodes),
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() { continue; }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || name == ".bin" { continue; }
+            let pkg_json = path.join("package.json");
+            if let Ok(content) = std::fs::read_to_string(&pkg_json) {
+                if let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let version = pkg.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
+                    nodes.push(InstallNode {
+                        name: name.clone(),
+                        version: version.to_string(),
+                        resolved: None,
+                    });
+                }
+            }
+        }
+        Ok(nodes)
     }
 }
 
-pub fn install_with_lockfile(dir: &Path, _frozen: bool) -> Result<(), PmError> {
-    let _ = std::fs::create_dir_all(dir.join("node_modules"));
+pub fn install_with_lockfile(dir: &Path, frozen: bool) -> Result<(), PmError> {
+    let nm = dir.join("node_modules");
+    std::fs::create_dir_all(&nm)
+        .map_err(|e| PmError::IoError(format!("Cannot create node_modules: {e}")))?;
+
+    let lockfile_path = dir.join("klyron.lock");
+    let has_lockfile = lockfile_path.exists();
+
+    if has_lockfile {
+        let data = std::fs::read(&lockfile_path)
+            .map_err(|e| PmError::IoError(e.to_string()))?;
+        let lock = lockfile::KlyronLockfile::from_bytes(&data)
+            .map_err(|e| PmError::IoError(format!("Invalid klyron.lock: {e}")))?;
+
+        if frozen {
+            return lock.verify_integrity(dir)
+                .map(|_| ())
+                .map_err(|e| PmError::IoError(e.to_string()));
+        }
+
+        for (name, pkg) in &lock.packages {
+            let pkg_dir = nm.join(name);
+            if !pkg_dir.join("package.json").exists() {
+                let url = format!("https://registry.npmjs.org/{name}/-/{name}-{}.tgz", pkg.version);
+                match download_and_extract_tarball(&url, &pkg_dir) {
+                    Ok(()) => tracing::info!("Downloaded {name}@{}", pkg.version),
+                    Err(e) => tracing::warn!("Failed to download {name}: {e}"),
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    let status = std::process::Command::new("npm")
+        .args(["install"])
+        .current_dir(dir)
+        .status()
+        .map_err(|e| PmError::IoError(format!("Failed to run npm install: {e}")))?;
+    if !status.success() {
+        return Err(PmError::IoError("npm install failed".into()));
+    }
+
+    let result = scan_node_modules_for_lockfile(dir)?;
+    let bytes = result.to_bytes()
+        .map_err(|e| PmError::IoError(e.to_string()))?;
+    std::fs::write(&lockfile_path, &bytes)
+        .map_err(|e| PmError::IoError(e.to_string()))?;
+    tracing::info!("Generated klyron.lock with {} packages", result.packages.len());
     Ok(())
 }
 
-pub fn generate_lockfile(result: &InstallResult, path: &Path) -> Result<(), PmError> {
-    let duration = result.end_time.duration_since(result.start_time).unwrap_or_default();
-    let json = serde_json::json!({
-        "name": "klyron-lock",
-        "packages": result.nodes.len(),
-        "duration_ms": duration.as_millis(),
-    });
-    std::fs::write(path, serde_json::to_string_pretty(&json)?)
+fn download_and_extract_tarball(url: &str, target_dir: &Path) -> Result<(), PmError> {
+    let response = reqwest::blocking::get(url)
+        .map_err(|e| PmError::IoError(format!("HTTP request failed: {e}")))?;
+    if !response.status().is_success() {
+        return Err(PmError::IoError(format!("HTTP {} for {url}", response.status())));
+    }
+    let bytes = response.bytes()
+        .map_err(|e| PmError::IoError(format!("Failed to read response: {e}")))?;
+
+    std::fs::create_dir_all(target_dir)
+        .map_err(|e| PmError::IoError(format!("Cannot create dir: {e}")))?;
+
+    let decoder = flate2::read::GzDecoder::new(&bytes[..]);
+    let mut archive = tar::Archive::new(decoder);
+    for entry in archive.entries().map_err(|e| PmError::IoError(format!("Tar error: {e}")))? {
+        let mut entry = entry.map_err(|e| PmError::IoError(format!("Entry error: {e}")))?;
+        if let Ok(path) = entry.path() {
+            let components: Vec<_> = path.components().collect();
+            if components.len() > 1 {
+                let relative: std::path::PathBuf = components[1..].iter().collect();
+                let dest = target_dir.join(&relative);
+                if let Some(parent) = dest.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                entry.unpack(&dest).ok();
+            }
+        }
+    }
+    Ok(())
+}
+
+fn scan_node_modules_for_lockfile(dir: &Path) -> Result<lockfile::KlyronLockfile, PmError> {
+    let pkg_json = dir.join("package.json");
+    let name = if pkg_json.exists() {
+        std::fs::read_to_string(&pkg_json).ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(String::from))
+            .unwrap_or_else(|| {
+                dir.file_name().and_then(|n| n.to_str()).unwrap_or("unknown").to_string()
+            })
+    } else {
+        dir.file_name().and_then(|n| n.to_str()).unwrap_or("unknown").to_string()
+    };
+
+    let mut lock = lockfile::KlyronLockfile::new();
+    let nm = dir.join("node_modules");
+    if nm.exists() {
+        scan_dir_for_packages(&nm, &mut lock)?;
+    }
+    Ok(lock)
+}
+
+fn scan_dir_for_packages(dir: &Path, lock: &mut lockfile::KlyronLockfile) -> Result<(), PmError> {
+    use lockfile::LockfilePackage;
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    let entries = std::fs::read_dir(dir)
         .map_err(|e| PmError::IoError(e.to_string()))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() { continue; }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || name == "node_modules" || name == ".bin" {
+            continue;
+        }
+        let pkg_json_path = path.join("package.json");
+        if pkg_json_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&pkg_json_path) {
+                if let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let version = pkg.get("version")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("0.0.0")
+                        .to_string();
+                    let integrity = compute_integrity_for_dir(&path);
+                    let dependencies = pkg.get("dependencies")
+                        .and_then(|v| v.as_object())
+                        .map(|obj| obj.iter().map(|(k, v)| {
+                            (k.clone(), v.as_str().unwrap_or("*").to_string())
+                        }).collect())
+                        .unwrap_or_default();
+                    let lp = LockfilePackage {
+                        name: name.clone(),
+                        version: version.clone(),
+                        resolved: String::new(),
+                        integrity: integrity.clone(),
+                        integrity_hashes: if integrity.is_empty() { vec![] } else { vec![integrity] },
+                        signature: None,
+                        signer: None,
+                        dependencies,
+                        optional_dependencies: HashMap::new(),
+                        peer_dependencies: HashMap::new(),
+                        bin: None,
+                        has_node_modules: false,
+                        install_time_ms: 0,
+                    };
+                    lock.add_package(&name, &version, lp);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn compute_integrity_for_dir(dir: &Path) -> String {
+    let pkg_json = dir.join("package.json");
+    if pkg_json.exists() {
+        if let Ok(data) = std::fs::read(&pkg_json) {
+            use sha2::{Sha512, Digest};
+            use base64::Engine;
+            let hash = Sha512::digest(&data);
+            format!("sha512-{}", base64::engine::general_purpose::STANDARD.encode(hash))
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    }
+}
+
+pub fn generate_lockfile(result: &InstallResult, path: &Path) -> Result<(), PmError> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let lock = scan_node_modules_for_lockfile(dir)?;
+    let bytes = lock.to_bytes()
+        .map_err(|e| PmError::IoError(e.to_string()))?;
+    std::fs::write(path, &bytes)
+        .map_err(|e| PmError::IoError(e.to_string()))?;
+    tracing::info!("Generated klyron.lock with {} packages ({} installed, {} from cache)",
+        lock.packages.len(), result.nodes.len(), result.nodes.len().saturating_sub(lock.packages.len()));
     Ok(())
 }
 
@@ -801,10 +993,13 @@ pub fn migrate_from_yarn_lockfile(source: &Path) -> Result<KlyronLockfile, PmErr
 }
 
 pub fn pack_package(dir: &Path, output: Option<&Path>) -> Result<PathBuf, PmError> {
+    use crate::pack::{PackConfig, pack};
+    let config = PackConfig {
+        root: dir.to_path_buf(),
+        ..Default::default()
+    };
+    let data = pack(&config)?;
     let pkg_json = dir.join("package.json");
-    if !pkg_json.exists() {
-        return Err(PmError::PackageNotFound("No package.json found".into()));
-    }
     let content = std::fs::read_to_string(&pkg_json)
         .map_err(|e| PmError::IoError(e.to_string()))?;
     let pkg: serde_json::Value = serde_json::from_str(&content)
@@ -813,31 +1008,159 @@ pub fn pack_package(dir: &Path, output: Option<&Path>) -> Result<PathBuf, PmErro
     let version = pkg.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
     let out = output.map(|p| p.to_path_buf())
         .unwrap_or_else(|| dir.join(format!("{name}-{version}.tgz")));
-    let data = Vec::new();
-    let builder = tar::Builder::new(data);
-    let data = builder.into_inner().map_err(|e| PmError::IoError(e.to_string()))?;
     std::fs::write(&out, &data)
         .map_err(|e| PmError::IoError(e.to_string()))?;
     Ok(out)
 }
 
-pub fn add_dist_tag(package: &str, version: &str, tag: &str, registry: &str) -> Result<(), PmError> {
+pub fn add_dist_tag(package: &str, version: &str, tag: &str, registry_url: &str) -> Result<(), PmError> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| PmError::IoError(format!("HTTP client: {e}")))?;
+    let url = format!("{}/-/package/{}/dist-tags/{}", registry_url.trim_end_matches('/'), package, tag);
+    let body = serde_json::json!({ "version": version });
+    let resp = client.put(&url)
+        .json(&body)
+        .send()
+        .map_err(|e| PmError::IoError(format!("Failed to add dist-tag: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(PmError::IoError(format!("HTTP {} adding dist-tag", resp.status())));
+    }
     Ok(())
 }
 
-pub fn remove_dist_tag(package: &str, tag: &str, registry: &str) -> Result<(), PmError> {
+pub fn remove_dist_tag(package: &str, tag: &str, registry_url: &str) -> Result<(), PmError> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| PmError::IoError(format!("HTTP client: {e}")))?;
+    let url = format!("{}/-/package/{}/dist-tags/{}", registry_url.trim_end_matches('/'), package, tag);
+    let resp = client.delete(&url)
+        .send()
+        .map_err(|e| PmError::IoError(format!("Failed to remove dist-tag: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(PmError::IoError(format!("HTTP {} removing dist-tag", resp.status())));
+    }
     Ok(())
 }
 
-pub fn list_dist_tags(package: &str, registry: &str) -> Result<Vec<(String, String)>, PmError> {
-    Ok(vec![("latest".to_string(), "0.0.0".to_string())])
+pub fn list_dist_tags(package: &str, registry_url: &str) -> Result<Vec<(String, String)>, PmError> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| PmError::IoError(format!("HTTP client: {e}")))?;
+    let url = format!("{}/{}/latest", registry_url.trim_end_matches('/'), package);
+    let resp = client.get(&url)
+        .header("Accept", "application/json")
+        .send()
+        .map_err(|e| PmError::IoError(format!("Request failed: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(PmError::PackageNotFound(package.to_string()));
+    }
+    let body: serde_json::Value = resp.json()
+        .map_err(|e| PmError::IoError(format!("Parse failed: {e}")))?;
+    let tags = body.get("dist-tags")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter().map(|(k, v)| {
+                (k.clone(), v.as_str().unwrap_or("unknown").to_string())
+            }).collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(tags)
 }
 
-pub fn why_package(name: &str, _lockfile: &KlyronLockfile) -> Result<Vec<WhyPath>, PmError> {
-    Ok(vec![WhyPath { depth: 0, path: vec![name.to_string()] }])
+pub fn why_package(name: &str, lockfile: &KlyronLockfile) -> Result<Vec<WhyPath>, PmError> {
+    let mut results = Vec::new();
+
+    for (pkg_name, _pkg) in &lockfile.packages {
+        if pkg_name == name {
+            results.push(WhyPath {
+                depth: 0,
+                path: vec![name.to_string()],
+            });
+            continue;
+        }
+        let dep_path = find_dependency_path(lockfile, pkg_name, name, 0);
+        if let Some(path) = dep_path {
+            results.push(WhyPath {
+                depth: path.len().saturating_sub(1),
+                path,
+            });
+        }
+    }
+
+    if results.is_empty() {
+        results.push(WhyPath {
+            depth: 0,
+            path: vec![name.to_string()],
+        });
+    }
+    Ok(results)
 }
 
-pub fn publish_package(_dir: &Path, _registry_url: &str, _token: Option<&str>) -> Result<(), PmError> {
+fn find_dependency_path(
+    lockfile: &KlyronLockfile,
+    current: &str,
+    target: &str,
+    depth: usize,
+) -> Option<Vec<String>> {
+    if depth > 10 || current == target {
+        return None;
+    }
+    if let Some(_pkg) = lockfile.packages.get(current) {
+        let deps = &lockfile.packages[current].dependencies;
+        if deps.contains_key(target) {
+            return Some(vec![current.to_string(), target.to_string()]);
+        }
+        for dep_name in deps.keys() {
+            if let Some(mut path) = find_dependency_path(lockfile, dep_name, target, depth + 1) {
+                let mut full = vec![current.to_string()];
+                full.append(&mut path);
+                return Some(full);
+            }
+        }
+    }
+    None
+}
+
+pub fn publish_package(dir: &Path, registry_url: &str, token: Option<&str>) -> Result<(), PmError> {
+    use crate::pack::{PackConfig, pack as pack_pkg};
+    let config = PackConfig {
+        root: dir.to_path_buf(),
+        ..Default::default()
+    };
+    let tarball_data = pack_pkg(&config)?;
+
+    let pkg_json = dir.join("package.json");
+    let content = std::fs::read_to_string(&pkg_json)
+        .map_err(|e| PmError::IoError(e.to_string()))?;
+    let pkg: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| PmError::IoError(e.to_string()))?;
+    let name = pkg.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let version = pkg.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| PmError::IoError(format!("HTTP client: {e}")))?;
+
+    let url = format!("{}/{}", registry_url.trim_end_matches('/'), name);
+    let mut req = client.put(&url)
+        .header("Content-Type", "application/octet-stream")
+        .body(tarball_data);
+
+    if let Some(t) = token {
+        req = req.header("Authorization", format!("Bearer {t}"));
+    }
+
+    let resp = req.send()
+        .map_err(|e| PmError::IoError(format!("Publish request failed: {e}")))?;
+    if !resp.status().is_success() {
+        return Err(PmError::IoError(format!("Publish failed: HTTP {} for {}", resp.status(), name)));
+    }
+    println!("Published {name}@{version} to {registry_url}");
     Ok(())
 }
 

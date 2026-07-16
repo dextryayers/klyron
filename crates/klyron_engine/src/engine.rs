@@ -20,7 +20,7 @@ impl JsEngineKind {
     }
 
     pub fn all() -> Vec<JsEngineKind> {
-        vec![Self::V8, Self::Boa, Self::QuickJS, Self::JSC]
+        vec![Self::Boa, Self::QuickJS]
     }
 }
 
@@ -298,11 +298,9 @@ mod tests {
     #[test]
     fn test_engine_kind_all() {
         let all = JsEngineKind::all();
-        assert_eq!(all.len(), 4);
-        assert!(all.contains(&JsEngineKind::V8));
+        assert_eq!(all.len(), 2);
         assert!(all.contains(&JsEngineKind::Boa));
         assert!(all.contains(&JsEngineKind::QuickJS));
-        assert!(all.contains(&JsEngineKind::JSC));
     }
 
     #[test]

@@ -17,101 +17,50 @@ pub use value::BoaValue;
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_boa_engine_new() {
-        let mut engine = BoaEngine::new();
-        let result = engine.eval("1 + 1");
-        match result {
-            Ok(val) => assert!(!val.is_empty()),
-            Err(_) => {} // boa may not be fully available
-        }
+    fn new_engine() -> BoaEngine {
+        BoaEngine::new()
     }
 
     #[test]
-    fn test_boa_eval_string() {
-        let mut engine = BoaEngine::new();
-        let result = engine.eval("\"hello\" + \" world\"");
-        match result {
-            Ok(val) => assert!(val.contains("hello") || val.contains("hello world")),
-            Err(_) => {}
-        }
+    fn test_boa_eval_addition() {
+        let mut eng = new_engine();
+        let result = eng.eval("1 + 2").unwrap();
+        assert_eq!(result, "3");
     }
 
     #[test]
-    fn test_boa_eval_number() {
-        let mut engine = BoaEngine::new();
-        let result = engine.eval("42");
-        match result {
-            Ok(val) => assert!(!val.is_empty()),
-            Err(_) => {}
-        }
+    fn test_boa_eval_string_concat() {
+        let mut eng = new_engine();
+        let result = eng.eval("\"hello\" + \" world\"").unwrap();
+        assert!(result.contains("hello world"), "got: {result}");
     }
 
     #[test]
     fn test_boa_eval_syntax_error() {
-        let mut engine = BoaEngine::new();
-        let result = engine.eval("syntax error{{{");
+        let mut eng = new_engine();
+        let result = eng.eval("syntax error{{{");
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_boa_eval_undefined() {
-        let mut engine = BoaEngine::new();
-        let result = engine.eval("undefined");
-        match result {
-            Ok(val) => assert!(!val.is_empty()),
-            Err(_) => {}
-        }
-    }
-
-    #[test]
     fn test_boa_execute_script() {
-        let mut engine = BoaEngine::new();
-        let result = engine.execute_script("test.js", "1 + 2");
-        match result {
-            Ok(val) => assert!(!val.is_empty()),
-            Err(_) => {}
-        }
-    }
-
-    #[test]
-    fn test_boa_execute_module() {
-        let mut engine = BoaEngine::new();
-        let result = engine.execute_module("test.mjs", "export const x = 1;");
-        match result {
-            Ok(val) => assert!(!val.is_empty()),
-            Err(_) => {} // module support may vary
-        }
-    }
-
-    #[test]
-    fn test_boa_snapshot() {
-        let engine = BoaEngine::new();
-        let result = engine.snapshot();
-        match result {
-            Ok(_snap) => {} // snapshot success
-            Err(_) => {} // snapshot may not be available
-        }
-    }
-
-    #[test]
-    fn test_boa_eval_object() {
-        let mut engine = BoaEngine::new();
-        let result = engine.eval("({a: 1, b: 2})");
-        match result {
-            Ok(val) => assert!(!val.is_empty()),
-            Err(_) => {}
-        }
+        let mut eng = new_engine();
+        let result = eng.execute_script("test.js", "1 + 2").unwrap();
+        assert_eq!(result, "3");
     }
 
     #[test]
     fn test_boa_eval_function_call() {
-        let mut engine = BoaEngine::new();
-        let result = engine.eval("(function(x) { return x * 2; })(5)");
-        match result {
-            Ok(val) => assert!(!val.is_empty()),
-            Err(_) => {}
-        }
+        let mut eng = new_engine();
+        let result = eng.eval("(function(x) { return x * 2; })(5)").unwrap();
+        assert_eq!(result, "10");
+    }
+
+    #[test]
+    fn test_boa_eval_array_length() {
+        let mut eng = new_engine();
+        let result = eng.eval("[1,2,3,4].length").unwrap();
+        assert_eq!(result, "4");
     }
 }
 

@@ -1,0 +1,21 @@
+{
+  "name": "klyron",
+  "version": "0.1.0",
+  "type": "rust",
+  "framework": "Unknown",
+  "language": "javascript",
+  "compiler": {
+    "target": "esnext",
+    "module": "esnext",
+    "minify": false,
+    "sourcemap": false
+  },
+  "dev": {
+    "port": 3000,
+    "hmr": true
+  },
+  "build": {
+    "outDir": "dist",
+    "minify": true
+  }
+}
