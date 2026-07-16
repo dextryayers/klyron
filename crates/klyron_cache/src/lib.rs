@@ -436,4 +436,226 @@ mod tests {
         assert!(exp.is_some());
         assert!(exp.unwrap() > Instant::now());
     }
+
+    // ── ConcurrentCache direct tests ──
+
+    #[test]
+    fn test_concurrent_cache_set_get() {
+        let cache = ConcurrentCache::new();
+        cache.set("ckey", b"cvalue");
+        assert_eq!(cache.get("ckey"), Some(b"cvalue".to_vec()));
+        assert_eq!(cache.get("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_concurrent_cache_delete() {
+        let cache = ConcurrentCache::new();
+        cache.set("k", b"v");
+        assert!(cache.delete("k"));
+        assert!(!cache.delete("k"));
+        assert_eq!(cache.get("k"), None);
+    }
+
+    #[test]
+    fn test_concurrent_cache_has() {
+        let cache = ConcurrentCache::new();
+        cache.set("exists", b"data");
+        assert!(cache.has("exists"));
+        assert!(!cache.has("missing"));
+    }
+
+    #[test]
+    fn test_concurrent_cache_set_with_ttl() {
+        let cache = ConcurrentCache::with_shards(1).with_ttl(Duration::from_secs(300));
+        cache.set_with_ttl("ttl-key", b"data", Duration::from_millis(10));
+        assert!(cache.has("ttl-key"));
+        thread::sleep(Duration::from_millis(20));
+        assert!(!cache.has("ttl-key"));
+    }
+
+    #[test]
+    fn test_concurrent_cache_set_with_tags() {
+        let cache = ConcurrentCache::new();
+        cache.set_with_tags("tagged", b"payload", &["tag1", "tag2"]);
+        assert_eq!(cache.get("tagged"), Some(b"payload".to_vec()));
+        assert!(cache.has("tagged"));
+    }
+
+    #[test]
+    fn test_concurrent_cache_evict_expired() {
+        let cache = ConcurrentCache::with_shards(1).with_ttl(Duration::from_millis(1));
+        cache.set("to-expire", b"will vanish");
+        thread::sleep(Duration::from_millis(10));
+        assert_eq!(cache.evict_expired(), 1);
+        assert_eq!(cache.size(), 0);
+    }
+
+    #[test]
+    fn test_concurrent_cache_evict_expired_none_fresh() {
+        let cache = ConcurrentCache::with_shards(1);
+        cache.set("fresh", b"still good");
+        assert_eq!(cache.evict_expired(), 0);
+        assert_eq!(cache.size(), 1);
+    }
+
+    #[test]
+    fn test_concurrent_cache_size_tracking() {
+        let cache = ConcurrentCache::with_shards(2);
+        assert_eq!(cache.size(), 0);
+        cache.set("a", b"1");
+        cache.set("b", b"2");
+        cache.set("c", b"3");
+        assert_eq!(cache.size(), 3);
+        cache.delete("b");
+        assert_eq!(cache.size(), 2);
+    }
+
+    #[test]
+    fn test_concurrent_cache_scan_patterns() {
+        let cache = ConcurrentCache::with_shards(2);
+        cache.set("session:abc", b"1");
+        cache.set("session:def", b"2");
+        cache.set("user:42", b"3");
+        cache.set("data:xyz", b"4");
+        assert_eq!(cache.scan("session:").len(), 2);
+        assert_eq!(cache.scan(":").len(), 4);
+        assert_eq!(cache.scan("nonexistent").len(), 0);
+        assert_eq!(cache.scan("").len(), 4);
+    }
+
+    #[test]
+    fn test_concurrent_cache_get_or_insert_with() {
+        let cache = ConcurrentCache::new();
+        let called = std::sync::atomic::AtomicBool::new(false);
+        let v = cache.get_or_insert_with("computed", || {
+            called.store(true, std::sync::atomic::Ordering::SeqCst);
+            b"first".to_vec()
+        });
+        assert_eq!(v, b"first");
+        assert!(called.load(std::sync::atomic::Ordering::SeqCst));
+
+        called.store(false, std::sync::atomic::Ordering::SeqCst);
+        let v2 = cache.get_or_insert_with("computed", || {
+            called.store(true, std::sync::atomic::Ordering::SeqCst);
+            b"second".to_vec()
+        });
+        assert_eq!(v2, b"first");
+        assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_concurrent_cache_lfu_eviction() {
+        let cache = ConcurrentCache::with_shards(1).with_max_size(2);
+        cache.set("a", b"1");
+        cache.set("b", b"2");
+        cache.get("a");
+        cache.get("b");
+        cache.get("a");
+        cache.set("c", b"3");
+        assert!(!cache.has("b"));
+        assert_eq!(cache.size(), 2);
+    }
+
+    #[test]
+    fn test_concurrent_cache_concurrent_access() {
+        use std::sync::Arc;
+        let cache = Arc::new(ConcurrentCache::with_shards(4));
+        let mut handles = vec![];
+        for i in 0..10 {
+            let c = cache.clone();
+            handles.push(thread::spawn(move || {
+                let key = format!("concurrent-key-{}", i);
+                let val = format!("concurrent-val-{}", i);
+                c.set(&key, val.as_bytes());
+                assert!(c.has(&key));
+                let got = c.get(&key);
+                assert_eq!(got, Some(val.as_bytes().to_vec()));
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(cache.size(), 10);
+    }
+
+    #[test]
+    fn test_cache_entry_is_expired() {
+        let expired = CacheEntry {
+            value: b"x".to_vec(),
+            expires_at: Some(Instant::now() - Duration::from_secs(1)),
+            tags: vec![],
+            hit_count: 0,
+            created_at: Instant::now(),
+        };
+        assert!(expired.is_expired());
+
+        let fresh = CacheEntry {
+            expires_at: Some(Instant::now() + Duration::from_secs(60)),
+            ..expired.clone()
+        };
+        assert!(!fresh.is_expired());
+
+        let no_expiry = CacheEntry {
+            expires_at: None,
+            ..expired
+        };
+        assert!(!no_expiry.is_expired());
+    }
+
+    // ── CacheManager string-level tests ──
+
+    #[test]
+    fn test_cache_manager_string_ops() {
+        let cache = CacheManager::new();
+        cache.set("string-key", "string-val");
+        assert!(cache.has("string-key"));
+        assert_eq!(cache.get("string-key"), Some("string-val".into()));
+        cache.delete("string-key");
+        assert!(!cache.has("string-key"));
+    }
+
+    #[test]
+    fn test_cache_manager_keys() {
+        let cache = CacheManager::new();
+        cache.set("k1", "v1");
+        cache.set("k2", "v2");
+        let mut keys = cache.keys();
+        keys.sort();
+        assert_eq!(keys, vec!["k1".to_string(), "k2".to_string()]);
+    }
+
+    #[test]
+    fn test_cache_manager_concurrent_access() {
+        use std::sync::Arc;
+        let cache = Arc::new(CacheManager::new());
+        let mut handles = vec![];
+        for i in 0..8 {
+            let c = cache.clone();
+            handles.push(thread::spawn(move || {
+                c.set(&format!("manager-key-{}", i), &format!("val-{}", i));
+                assert!(c.has(&format!("manager-key-{}", i)));
+                assert_eq!(
+                    c.get(&format!("manager-key-{}", i)),
+                    Some(format!("val-{}", i))
+                );
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(cache.size(), 8);
+    }
+
+    #[test]
+    fn test_cache_manager_expires_at_nonexistent() {
+        let cache = CacheManager::new();
+        assert!(cache.expires_at("nope").is_none());
+    }
+
+    #[test]
+    fn test_cache_clear_empty() {
+        let cache = CacheManager::new();
+        cache.clear();
+        assert_eq!(cache.size(), 0);
+    }
 }

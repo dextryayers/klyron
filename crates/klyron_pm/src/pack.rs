@@ -5,6 +5,53 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use tar::Builder as TarBuilder;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pack_config_defaults() {
+        let config = PackConfig::default();
+        assert_eq!(config.root, PathBuf::from("."));
+        assert!(config.exclude.contains(&".git".to_string()));
+        assert!(config.exclude.contains(&"node_modules".to_string()));
+        assert!(!config.sign);
+        assert!(config.signing_key.is_none());
+    }
+
+    #[test]
+    fn test_tar_header_creation() {
+        let mut header = tar::Header::new_gnu();
+        header.set_path("package/package.json").unwrap();
+        header.set_size(42);
+        header.set_mode(0o644);
+        header.set_cksum();
+        assert!(header.path().is_ok());
+        assert_eq!(header.size().unwrap(), 42);
+    }
+
+    #[test]
+    fn test_manifest_json_normalization() {
+        let mut manifest = serde_json::Map::new();
+        manifest.insert("name".into(), serde_json::Value::String("test".into()));
+        manifest.insert("version".into(), serde_json::Value::String("1.0.0".into()));
+        manifest.insert("scripts".into(), serde_json::Value::Object(serde_json::Map::new()));
+        manifest.insert("devDependencies".into(), serde_json::Value::Object(serde_json::Map::new()));
+
+        manifest.remove("scripts");
+        manifest.remove("devDependencies");
+        assert!(!manifest.contains_key("scripts"));
+        assert!(!manifest.contains_key("devDependencies"));
+        assert_eq!(manifest.get("name").and_then(|v| v.as_str()), Some("test"));
+    }
+
+    #[test]
+    fn test_sign_tarball_invalid_key() {
+        let result = sign_tarball(b"data", &[0u8; 16]);
+        assert!(result.is_err());
+    }
+}
+
 /// Configuration for packing a package
 #[derive(Debug, Clone)]
 pub struct PackConfig {

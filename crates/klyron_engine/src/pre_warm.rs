@@ -76,3 +76,53 @@ impl EnginePreWarmer {
 pub fn default_pre_warm_scripts() -> Vec<(&'static str, &'static str)> {
     COMMON_POLYFILLS.to_vec()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::JsEngineKind;
+
+    #[test]
+    fn test_pre_warmer_new() {
+        let warmer = EnginePreWarmer::new(JsEngineKind::Boa);
+        assert!(!warmer.is_ready());
+        assert!(warmer.pool().is_none());
+    }
+
+    #[test]
+    fn test_pre_warmer_wait_ready_timeout() {
+        let warmer = EnginePreWarmer::new(JsEngineKind::Boa);
+        let ready = warmer.wait_ready(std::time::Duration::from_millis(10));
+        assert!(!ready);
+    }
+
+    #[test]
+    fn test_default_pre_warm_scripts() {
+        let scripts = default_pre_warm_scripts();
+        assert!(!scripts.is_empty());
+        let names: Vec<&str> = scripts.iter().map(|(n, _)| *n).collect();
+        assert!(names.contains(&"console"));
+        assert!(names.contains(&"timers"));
+        assert!(names.contains(&"json"));
+        assert!(names.contains(&"fetch_polyfill"));
+        assert!(names.contains(&"promise"));
+    }
+
+    #[test]
+    fn test_default_pre_warm_scripts_contain_code() {
+        let scripts = default_pre_warm_scripts();
+        for (name, code) in &scripts {
+            assert!(!name.is_empty(), "name should not be empty");
+            assert!(!code.is_empty(), "code for {} should not be empty", name);
+        }
+    }
+
+    #[test]
+    fn test_start_blocking_no_engine() {
+        let warmer = EnginePreWarmer::new(JsEngineKind::Boa);
+        // With default features, pool creation will have 0 engines
+        let pool = warmer.start_blocking(2);
+        assert!(warmer.is_ready());
+        assert_eq!(pool.kind(), JsEngineKind::Boa);
+    }
+}

@@ -488,6 +488,56 @@ fn fs_available_space(_path: &std::path::Path) -> Option<f64> {
     None
 }
 
+#[derive(Args)]
+pub struct ConfigArgs {
+    #[arg(short, long)]
+    pub key: Option<String>,
+    #[arg(short, long)]
+    pub value: Option<String>,
+    #[arg(long)]
+    pub json: bool,
+    #[arg(long)]
+    pub file: Option<String>,
+}
+
+pub fn run_config(key: Option<String>, value: Option<String>) -> anyhow::Result<()> {
+    let config_path = get_config_dir().join("config.toml");
+    match (key, value) {
+        (Some(k), Some(v)) => {
+            let content = std::fs::read_to_string(&config_path).unwrap_or_default();
+            let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+            let kv = format!("{k} = {v}");
+            if let Some(pos) = lines.iter().position(|l| l.starts_with(&format!("{k} ="))) {
+                lines[pos] = kv;
+            } else {
+                lines.push(kv);
+            }
+            std::fs::create_dir_all(config_path.parent().unwrap())?;
+            std::fs::write(&config_path, lines.join("\n") + "\n")?;
+            println!("Set config {k} = {v}");
+        }
+        (Some(k), None) => {
+            let content = std::fs::read_to_string(&config_path)?;
+            for line in content.lines() {
+                if line.starts_with(&format!("{k} =")) {
+                    println!("{}", line);
+                    return Ok(());
+                }
+            }
+            eprintln!("Config key '{}' not found", k);
+        }
+        (None, _) => {
+            if config_path.exists() {
+                let content = std::fs::read_to_string(&config_path)?;
+                println!("{}", content);
+            } else {
+                println!("No config file at {}", config_path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn run_version() -> anyhow::Result<()> {
     println!("Klyron v{}", env!("CARGO_PKG_VERSION"));
     Ok(())

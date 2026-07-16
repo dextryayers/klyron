@@ -135,4 +135,106 @@ mod tests {
         let pool = ConnectionPool::new(6, 100);
         assert_eq!(pool.evict_expired(), 0);
     }
+
+    #[test]
+    fn test_pool_active_count() {
+        let pool = ConnectionPool::new(6, 100);
+        assert_eq!(pool.active_count(), 0);
+    }
+
+    #[test]
+    fn test_pool_close_and_close_host() {
+        let pool = ConnectionPool::new(6, 100);
+        assert_eq!(pool.active_count(), 0);
+        pool.close_host("nonexistent.com");
+        assert_eq!(pool.active_count(), 0);
+        pool.close();
+        assert_eq!(pool.active_count(), 0);
+    }
+
+    #[test]
+    fn test_pool_release_noop() {
+        let pool = ConnectionPool::new(6, 100);
+        pool.release("any-host");
+        assert_eq!(pool.active_count(), 0);
+    }
+
+    #[test]
+    fn test_pool_evict_expired_none_fresh() {
+        let pool = ConnectionPool::new(5, 10);
+        assert_eq!(pool.evict_expired(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_pool_get_empty() {
+        let pool = ConnectionPool::new(5, 10);
+        let result = pool.get("example.com:80").await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_pool_put_and_get_cycle() {
+        let pool = ConnectionPool::new(5, 10);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let host = "test-host:9090".to_string();
+        pool.put(host.clone(), stream).await;
+        assert_eq!(pool.active_count(), 1);
+
+        let retrieved = pool.get(&host).await;
+        assert!(retrieved.is_some());
+        assert_eq!(pool.active_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_pool_put_max_per_host() {
+        let pool = ConnectionPool::new(2, 10);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            for _ in 0..3 {
+                let _ = listener.accept().await;
+            }
+        });
+
+        let host = "same-host:8080".to_string();
+        for _ in 0..3 {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            pool.put(host.clone(), stream).await;
+        }
+        assert_eq!(pool.active_count(), 2);
+
+        let retrieved = pool.get(&host).await;
+        assert!(retrieved.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_pool_get_only_returns_fresh() {
+        let pool = ConnectionPool::new(5, 10);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let host = "get-fresh:7070".to_string();
+        pool.put(host.clone(), stream).await;
+
+        // Getting from a different host should return None
+        let diff = pool.get("other-host:9090").await;
+        assert!(diff.is_none());
+
+        // Getting from the correct host should succeed
+        let same = pool.get(&host).await;
+        assert!(same.is_some());
+    }
 }

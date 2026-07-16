@@ -1,7 +1,161 @@
 use crate::PmError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_workspace_config_defaults() {
+        let config = WorkspaceConfig::default();
+        assert_eq!(config.members, vec!["packages/*"]);
+        assert!(config.shared_deps.contains(&"typescript".to_string()));
+        assert!(config.hoist_patterns.contains(&"*".to_string()));
+        assert!(config.ignore_patterns.contains(&"**/node_modules/**".to_string()));
+        assert!(config.features.is_none());
+    }
+
+    #[test]
+    fn test_workspace_config_custom_members() {
+        let config = WorkspaceConfig {
+            members: vec!["packages/*".into(), "libs/*".into()],
+            shared_deps: vec![],
+            hoist_patterns: vec![],
+            ignore_patterns: vec![],
+            features: None,
+        };
+        assert_eq!(config.members.len(), 2);
+    }
+
+    #[test]
+    fn test_hoist_analysis_empty() {
+        let analysis = HoistAnalysis {
+            duplicated_deps: vec![],
+            potential_savings: 0,
+            member_count: 0,
+        };
+        assert_eq!(analysis.member_count, 0);
+        assert!(analysis.duplicated_deps.is_empty());
+    }
+
+    #[test]
+    fn test_suggest_hoisting_empty() {
+        let analysis = HoistAnalysis {
+            duplicated_deps: vec![],
+            potential_savings: 0,
+            member_count: 0,
+        };
+        let suggestions = suggest_hoisting(&analysis);
+        assert!(suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_suggest_hoisting_with_duplicates() {
+        let analysis = HoistAnalysis {
+            duplicated_deps: vec![
+                DuplicateDep {
+                    name: "lodash".into(),
+                    versions: vec!["4.17.21".into(), "4.17.20".into()],
+                    installations: vec!["packages/a/node_modules/lodash".into()],
+                    total_install_size: 1024 * 1024,
+                },
+            ],
+            potential_savings: 1024 * 1024,
+            member_count: 2,
+        };
+        let suggestions = suggest_hoisting(&analysis);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].package, "lodash");
+    }
+
+    #[test]
+    fn test_duplicate_dep_creation() {
+        let dep = DuplicateDep {
+            name: "react".into(),
+            versions: vec!["18.0.0".into()],
+            installations: vec!["packages/app/node_modules/react".into()],
+            total_install_size: 50000,
+        };
+        assert_eq!(dep.name, "react");
+        assert_eq!(dep.total_install_size, 50000);
+    }
+
+    #[test]
+    fn test_hoist_suggestion_creation() {
+        let suggestion = HoistSuggestion {
+            package: "lodash".into(),
+            from_version: "4.17.20".into(),
+            to_version: "4.17.21".into(),
+            members_affected: vec!["pkg-a".into()],
+            savings_bytes: 500000,
+        };
+        assert_eq!(suggestion.package, "lodash");
+        assert_eq!(suggestion.savings_bytes, 500000);
+    }
+
+    #[test]
+    fn test_add_to_member_no_file() {
+        let tmp = std::env::temp_dir().join("klyron_ws_test_add");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let result = add_to_member(&tmp, "lodash", "4.17.21");
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_remove_from_member_no_file() {
+        let tmp = std::env::temp_dir().join("klyron_ws_test_rm");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let result = remove_from_member(&tmp, "lodash");
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_load_workspace_config_no_config() {
+        let tmp = std::env::temp_dir().join("klyron_ws_test_load");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let result = load_workspace_config(&tmp);
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_load_workspace_config_from_package_json() {
+        let tmp = std::env::temp_dir().join("klyron_ws_test_pkg");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let pkg = serde_json::json!({
+            "workspaces": ["packages/*", "libs/*"]
+        });
+        std::fs::write(tmp.join("package.json"), serde_json::to_string(&pkg).unwrap()).unwrap();
+        let config = load_workspace_config(&tmp).unwrap();
+        assert_eq!(config.members.len(), 2);
+        assert!(config.members.contains(&"packages/*".to_string()));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_workspace_config_with_features() {
+        let mut features = HashMap::new();
+        features.insert("web".into(), vec!["react".into(), "react-dom".into()]);
+        features.insert("mobile".into(), vec!["react-native".into()]);
+        let config = WorkspaceConfig {
+            members: vec!["packages/*".into()],
+            shared_deps: vec![],
+            hoist_patterns: vec![],
+            ignore_patterns: vec![],
+            features: Some(features),
+        };
+        assert!(config.features.is_some());
+        assert_eq!(config.features.as_ref().unwrap().len(), 2);
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceConfig {

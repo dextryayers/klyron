@@ -119,3 +119,109 @@ pub trait ModuleLoader {
     fn register(&self, name: &str, source: &str);
     fn has(&self, name: &str) -> bool;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_es_module_loader_new() {
+        let loader = ESModuleLoader::new("/base/path");
+        assert!(!loader.has("nonexistent"));
+    }
+
+    #[test]
+    fn test_register_and_get() {
+        let loader = ESModuleLoader::new("/base/path");
+        loader.register("mod", "export const x = 1;", ModuleType::EsModule);
+        assert!(loader.has("mod"));
+        let module = loader.get("mod").unwrap();
+        assert_eq!(module.specifier, "mod");
+        assert_eq!(module.source, "export const x = 1;");
+    }
+
+    #[test]
+    fn test_register_json_module() {
+        let loader = ESModuleLoader::new("/base/path");
+        loader.register("data.json", r#"{"key":"value"}"#, ModuleType::Json);
+        let module = loader.get("data.json").unwrap();
+        assert_eq!(module.source, r#"{"key":"value"}"#);
+    }
+
+    #[test]
+    fn test_instantiate() {
+        let loader = ESModuleLoader::new("/base/path");
+        loader.instantiate("mod", "code").unwrap();
+        assert!(loader.has("mod"));
+    }
+
+    #[test]
+    fn test_resolve_absolute_path() {
+        let loader = ESModuleLoader::new("/base");
+        let result = loader.resolve("/absolute/path.js", "/base");
+        assert_eq!(result.unwrap(), "/absolute/path.js");
+    }
+
+    #[test]
+    fn test_resolve_file_url() {
+        let loader = ESModuleLoader::new("/base");
+        let result = loader.resolve("file:///some/path.js", "/base");
+        assert_eq!(result.unwrap(), "/some/path.js");
+    }
+
+    #[test]
+    fn test_resolve_nonexistent_relative() {
+        let loader = ESModuleLoader::new("/nonexistent_base");
+        let result = loader.resolve("./nonexistent_file.js", "/nonexistent_base/mod.js");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_module_type_enum() {
+        match ModuleType::EsModule {
+            ModuleType::EsModule => {}
+            _ => panic!("expected EsModule"),
+        }
+        match ModuleType::CommonJs {
+            ModuleType::CommonJs => {}
+            _ => panic!("expected CommonJs"),
+        }
+    }
+
+    #[test]
+    fn test_es_module_structure() {
+        let module = ESModule {
+            specifier: "test".to_string(),
+            source: "code".to_string(),
+            module_type: ModuleType::Wasm,
+            resolved_path: Some("/path".to_string()),
+            dependencies: vec!["dep".to_string()],
+        };
+        assert_eq!(module.specifier, "test");
+        assert_eq!(module.dependencies.len(), 1);
+    }
+
+    #[test]
+    fn test_set_extensions() {
+        let mut loader = ESModuleLoader::new("/base");
+        loader.set_extensions(vec![".ts".to_string(), ".js".to_string()]);
+        let result = loader.resolve("./mod.ts", "/base/mod.js");
+        assert!(result.is_err()); // no filesystem, so expected
+    }
+
+    #[test]
+    fn test_resolve_import_map_nonexistent() {
+        let loader = ESModuleLoader::new("/nonexistent");
+        let result = loader.resolve_import_map("some_module");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_register_deduplication() {
+        let loader = ESModuleLoader::new("/base");
+        loader.register("mod", "v1", ModuleType::EsModule);
+        loader.register("mod", "v2", ModuleType::EsModule);
+        let module = loader.get("mod").unwrap();
+        assert_eq!(module.source, "v2");
+    }
+}

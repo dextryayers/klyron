@@ -757,3 +757,265 @@ impl Drop for PluginRegistry {
         let _ = self.rollback();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_registry_new() {
+        let registry = PluginRegistry::new().unwrap();
+        assert!(registry.list().is_empty());
+        assert_eq!(registry.hook_registry().count(), 0);
+    }
+
+    #[test]
+    fn test_registry_default() {
+        let registry = PluginRegistry::default();
+        assert!(registry.list().is_empty());
+    }
+
+    #[test]
+    fn test_registry_with_plugins_dir() {
+        let dir = PathBuf::from("/tmp/klyron-test-plugins");
+        let registry = PluginRegistry::new()
+            .unwrap()
+            .with_plugins_dir(dir.clone());
+        assert_eq!(registry.plugins_dir(), &dir);
+    }
+
+    #[test]
+    fn test_registry_with_no_rollback() {
+        let registry = PluginRegistry::new().unwrap().with_no_rollback();
+        assert!(registry.list().is_empty());
+    }
+
+    #[test]
+    fn test_registry_with_limits() {
+        let registry = PluginRegistry::new()
+            .unwrap()
+            .with_limits(500_000, 32 * 1024 * 1024, 3000);
+        assert!(registry.list().is_empty());
+    }
+
+    #[test]
+    fn test_list_empty() {
+        let registry = PluginRegistry::new().unwrap();
+        let list = registry.list();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn test_is_loaded_returns_false_for_missing() {
+        let registry = PluginRegistry::new().unwrap();
+        assert!(!registry.is_loaded("nonexistent"));
+    }
+
+    #[test]
+    fn test_is_enabled_returns_false_for_missing() {
+        let registry = PluginRegistry::new().unwrap();
+        assert!(!registry.is_enabled("nonexistent"));
+    }
+
+    #[test]
+    fn test_get_manifest_returns_none_for_missing() {
+        let registry = PluginRegistry::new().unwrap();
+        assert!(registry.get_manifest("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_get_info_returns_none_for_missing() {
+        let registry = PluginRegistry::new().unwrap();
+        assert!(registry.get_info("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_get_all_info_empty() {
+        let registry = PluginRegistry::new().unwrap();
+        assert!(registry.get_all_info().is_empty());
+    }
+
+    #[test]
+    fn test_search_returns_empty() {
+        let registry = PluginRegistry::new().unwrap();
+        let results = registry.search("anything");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_unload_missing_plugin_returns_error() {
+        let mut registry = PluginRegistry::new().unwrap();
+        let result = registry.unload("ghost");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_remove_missing_plugin_returns_error() {
+        let mut registry = PluginRegistry::new().unwrap();
+        let result = registry.remove("ghost");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_total_fuel_consumed_missing_plugin_returns_error() {
+        let registry = PluginRegistry::new().unwrap();
+        let result = registry.total_fuel_consumed("ghost");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_toggle_missing_plugin_returns_error() {
+        let mut registry = PluginRegistry::new().unwrap();
+        let result = registry.toggle("ghost");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_update_missing_plugin_returns_error() {
+        let mut registry = PluginRegistry::new().unwrap();
+        let result = registry.update("ghost", Path::new("nonexistent.wasm"), false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_hook_registry_is_empty() {
+        let registry = PluginRegistry::new().unwrap();
+        assert_eq!(registry.hook_registry().count(), 0);
+    }
+
+    #[test]
+    fn test_resolve_dependency_order_empty() {
+        let registry = PluginRegistry::new().unwrap();
+        let order = registry.resolve_dependency_order().unwrap();
+        assert!(order.is_empty());
+    }
+
+    #[test]
+    fn test_detect_cycles_empty() {
+        let registry = PluginRegistry::new().unwrap();
+        let cycles = registry.detect_cycles();
+        assert!(cycles.is_empty());
+    }
+
+    #[test]
+    fn test_event_listener() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let mut registry = PluginRegistry::new().unwrap();
+        let fired = Arc::new(AtomicBool::new(false));
+        let fired_clone = fired.clone();
+        registry.on_event(move |event| {
+            if matches!(event, PluginEvent::Installed { .. }) {
+                fired_clone.store(true, Ordering::SeqCst);
+            }
+        });
+        // We can't easily trigger the event without installing a plugin,
+        // but we can verify the listener was registered by checking
+        // that emitting works without panicking.
+        registry.emit(PluginEvent::Installed {
+            name: "test".into(),
+            version: "1.0".into(),
+        });
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_refresh_installed_non_existent_dir() {
+        let mut registry = PluginRegistry::new()
+            .unwrap()
+            .with_plugins_dir(PathBuf::from("/nonexistent/klyron/plugins"));
+        // Should not error if dir doesn't exist
+        registry.refresh_installed().unwrap();
+        assert!(registry.get_all_info().is_empty());
+    }
+
+    #[test]
+    fn test_rollback_empty_stack() {
+        let mut registry = PluginRegistry::new().unwrap();
+        // Rolling back with empty stack should be a no-op
+        registry.rollback().unwrap();
+    }
+
+    #[test]
+    fn test_plugin_event_variants() {
+        let installed = PluginEvent::Installed {
+            name: "p".into(),
+            version: "1.0".into(),
+        };
+        let removed = PluginEvent::Removed {
+            name: "p".into(),
+        };
+        let enabled = PluginEvent::Enabled {
+            name: "p".into(),
+        };
+        let disabled = PluginEvent::Disabled {
+            name: "p".into(),
+        };
+        let executed = PluginEvent::HookExecuted {
+            name: "p".into(),
+            phase: "on_before_build".into(),
+            duration_ms: 5,
+        };
+        let failed = PluginEvent::HookFailed {
+            name: "p".into(),
+            phase: "on_before_build".into(),
+            error: "err".into(),
+        };
+        let rolled_back = PluginEvent::RolledBack {
+            name: "p".into(),
+            phase: "on_before_build".into(),
+        };
+        let updated = PluginEvent::Updated {
+            name: "p".into(),
+            old_version: "1.0".into(),
+            new_version: "2.0".into(),
+        };
+        let error = PluginEvent::Error {
+            name: "p".into(),
+            error: "err".into(),
+        };
+
+        // Verify Debug can be derived (ensures all variants compile)
+        let _ = format!("{:?}", installed);
+        let _ = format!("{:?}", removed);
+        let _ = format!("{:?}", enabled);
+        let _ = format!("{:?}", disabled);
+        let _ = format!("{:?}", executed);
+        let _ = format!("{:?}", failed);
+        let _ = format!("{:?}", rolled_back);
+        let _ = format!("{:?}", updated);
+        let _ = format!("{:?}", error);
+
+        // Verify Clone
+        let _ = installed.clone();
+        let _ = error.clone();
+    }
+
+    #[test]
+    fn test_execute_hooks_empty() {
+        let registry = PluginRegistry::new().unwrap();
+        let results = registry.execute_hooks(&HookPhase::OnBeforeBuild, b"data");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_execute_hooks_with_rollback_empty() {
+        let mut registry = PluginRegistry::new().unwrap();
+        let results = registry.execute_hooks_with_rollback(&HookPhase::OnBeforeBuild, b"data");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_registry_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<PluginRegistry>();
+    }
+
+    #[test]
+    fn test_plugin_event_send_sync() {
+        fn assert_send<T: Send>() {}
+        fn assert_sync<T: Sync>() {}
+        assert_send::<PluginEvent>();
+        assert_sync::<PluginEvent>();
+    }
+}

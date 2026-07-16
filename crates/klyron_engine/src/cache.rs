@@ -328,3 +328,149 @@ fn get_default_cache_dir() -> PathBuf {
 fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> CacheConfig {
+        CacheConfig {
+            max_size_mb: 10,
+            ttl_secs: 3600,
+            disk_path: PathBuf::from("/tmp/opencode_cache_test"),
+            compression: false,
+            max_memory_entries: 100,
+        }
+    }
+
+    #[test]
+    fn test_cache_config_default() {
+        let config = CacheConfig::default();
+        assert_eq!(config.max_size_mb, 512);
+        assert_eq!(config.ttl_secs, 3600);
+        assert!(config.compression);
+    }
+
+    #[test]
+    fn test_cache_config_builder() {
+        let config = CacheConfig::default()
+            .with_ttl(100)
+            .with_max_size(50)
+            .with_compression(false);
+        assert_eq!(config.ttl_secs, 100);
+        assert_eq!(config.max_size_mb, 50);
+        assert!(!config.compression);
+    }
+
+    #[test]
+    fn test_memory_cache_put_get() {
+        let config = test_config();
+        let mut cache = MemoryCache::new(config);
+        cache.put("key1".to_string(), b"value1".to_vec(), 3600, "text".to_string());
+        let entry = cache.get("key1").unwrap();
+        assert_eq!(entry.value, b"value1");
+        assert_eq!(entry.content_type, "text");
+    }
+
+    #[test]
+    fn test_memory_cache_miss() {
+        let config = test_config();
+        let mut cache = MemoryCache::new(config);
+        assert!(cache.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_memory_cache_remove() {
+        let config = test_config();
+        let mut cache = MemoryCache::new(config);
+        cache.put("k".to_string(), vec![1], 3600, "text".to_string());
+        assert!(cache.contains("k"));
+        cache.remove("k");
+        assert!(!cache.contains("k"));
+    }
+
+    #[test]
+    fn test_memory_cache_clear() {
+        let config = test_config();
+        let mut cache = MemoryCache::new(config);
+        cache.put("a".to_string(), vec![1], 3600, "text".to_string());
+        cache.put("b".to_string(), vec![2], 3600, "text".to_string());
+        cache.clear();
+        assert_eq!(cache.len(), 0);
+        assert_eq!(cache.current_size_bytes(), 0);
+    }
+
+    #[test]
+    fn test_memory_cache_expiry() {
+        let config = test_config();
+        let mut cache = MemoryCache::new(config);
+        cache.put("exp".to_string(), vec![1], 0, "text".to_string());
+        let entry = cache.get("exp").unwrap();
+        assert_eq!(entry.expires_at, 0);
+    }
+
+    #[test]
+    fn test_memory_cache_lru_eviction() {
+        let mut config = test_config();
+        config.max_memory_entries = 2;
+        let mut cache = MemoryCache::new(config);
+        cache.put("a".to_string(), vec![1; 100], 3600, "text".to_string());
+        cache.put("b".to_string(), vec![2; 100], 3600, "text".to_string());
+        cache.put("c".to_string(), vec![3; 100], 3600, "text".to_string());
+        assert!(cache.get("a").is_none());
+        assert!(cache.get("c").is_some());
+    }
+
+    #[test]
+    fn test_cache_entry_serialization() {
+        let entry = CacheEntry {
+            key: "test".to_string(),
+            value: vec![1, 2, 3],
+            created_at: 1000,
+            expires_at: 2000,
+            size_bytes: 3,
+            content_type: "bytecode".to_string(),
+            compressed: false,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: CacheEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.key, "test");
+        assert_eq!(deserialized.value, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_memory_cache_size_tracking() {
+        let config = test_config();
+        let mut cache = MemoryCache::new(config);
+        assert_eq!(cache.current_size_bytes(), 0);
+        cache.put("d".to_string(), vec![0u8; 500], 3600, "text".to_string());
+        assert!(cache.current_size_bytes() >= 500);
+    }
+
+    #[test]
+    fn test_memory_cache_contains() {
+        let config = test_config();
+        let mut cache = MemoryCache::new(config);
+        cache.put("present".to_string(), vec![1], 3600, "text".to_string());
+        assert!(cache.contains("present"));
+        assert!(!cache.contains("missing"));
+    }
+
+    #[test]
+    fn test_disk_cache_key_sanitization() {
+        let config = test_config();
+        let cache = DiskCache::new(config);
+        let path = cache.disk_path_for("test/../file.js");
+        let filename = path.file_name().unwrap().to_string_lossy().to_string();
+        assert!(!filename.contains('/'), "filename should not contain slashes: {}", filename);
+        assert!(filename.ends_with(".cache"));
+    }
+
+    #[test]
+    fn test_cache_config_disk_path() {
+        let custom = PathBuf::from("/tmp/custom_cache");
+        let config = CacheConfig::default()
+            .with_disk_path(custom.clone());
+        assert_eq!(config.disk_path, custom);
+    }
+}

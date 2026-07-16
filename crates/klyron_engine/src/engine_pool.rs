@@ -196,3 +196,86 @@ impl Default for EnginePool {
         Self::new(JsEngineKind::Boa, 2, 16)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_engine_pool_new() {
+        // With default features, no engine is available, but the pool should still be created
+        let pool = EnginePool::new(JsEngineKind::Boa, 0, 4);
+        assert_eq!(pool.size(), 0);
+        assert_eq!(pool.kind(), JsEngineKind::Boa);
+    }
+
+    #[test]
+    fn test_engine_pool_acquire_release() {
+        let pool = EnginePool::new(JsEngineKind::Boa, 0, 4);
+        // acquire may fail since Boa is not available with default features
+        let result = pool.acquire();
+        // Should either succeed or fail gracefully
+        if let Ok(entry) = result {
+            assert!(entry.in_use.lock().clone());
+            pool.release(&entry);
+            assert!(!entry.in_use.lock().clone());
+        }
+    }
+
+    #[test]
+    fn test_engine_pool_size_bounds() {
+        let pool = EnginePool::new(JsEngineKind::Boa, 0, 10);
+        assert!(pool.size() <= 10);
+    }
+
+    #[test]
+    fn test_engine_pool_warmup() {
+        let pool = EnginePool::new(JsEngineKind::Boa, 0, 10);
+        let results = pool.warmup(3);
+        // warmup may fail, but shouldn't panic
+        assert!(results.len() <= 3);
+    }
+
+    #[test]
+    fn test_engine_pool_available() {
+        let pool = EnginePool::new(JsEngineKind::Boa, 0, 4);
+        assert_eq!(pool.available(), 0);
+    }
+
+    #[test]
+    fn test_engine_pool_default() {
+        let pool = EnginePool::default();
+        assert_eq!(pool.kind(), JsEngineKind::Boa);
+    }
+
+    #[test]
+    fn test_pool_entry_stats() {
+        let stats = PoolEntryStats {
+            acquires: 5,
+            total_elapsed: std::time::Duration::from_secs(10),
+            created_at: std::time::Instant::now(),
+        };
+        assert_eq!(stats.acquires, 5);
+        assert_eq!(stats.total_elapsed.as_secs(), 10);
+    }
+
+    #[test]
+    fn test_auto_scale_empty_pool() {
+        let pool = EnginePool::new(JsEngineKind::Boa, 0, 4);
+        pool.auto_scale();
+        assert!(pool.size() <= 4);
+    }
+
+    #[test]
+    fn test_pre_compile_scripts_empty() {
+        let pool = EnginePool::new(JsEngineKind::Boa, 0, 4);
+        pool.pre_compile_scripts(&[]);
+        assert!(pool.size() <= 4);
+    }
+
+    #[test]
+    fn test_engine_pool_kind() {
+        let pool = EnginePool::new(JsEngineKind::QuickJS, 0, 2);
+        assert_eq!(pool.kind(), JsEngineKind::QuickJS);
+    }
+}

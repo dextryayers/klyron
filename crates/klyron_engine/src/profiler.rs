@@ -226,3 +226,207 @@ impl Default for JitProfiler {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_jit_profiler_new() {
+        let profiler = JitProfiler::new();
+        assert!(profiler.is_enabled());
+        assert_eq!(profiler.profile_count(), 0);
+    }
+
+    #[test]
+    fn test_jit_profiler_new_disabled() {
+        let profiler = JitProfiler::new_disabled();
+        assert!(!profiler.is_enabled());
+    }
+
+    #[test]
+    fn test_start_stop_profiling() {
+        let mut profiler = JitProfiler::new();
+        profiler.stop_profiling();
+        assert!(!profiler.is_enabled());
+        profiler.start_profiling();
+        assert!(profiler.is_enabled());
+    }
+
+    #[test]
+    fn test_record_compile() {
+        let profiler = JitProfiler::new();
+        profiler.record_compile("test.js", Duration::from_millis(10));
+        let stats = profiler.get_stats();
+        assert_eq!(stats.total_scripts, 1);
+        assert_eq!(stats.compile_time.as_millis(), 10);
+    }
+
+    #[test]
+    fn test_record_execution() {
+        let profiler = JitProfiler::new();
+        profiler.record_execution("test.js", Duration::from_millis(5), 1024);
+        let stats = profiler.get_stats();
+        assert_eq!(stats.execution_time.as_millis(), 5);
+        assert_eq!(stats.memory_usage, 1024);
+    }
+
+    #[test]
+    fn test_record_jit_compilation() {
+        let profiler = JitProfiler::new();
+        profiler.record_jit_compilation(Duration::from_millis(50));
+        let stats = profiler.get_stats();
+        assert_eq!(stats.jit_compilations, 1);
+        assert_eq!(stats.jit_compilation_time.as_millis(), 50);
+    }
+
+    #[test]
+    fn test_cache_hit_miss() {
+        let profiler = JitProfiler::new();
+        profiler.record_cache_hit();
+        profiler.record_cache_hit();
+        profiler.record_cache_miss();
+        let stats = profiler.get_stats();
+        assert_eq!(stats.cache_hits, 2);
+        assert_eq!(stats.cache_misses, 1);
+    }
+
+    #[test]
+    fn test_record_deoptimization() {
+        let profiler = JitProfiler::new();
+        profiler.record_deoptimization();
+        profiler.record_deoptimization();
+        let stats = profiler.get_stats();
+        assert_eq!(stats.deoptimizations, 2);
+    }
+
+    #[test]
+    fn test_add_profile() {
+        let profiler = JitProfiler::new();
+        let profile = IndividualProfile {
+            script_name: "test.js".to_string(),
+            compile_time: Duration::from_millis(10),
+            execution_time: Duration::from_millis(20),
+            memory_delta: 512,
+            jit_compiled: true,
+            cache_hit: false,
+            timestamp: Instant::now(),
+        };
+        profiler.add_profile(profile);
+        assert_eq!(profiler.profile_count(), 1);
+    }
+
+    #[test]
+    fn test_disabled_profiler_discards() {
+        let profiler = JitProfiler::new_disabled();
+        profiler.record_compile("test.js", Duration::from_millis(10));
+        profiler.record_cache_hit();
+        let stats = profiler.get_stats();
+        assert_eq!(stats.total_scripts, 0);
+        assert_eq!(stats.cache_hits, 0);
+    }
+
+    #[test]
+    fn test_generate_report() {
+        let profiler = JitProfiler::new();
+        profiler.record_compile("test.js", Duration::from_millis(10));
+        profiler.record_execution("test.js", Duration::from_millis(5), 256);
+        profiler.record_cache_hit();
+        let report = profiler.generate_report();
+        assert_eq!(report["total_scripts"], 1);
+        assert!(report["profiling_enabled"].as_bool().unwrap());
+        assert!(report["cache_hits"].as_u64().unwrap() >= 1);
+    }
+
+    #[test]
+    fn test_generate_report_empty() {
+        let profiler = JitProfiler::new();
+        let report = profiler.generate_report();
+        assert_eq!(report["total_scripts"], 0);
+        assert_eq!(report["hot_scripts_count"], 0);
+    }
+
+    #[test]
+    fn test_recommendations_empty() {
+        let profiler = JitProfiler::new();
+        let stats = ProfilingStats::default();
+        let recommendations = profiler.generate_recommendations(&stats);
+        assert!(recommendations.is_empty());
+    }
+
+    #[test]
+    fn test_elapsed_time() {
+        let profiler = JitProfiler::new();
+        let elapsed = profiler.elapsed();
+        assert!(elapsed.as_nanos() > 0 || elapsed.as_nanos() == 0);
+    }
+
+    #[test]
+    fn test_reset() {
+        let profiler = JitProfiler::new();
+        profiler.record_compile("test.js", Duration::from_millis(10));
+        profiler.record_cache_hit();
+        profiler.reset();
+        let stats = profiler.get_stats();
+        assert_eq!(stats.total_scripts, 0);
+        assert_eq!(stats.cache_hits, 0);
+    }
+
+    #[test]
+    fn test_peak_memory_tracking() {
+        let profiler = JitProfiler::new();
+        profiler.record_execution("a.js", Duration::default(), 500);
+        profiler.record_execution("b.js", Duration::default(), 1000);
+        let stats = profiler.get_stats();
+        assert_eq!(stats.peak_memory_usage, 1500);
+        assert_eq!(stats.memory_usage, 1500);
+    }
+
+    #[test]
+    fn test_profiling_stats_default() {
+        let stats = ProfilingStats::default();
+        assert_eq!(stats.compile_time, Duration::default());
+        assert_eq!(stats.total_scripts, 0);
+        assert_eq!(stats.cache_hits, 0);
+    }
+
+    #[test]
+    fn test_profiling_stats_serialization() {
+        let stats = ProfilingStats {
+            compile_time: Duration::from_millis(100),
+            execution_time: Duration::from_millis(200),
+            memory_usage: 1024,
+            jit_compilations: 5,
+            cache_hits: 10,
+            cache_misses: 2,
+            total_scripts: 3,
+            avg_compile_time_ns: 33_333_333.0,
+            avg_execution_time_ns: 66_666_666.0,
+            peak_memory_usage: 2048,
+            jit_compilation_time: Duration::from_millis(50),
+            deoptimizations: 1,
+            optimized_code_count: 5,
+        };
+        let json = serde_json::to_string(&stats).unwrap();
+        let deserialized: ProfilingStats = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.total_scripts, 3);
+        assert_eq!(deserialized.cache_hits, 10);
+        assert_eq!(deserialized.jit_compilations, 5);
+    }
+
+    #[test]
+    fn test_individual_profile_structure() {
+        let profile = IndividualProfile {
+            script_name: "test".to_string(),
+            compile_time: Duration::from_millis(1),
+            execution_time: Duration::from_millis(2),
+            memory_delta: 100,
+            jit_compiled: true,
+            cache_hit: false,
+            timestamp: Instant::now(),
+        };
+        assert_eq!(profile.script_name, "test");
+        assert!(profile.jit_compiled);
+        assert!(!profile.cache_hit);
+    }
+}

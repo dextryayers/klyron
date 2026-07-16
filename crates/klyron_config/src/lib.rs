@@ -478,4 +478,315 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
+
+    #[test]
+    fn test_default_config_const() {
+        assert_eq!(DEFAULT_CONFIG.telemetry, Some(true));
+        assert!(DEFAULT_CONFIG.compiler.is_none());
+        assert!(DEFAULT_CONFIG.project.is_none());
+        assert!(DEFAULT_CONFIG.server.is_none());
+        assert!(DEFAULT_CONFIG.build.is_none());
+    }
+
+    #[test]
+    fn test_parse_toml_config() {
+        let toml_str = r#"
+[project]
+name = "test-app"
+version = "1.0.0"
+
+[compiler]
+target = "wasm"
+minify = true
+"#;
+        let config = parse_config(toml_str, Path::new("klyron.toml")).unwrap();
+        assert_eq!(config.project.as_ref().unwrap().name.as_ref().unwrap(), "test-app");
+        assert_eq!(config.project.as_ref().unwrap().version.as_ref().unwrap(), "1.0.0");
+        assert_eq!(config.compiler.as_ref().unwrap().target.as_ref().unwrap(), "wasm");
+        assert_eq!(config.compiler.as_ref().unwrap().minify, Some(true));
+    }
+
+    #[test]
+    fn test_parse_json_config() {
+        let json_str = r#"{
+            "project": { "name": "json-app", "version": "2.0.0" },
+            "telemetry": false
+        }"#;
+        let config = parse_config(json_str, Path::new("klyron.json")).unwrap();
+        assert_eq!(config.project.as_ref().unwrap().name.as_ref().unwrap(), "json-app");
+        assert_eq!(config.project.as_ref().unwrap().version.as_ref().unwrap(), "2.0.0");
+        assert_eq!(config.telemetry, Some(false));
+    }
+
+    #[test]
+    fn test_parse_js_config() {
+        let config = parse_config("", Path::new("klyron.config.js")).unwrap();
+        assert_eq!(config.project.as_ref().unwrap().r#type.as_ref().unwrap(), "js");
+    }
+
+    #[test]
+    fn test_parse_ts_config() {
+        let config = parse_config("", Path::new("klyron.config.ts")).unwrap();
+        assert_eq!(config.project.as_ref().unwrap().r#type.as_ref().unwrap(), "ts");
+    }
+
+    #[test]
+    fn test_deep_merge_all_fields() {
+        let mut base = KlyronConfig::default();
+        let over = KlyronConfig {
+            telemetry: Some(false),
+            compiler: Some(CompilerConfig {
+                target: Some("wasm".into()),
+                minify: Some(true),
+                ..Default::default()
+            }),
+            build: Some(BuildConfig {
+                minify: Some(true),
+                ..Default::default()
+            }),
+            plugins: Some(vec!["plugin-a".into()]),
+            ..Default::default()
+        };
+        deep_merge(&mut base, over);
+        assert_eq!(base.telemetry, Some(false));
+        assert_eq!(base.compiler.unwrap().target.unwrap(), "wasm");
+    }
+
+    #[test]
+    fn test_serialization_roundtrip() {
+        let config = KlyronConfig {
+            telemetry: Some(true),
+            project: Some(ProjectConfig {
+                name: Some("roundtrip".into()),
+                version: Some("3.0.0".into()),
+                ..Default::default()
+            }),
+            compiler: Some(CompilerConfig {
+                target: Some("x86_64".into()),
+                minify: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        let deserialized: KlyronConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(deserialized.telemetry, Some(true));
+        assert_eq!(deserialized.project.unwrap().name.unwrap(), "roundtrip");
+    }
+
+    #[test]
+    fn test_resolve_value_nested() {
+        let config = KlyronConfig {
+            project: Some(ProjectConfig {
+                name: Some("myapp".into()),
+                version: Some("1.2.3".into()),
+                entry: Some("src/main.ts".into()),
+                ..Default::default()
+            }),
+            compiler: Some(CompilerConfig {
+                target: Some("wasm".into()),
+                minify: Some(true),
+                ..Default::default()
+            }),
+            server: Some(ServerConfig {
+                host: Some("0.0.0.0".into()),
+                port: Some(3000),
+                ..Default::default()
+            }),
+            telemetry: Some(false),
+            ..Default::default()
+        };
+        assert_eq!(resolve_value(&config, "name"), Some("myapp".into()));
+        assert_eq!(resolve_value(&config, "version"), Some("1.2.3".into()));
+        assert_eq!(resolve_value(&config, "entry"), Some("src/main.ts".into()));
+        assert_eq!(resolve_value(&config, "telemetry"), Some("false".into()));
+        assert_eq!(resolve_value(&config, "compiler.target"), Some("wasm".into()));
+        assert_eq!(resolve_value(&config, "compiler.minify"), Some("true".into()));
+        assert_eq!(resolve_value(&config, "server.host"), Some("0.0.0.0".into()));
+        assert_eq!(resolve_value(&config, "server.port"), Some("3000".into()));
+        assert_eq!(resolve_value(&config, "nonexistent"), None);
+    }
+
+    #[test]
+    fn test_apply_value() {
+        let mut config = KlyronConfig::default();
+        apply_value(&mut config, "name", "test-app").unwrap();
+        assert_eq!(config.project.as_ref().unwrap().name.as_ref().unwrap(), "test-app");
+
+        apply_value(&mut config, "telemetry", "true").unwrap();
+        assert_eq!(config.telemetry, Some(true));
+
+        apply_value(&mut config, "compiler.target", "arm").unwrap();
+        assert_eq!(config.compiler.as_ref().unwrap().target.as_ref().unwrap(), "arm");
+    }
+
+    #[test]
+    fn test_apply_value_errors() {
+        let mut config = KlyronConfig::default();
+        assert!(apply_value(&mut config, "unknown.key", "val").is_err());
+        assert!(apply_value(&mut config, "telemetry", "not-a-bool").is_err());
+        assert!(apply_value(&mut config, "compiler.minify", "not-bool").is_err());
+    }
+
+    #[test]
+    fn test_validation_valid_config() {
+        let config = KlyronConfig {
+            project: Some(ProjectConfig {
+                name: Some("valid-app".into()),
+                version: Some("1.2.3".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let v = validate_config(&config);
+        assert!(v.is_valid());
+        assert!(!v.has_warnings());
+        assert!(v.into_result().is_ok());
+    }
+
+    #[test]
+    fn test_validation_empty_name() {
+        let config = KlyronConfig {
+            project: Some(ProjectConfig {
+                name: Some("".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let v = validate_config(&config);
+        assert!(!v.errors.is_empty());
+        assert!(v.errors.iter().any(|e| e.contains("empty")));
+    }
+
+    #[test]
+    fn test_validation_space_name_warning() {
+        let config = KlyronConfig {
+            project: Some(ProjectConfig {
+                name: Some("my app".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let v = validate_config(&config);
+        assert!(v.has_warnings());
+        assert!(v.warnings.iter().any(|w| w.contains("spaces")));
+    }
+
+    #[test]
+    fn test_validation_invalid_semver() {
+        let config = KlyronConfig {
+            project: Some(ProjectConfig {
+                version: Some("not-semver".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let v = validate_config(&config);
+        assert!(!v.errors.is_empty());
+        assert!(v.errors.iter().any(|e| e.contains("semver")));
+    }
+
+    #[test]
+    fn test_validation_empty_plugin_warning() {
+        let config = KlyronConfig {
+            plugins: Some(vec!["valid-plugin".into(), "".into()]),
+            ..Default::default()
+        };
+        let v = validate_config(&config);
+        assert!(v.has_warnings());
+    }
+
+    #[test]
+    fn test_is_valid_semver() {
+        assert!(is_valid_semver("1.2.3"));
+        assert!(is_valid_semver("0.0.1"));
+        assert!(is_valid_semver("10.20.30.40"));
+        assert!(!is_valid_semver(""));
+        assert!(!is_valid_semver("1"));
+        assert!(!is_valid_semver("1.2.3.4.5"));
+        assert!(!is_valid_semver("1.2.three"));
+        assert!(!is_valid_semver(".1.2"));
+    }
+
+    #[test]
+    fn test_config_validation_struct() {
+        let v = ConfigValidation { errors: vec![], warnings: vec![] };
+        assert!(v.is_valid());
+        assert!(!v.has_warnings());
+        assert!(v.clone().into_result().is_ok());
+
+        let v2 = ConfigValidation {
+            errors: vec!["some error".into()],
+            warnings: vec!["warning".into()],
+        };
+        assert!(!v2.is_valid());
+        assert!(v2.has_warnings());
+        assert!(v2.into_result().is_err());
+    }
+
+    #[test]
+    fn test_config_layer_source_name() {
+        let def = ConfigLayer::Defaults(KlyronConfig::default());
+        assert_eq!(def.source_name(), "defaults");
+
+        let file = ConfigLayer::File(PathBuf::from("klyron.toml"), KlyronConfig::default());
+        assert_eq!(file.source_name(), "klyron.toml");
+        assert!(file.is_file());
+
+        let cli = ConfigLayer::Cli(KlyronConfig::default());
+        assert_eq!(cli.source_name(), "cli");
+
+        let env = ConfigLayer::Env("KEY".into(), "VAL".into());
+        assert_eq!(env.source_name(), "env");
+    }
+
+    #[test]
+    fn test_config_builder_with_env() {
+        let config = ConfigBuilder::new()
+            .with_defaults(KlyronConfig {
+                telemetry: Some(true),
+                ..Default::default()
+            })
+            .with_env("KLYRON_TELEMETRY".into(), "false".into())
+            .build();
+        assert_eq!(config.telemetry, Some(false));
+    }
+
+    #[test]
+    fn test_config_builder_env_no_prefix() {
+        let config = ConfigBuilder::new()
+            .with_env("OTHER_VAR".into(), "value".into())
+            .build();
+        // No KLYRON_ prefix, should be ignored
+        assert_eq!(config.telemetry, None);
+    }
+
+    #[test]
+    fn test_config_builder_ordering() {
+        let config = ConfigBuilder::new()
+            .with_defaults(KlyronConfig {
+                telemetry: Some(true),
+                ..Default::default()
+            })
+            .with_cli(KlyronConfig {
+                telemetry: Some(false),
+                ..Default::default()
+            })
+            .build();
+        assert_eq!(config.telemetry, Some(false));
+    }
+
+    #[test]
+    fn test_compiler_target_empty_warning() {
+        let config = KlyronConfig {
+            compiler: Some(CompilerConfig {
+                target: Some("".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let v = validate_config(&config);
+        assert!(v.has_warnings());
+        assert!(v.warnings.iter().any(|w| w.contains("compiler.target")));
+    }
 }

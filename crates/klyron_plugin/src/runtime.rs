@@ -294,3 +294,130 @@ pub fn verify_compatibility(manifest: &PluginManifest, force: bool) -> Result<Pl
 pub fn hash_wasm(bytes: &[u8]) -> Vec<u8> {
     Sha256::digest(bytes).to_vec()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_runtime_creation() {
+        let runtime = PluginRuntime::new(None).unwrap();
+        let _ = runtime.engine();
+    }
+
+    #[test]
+    fn test_runtime_with_sandbox() {
+        let sandbox = Arc::new(crate::sandbox::Sandbox::with_defaults());
+        let runtime = PluginRuntime::new(Some(sandbox)).unwrap();
+        let _ = runtime.engine();
+    }
+
+    #[test]
+    fn test_runtime_default() {
+        let runtime = PluginRuntime::default();
+        let _ = runtime.engine();
+    }
+
+    #[test]
+    fn test_hash_empty() {
+        let hash = hash_wasm(b"");
+        assert_eq!(hash.len(), 32);
+    }
+
+    #[test]
+    fn test_hash_deterministic() {
+        let data = b"hello wasm world";
+        let h1 = hash_wasm(data);
+        let h2 = hash_wasm(data);
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_hash_different_inputs() {
+        let h1 = hash_wasm(b"foo");
+        let h2 = hash_wasm(b"bar");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn test_check_api_compatibility_default() {
+        let manifest = PluginManifest {
+            name: "test".into(),
+            version: "1.0.0".into(),
+            ..Default::default()
+        };
+        let compat = check_api_compatibility(&manifest);
+        assert_eq!(compat.min_version, KLYRON_API_VERSION);
+        assert_eq!(compat.max_version, KLYRON_API_VERSION);
+    }
+
+    #[test]
+    fn test_check_api_compatibility_custom() {
+        let manifest = PluginManifest {
+            name: "test".into(),
+            version: "1.0.0".into(),
+            klyron_api: Some("2.0.0".into()),
+            ..Default::default()
+        };
+        let compat = check_api_compatibility(&manifest);
+        assert_eq!(compat.min_version, "2.0.0");
+        assert_eq!(compat.max_version, "2.0.0");
+    }
+
+    #[test]
+    fn test_verify_compatibility_matching() {
+        let manifest = PluginManifest {
+            name: "test".into(),
+            version: "1.0.0".into(),
+            klyron_api: Some(KLYRON_API_VERSION.into()),
+            ..Default::default()
+        };
+        let compat = verify_compatibility(&manifest, false).unwrap();
+        assert_eq!(compat.min_version, KLYRON_API_VERSION);
+    }
+
+    #[test]
+    fn test_verify_compatibility_mismatch() {
+        let manifest = PluginManifest {
+            name: "test".into(),
+            version: "1.0.0".into(),
+            klyron_api: Some("99.0.0".into()),
+            ..Default::default()
+        };
+        let result = verify_compatibility(&manifest, false);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("outside required range"));
+    }
+
+    #[test]
+    fn test_verify_compatibility_force() {
+        let manifest = PluginManifest {
+            name: "test".into(),
+            version: "1.0.0".into(),
+            klyron_api: Some("99.0.0".into()),
+            ..Default::default()
+        };
+        let compat = verify_compatibility(&manifest, true).unwrap();
+        assert_eq!(compat.min_version, "99.0.0");
+    }
+
+    #[test]
+    fn test_verify_compatibility_lower_major() {
+        let manifest = PluginManifest {
+            name: "test".into(),
+            version: "1.0.0".into(),
+            klyron_api: Some("0.1.0".into()),
+            ..Default::default()
+        };
+        let result = verify_compatibility(&manifest, false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_default_compat_struct() {
+        let compat = crate::manifest::default_compat();
+        assert_eq!(compat.min_version, "1.0.0");
+        assert_eq!(compat.max_version, "1.0.0");
+    }
+
+}

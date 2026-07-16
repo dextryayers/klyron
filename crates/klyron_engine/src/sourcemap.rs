@@ -175,3 +175,110 @@ struct ParsedStackLine {
     line: u32,
     column: u32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sourcemap_new() {
+        let sm = SourceMap::new();
+        assert_eq!(sm.version, 3);
+        assert!(sm.sources.is_empty());
+        assert!(sm.mappings.is_empty());
+    }
+
+    #[test]
+    fn test_sourcemap_add_mapping() {
+        let mut sm = SourceMap::new();
+        sm.add_mapping(1, 0, 1, 0, "source.js", None);
+        assert_eq!(sm.mappings.len(), 1);
+        assert_eq!(sm.sources.len(), 1);
+        assert_eq!(sm.sources[0], "source.js");
+    }
+
+    #[test]
+    fn test_sourcemap_add_mapping_with_name() {
+        let mut sm = SourceMap::new();
+        sm.add_mapping(2, 5, 10, 3, "lib.js", Some("myFunction"));
+        let mapping = &sm.mappings[0];
+        assert_eq!(mapping.name.as_deref(), Some("myFunction"));
+        assert_eq!(mapping.generated_line, 2);
+        assert_eq!(mapping.original_line, 10);
+    }
+
+    #[test]
+    fn test_sourcemap_duplicate_source() {
+        let mut sm = SourceMap::new();
+        sm.add_mapping(1, 0, 1, 0, "shared.js", None);
+        sm.add_mapping(2, 0, 5, 0, "shared.js", None);
+        assert_eq!(sm.sources.len(), 1);
+    }
+
+    #[test]
+    fn test_sourcemap_parse_valid() {
+        let json = r#"{
+            "version": 3,
+            "file": "out.js",
+            "sources": ["in.js"],
+            "names": ["foo"],
+            "mappings": ""
+        }"#;
+        let sm = SourceMap::parse_sourcemap(json).unwrap();
+        assert_eq!(sm.version, 3);
+        assert_eq!(sm.file.as_deref(), Some("out.js"));
+        assert_eq!(sm.sources, vec!["in.js"]);
+        assert_eq!(sm.names, vec!["foo"]);
+    }
+
+    #[test]
+    fn test_sourcemap_parse_with_source_root() {
+        let json = r#"{
+            "version": 3,
+            "sourceRoot": "/root",
+            "sources": ["src/app.ts"],
+            "sourcesContent": ["console.log(1);"]
+        }"#;
+        let sm = SourceMap::parse_sourcemap(json).unwrap();
+        assert_eq!(sm.source_root.as_deref(), Some("/root"));
+        assert_eq!(sm.sources_content.len(), 1);
+        assert_eq!(sm.sources_content[0].as_deref(), Some("console.log(1);"));
+    }
+
+    #[test]
+    fn test_sourcemap_parse_invalid_json() {
+        let result = SourceMap::parse_sourcemap("not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sourcemap_map_stack_trace_no_match() {
+        let sm = SourceMap::new();
+        let mapped = sm.map_stack_trace("Error: test\n    at file.js:1:2");
+        assert_eq!(mapped, "Error: test\n    at file.js:1:2\n");
+    }
+
+    #[test]
+    fn test_sourcemap_map_stack_trace_with_mapping() {
+        let mut sm = SourceMap::new();
+        sm.add_mapping(1, 0, 10, 5, "original.ts", Some("func"));
+        // parse_stack_line expects lines like "file:line:col" without "at " or "Error" prefix
+        let mapped = sm.map_stack_trace("file.js:1:2");
+        assert!(mapped.contains("original.ts"), "mapped should contain original.ts, got: {}", mapped);
+    }
+
+    #[test]
+    fn test_sourcemap_default() {
+        let sm: SourceMap = Default::default();
+        assert_eq!(sm.version, 3);
+    }
+
+    #[test]
+    fn test_sourcemap_multiple_mappings_same_line() {
+        let mut sm = SourceMap::new();
+        sm.add_mapping(1, 0, 1, 0, "a.js", Some("a"));
+        sm.add_mapping(1, 10, 2, 0, "b.js", Some("b"));
+        assert_eq!(sm.mappings.len(), 2);
+        assert_eq!(sm.line_mappings.get(&1).unwrap().len(), 2);
+    }
+}

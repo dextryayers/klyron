@@ -4,6 +4,86 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 use std::path::Path;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+
+    fn test_keypair() -> (Vec<u8>, Vec<u8>) {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let mut secret = [0u8; 32];
+        rng.fill_bytes(&mut secret);
+        let signing_key = DalekSigningKey::from_bytes(&secret);
+        let verifying_key = signing_key.verifying_key();
+        (signing_key.to_bytes().to_vec(), verifying_key.to_bytes().to_vec())
+    }
+
+    #[test]
+    fn test_sign_and_verify_roundtrip() {
+        let (secret, public) = test_keypair();
+        let data = b"hello world";
+        let signature = sign(data, &secret);
+        assert_eq!(signature.len(), 64);
+        assert!(verify(data, &signature, &public));
+    }
+
+    #[test]
+    fn test_verify_wrong_data() {
+        let (secret, public) = test_keypair();
+        let signature = sign(b"real data", &secret);
+        assert!(!verify(b"fake data", &signature, &public));
+    }
+
+    #[test]
+    fn test_verify_invalid_signature_length() {
+        let (_, public) = test_keypair();
+        assert!(!verify(b"data", &[0u8; 32], &public));
+    }
+
+    #[test]
+    fn test_verify_invalid_public_key_length() {
+        assert!(!verify(b"data", &[0u8; 64], &[0u8; 16]));
+    }
+
+    #[test]
+    fn test_sign_with_invalid_key_length() {
+        let signature = sign(b"data", &[0u8; 16]);
+        assert!(signature.is_empty());
+    }
+
+    #[test]
+    fn test_generate_keypair_returns_different_keys() {
+        let (secret, public) = generate_keypair();
+        assert_eq!(secret.len(), 32);
+        assert_eq!(public.len(), 32);
+        assert_ne!(secret, public);
+    }
+
+    #[test]
+    fn test_verify_with_wrong_key() {
+        let (secret, _) = test_keypair();
+        let (_, _wrong_public) = test_keypair();
+        // Use a different seed for wrong key
+        let mut rng = rand::rngs::StdRng::seed_from_u64(99);
+        let mut wrong_secret = [0u8; 32];
+        rng.fill_bytes(&mut wrong_secret);
+        let wrong_signing = DalekSigningKey::from_bytes(&wrong_secret);
+        let wrong_public2 = wrong_signing.verifying_key();
+        
+        let data = b"test data";
+        let signature = sign(data, &secret);
+        assert!(!verify(data, &signature, &wrong_public2.to_bytes().as_ref()));
+    }
+
+    #[test]
+    fn test_sign_empty_data() {
+        let (secret, public) = test_keypair();
+        let signature = sign(b"", &secret);
+        assert!(verify(b"", &signature, &public));
+        assert!(!verify(b"non-empty", &signature, &public));
+    }
+}
+
 pub struct SigningKey(pub DalekSigningKey);
 
 pub struct VerifyKey(pub DalekVerifyingKey);

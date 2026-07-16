@@ -133,3 +133,110 @@ pub fn find_engine_path(name: &str) -> String {
     });
     Path::new(&out_dir).join(name).to_string_lossy().to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_engine_input_serialization() {
+        let input = EngineInput {
+            action: "eval".to_string(),
+            code: Some("1+1".to_string()),
+            args: None,
+            filename: None,
+            project: None,
+            files: None,
+        };
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(json.contains("\"action\":\"eval\""));
+        assert!(json.contains("\"code\":\"1+1\""));
+    }
+
+    #[test]
+    fn test_engine_input_with_all_fields() {
+        let input = EngineInput {
+            action: "run".to_string(),
+            code: Some("console.log('hi')".to_string()),
+            args: Some("--debug".to_string()),
+            filename: Some("test.js".to_string()),
+            project: Some("my_project".to_string()),
+            files: Some(vec![
+                FileEntry { name: "lib.js".to_string(), content: "export const x = 1;".to_string() }
+            ]),
+        };
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(json.contains("\"action\":\"run\""));
+        assert!(json.contains("\"project\":\"my_project\""));
+        assert!(json.contains("lib.js"));
+    }
+
+    #[test]
+    fn test_engine_output_deserialization() {
+        let json = r#"{"stdout":"hello","stderr":"","exit_code":0,"result":"ok"}"#;
+        let output: EngineOutput = serde_json::from_str(json).unwrap();
+        assert_eq!(output.stdout, "hello");
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.result, "ok");
+    }
+
+    #[test]
+    fn test_engine_output_with_error() {
+        let json = r#"{"stdout":"","stderr":"error msg","exit_code":1,"result":""}"#;
+        let output: EngineOutput = serde_json::from_str(json).unwrap();
+        assert_eq!(output.stderr, "error msg");
+        assert_eq!(output.exit_code, 1);
+    }
+
+    #[test]
+    fn test_file_entry_creation() {
+        let entry = FileEntry {
+            name: "module.js".to_string(),
+            content: "export default 42;".to_string(),
+        };
+        assert_eq!(entry.name, "module.js");
+        assert_eq!(entry.content, "export default 42;");
+    }
+
+    #[test]
+    fn test_engine_input_optional_fields_skipped() {
+        let input = EngineInput {
+            action: "eval".to_string(),
+            code: None,
+            args: None,
+            filename: None,
+            project: None,
+            files: None,
+        };
+        let json = serde_json::to_string(&input).unwrap();
+        // optional fields should be skipped via skip_serializing_if
+        assert!(!json.contains("\"code\""));
+        assert!(!json.contains("\"args\""));
+        assert!(!json.contains("\"filename\""));
+    }
+
+    #[test]
+    fn test_engine_output_default_result() {
+        let json = r#"{"stdout":"out","stderr":"err","exit_code":0}"#;
+        let output: EngineOutput = serde_json::from_str(json).unwrap();
+        assert_eq!(output.stdout, "out");
+        assert_eq!(output.stderr, "err");
+        assert_eq!(output.result, "");
+    }
+
+    #[test]
+    fn test_engine_output_roundtrip() {
+        let output = EngineOutput {
+            stdout: "stdout".to_string(),
+            stderr: "stderr".to_string(),
+            exit_code: 42,
+            result: "result".to_string(),
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        let deserialized: EngineOutput = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.stdout, "stdout");
+        assert_eq!(deserialized.stderr, "stderr");
+        assert_eq!(deserialized.exit_code, 42);
+        assert_eq!(deserialized.result, "result");
+    }
+}

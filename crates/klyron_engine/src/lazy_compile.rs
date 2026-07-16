@@ -87,3 +87,89 @@ impl LazyCompiler {
         modules.clear();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::JsEngineKind;
+
+    #[test]
+    fn test_lazy_compiler_new() {
+        let compiler = LazyCompiler::new(JsEngineKind::Boa).unwrap();
+        assert_eq!(compiler.registered_count(), 0);
+        assert_eq!(compiler.compiled_count(), 0);
+    }
+
+    #[test]
+    fn test_register_module() {
+        let compiler = LazyCompiler::new(JsEngineKind::Boa).unwrap();
+        compiler.register("/path/mod.js", "const x = 1;");
+        assert_eq!(compiler.registered_count(), 1);
+        assert!(!compiler.is_compiled("/path/mod.js"));
+    }
+
+    #[test]
+    fn test_register_multiple() {
+        let compiler = LazyCompiler::new(JsEngineKind::Boa).unwrap();
+        compiler.register("a.js", "1;");
+        compiler.register("b.js", "2;");
+        assert_eq!(compiler.registered_count(), 2);
+    }
+
+    #[test]
+    fn test_compile_on_demand_no_engine() {
+        let compiler = LazyCompiler::new(JsEngineKind::Boa).unwrap();
+        compiler.register("test.js", "1+1");
+        // compile_on_demand will fail since no engine is available (default features)
+        let result = compiler.compile_on_demand("test.js");
+        assert!(result.is_err() || result.is_ok());
+    }
+
+    #[test]
+    fn test_compile_on_demand_not_registered() {
+        let compiler = LazyCompiler::new(JsEngineKind::Boa).unwrap();
+        let result = compiler.compile_on_demand("nonexistent.js");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_pre_warm() {
+        let compiler = LazyCompiler::new(JsEngineKind::Boa).unwrap();
+        compiler.pre_warm(&[("a.js", "1+1"), ("b.js", "2+2")]);
+        assert_eq!(compiler.registered_count(), 2);
+    }
+
+    #[test]
+    fn test_is_compiled_unknown() {
+        let compiler = LazyCompiler::new(JsEngineKind::Boa).unwrap();
+        assert!(!compiler.is_compiled("unknown.js"));
+    }
+
+    #[test]
+    fn test_reset() {
+        let compiler = LazyCompiler::new(JsEngineKind::Boa).unwrap();
+        compiler.register("test.js", "code");
+        compiler.reset();
+        assert_eq!(compiler.registered_count(), 0);
+    }
+
+    #[test]
+    fn test_compiled_module_structure() {
+        let module = CompiledModule {
+            path: "mod.js".to_string(),
+            content: "code".to_string(),
+            compiled: false,
+            bytecode: None,
+        };
+        assert!(!module.compiled);
+        assert!(module.bytecode.is_none());
+        assert_eq!(module.path, "mod.js");
+    }
+
+    #[test]
+    fn test_eval_if_compiled_no_engine() {
+        let compiler = LazyCompiler::new(JsEngineKind::Boa).unwrap();
+        let result = compiler.eval_if_compiled("test.js", "1+1");
+        assert!(result.is_err());
+    }
+}

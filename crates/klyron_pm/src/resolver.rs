@@ -8,6 +8,103 @@ use pubgrub::{
 
 use crate::{LockfileV3, PmError};
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pubgrub::Ranges;
+
+    #[test]
+    fn test_provider_new() {
+        let provider = KlyronDependencyProvider::new();
+        assert!(provider.packages.is_empty());
+        assert!(provider.dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_add_package_version() {
+        let mut provider = KlyronDependencyProvider::new();
+        provider.add_package_version("foo".into(), semver::Version::new(1, 0, 0));
+        assert_eq!(provider.packages.len(), 1);
+        assert_eq!(provider.packages["foo"].len(), 1);
+    }
+
+    #[test]
+    fn test_add_multiple_versions() {
+        let mut provider = KlyronDependencyProvider::new();
+        provider.add_package_version("foo".into(), semver::Version::new(1, 0, 0));
+        provider.add_package_version("foo".into(), semver::Version::new(2, 0, 0));
+        assert_eq!(provider.packages["foo"].len(), 2);
+    }
+
+    #[test]
+    fn test_add_dependencies() {
+        let mut provider = KlyronDependencyProvider::new();
+        let ver = semver::Version::new(1, 0, 0);
+        provider.add_package_version("foo".into(), ver.clone());
+        let mut deps = DependencyConstraints::default();
+        let range = Ranges::from_req(semver::VersionReq::parse(">=0.1.0").unwrap());
+        deps.insert("bar".into(), range);
+        provider.add_dependencies("foo".into(), ver.clone(), deps);
+        assert!(provider.dependencies.contains_key(&("foo".into(), ver)));
+    }
+
+    #[test]
+    fn test_choose_version_returns_highest() {
+        let mut provider = KlyronDependencyProvider::new();
+        provider.add_package_version("foo".into(), semver::Version::new(1, 0, 0));
+        provider.add_package_version("foo".into(), semver::Version::new(2, 0, 0));
+        let range = Ranges::full();
+        let chosen = provider.choose_version(&"foo".into(), &range).unwrap();
+        assert_eq!(chosen, Some(semver::Version::new(2, 0, 0)));
+    }
+
+    #[test]
+    fn test_choose_version_no_match() {
+        let provider = KlyronDependencyProvider::new();
+        let range = Ranges::full();
+        let chosen = provider.choose_version(&"nonexistent".into(), &range).unwrap();
+        assert_eq!(chosen, None);
+    }
+
+    #[test]
+    fn test_get_dependencies_unavailable() {
+        let provider = KlyronDependencyProvider::new();
+        let ver = semver::Version::new(1, 0, 0);
+        let deps = provider.get_dependencies(&"foo".into(), &ver).unwrap();
+        assert!(matches!(deps, Dependencies::Unavailable(_)));
+    }
+
+    #[test]
+    fn test_prioritize_empty() {
+        let provider = KlyronDependencyProvider::new();
+        let range = Ranges::full();
+        let stats = PackageResolutionStatistics::default();
+        let priority = provider.prioritize(&"foo".into(), &range, &stats);
+        // Should return some priority value
+        assert_eq!(priority.1, Reverse(0));
+    }
+
+    #[test]
+    fn test_resolve_from_lockfile_empty() {
+        let lf = LockfileV3 {
+            name: None, lockfile_version: None,
+            packages: std::collections::BTreeMap::new(),
+            workspaces: None, metadata: None,
+        };
+        let result = resolve_from_lockfile(&lf, "root", semver::Version::new(1, 0, 0));
+        // Should fail since there are no dependencies registered
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_version_range_construction() {
+        let req = semver::VersionReq::parse("^1.0.0").unwrap();
+        let range = Ranges::from_req(req);
+        let full = Ranges::full();
+        assert_ne!(range, full);
+    }
+}
+
 pub struct KlyronDependencyProvider {
     packages: HashMap<String, Vec<semver::Version>>,
     dependencies:

@@ -2,6 +2,96 @@ use crate::PmError;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mirror_metadata_creation() {
+        let mut packages = HashMap::new();
+        packages.insert("lodash".into(), MirrorPackage {
+            name: "lodash".into(),
+            versions: vec!["4.17.21".into()],
+            updated_at: "2024-01-01".into(),
+        });
+        let metadata = MirrorMetadata {
+            registry_url: "https://registry.npmjs.org".into(),
+            last_sync: "2024-06-15T10:00:00Z".into(),
+            packages,
+        };
+        assert_eq!(metadata.registry_url, "https://registry.npmjs.org");
+        assert_eq!(metadata.packages.len(), 1);
+        assert_eq!(metadata.packages["lodash"].versions, vec!["4.17.21"]);
+    }
+
+    #[test]
+    fn test_mirror_package_creation() {
+        let pkg = MirrorPackage {
+            name: "react".into(),
+            versions: vec!["18.0.0".into(), "18.1.0".into()],
+            updated_at: "2024-03-01".into(),
+        };
+        assert_eq!(pkg.name, "react");
+        assert_eq!(pkg.versions.len(), 2);
+    }
+
+    #[test]
+    fn test_mirror_meta_path() {
+        let dir = std::path::Path::new("/tmp/mirror");
+        let path = mirror_meta_path(dir);
+        assert_eq!(path, std::path::PathBuf::from("/tmp/mirror/mirror.json"));
+    }
+
+    #[test]
+    fn test_url_rewriting() {
+        let registry_url = "https://registry.npmjs.org";
+        let name = "lodash";
+        let version = "4.17.21";
+        let tarball_url = format!("{}/{}/-/{}-{}.tgz", registry_url.trim_end_matches('/'), name, name, version);
+        assert_eq!(tarball_url, "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz");
+    }
+
+    #[test]
+    fn test_metadata_url() {
+        let registry_url = "https://registry.npmjs.org/";
+        let name = "express";
+        let metadata_url = format!("{}/{}", registry_url.trim_end_matches('/'), name);
+        assert_eq!(metadata_url, "https://registry.npmjs.org/express");
+    }
+
+    #[test]
+    fn test_chrono_now_iso_format() {
+        let iso = chrono_now_iso();
+        assert_eq!(iso.len(), 20); // YYYY-MM-DDTHH:MM:SSZ
+        assert!(iso.ends_with('Z'));
+        assert_eq!(&iso[4..5], "-");
+        assert_eq!(&iso[7..8], "-");
+        assert_eq!(&iso[13..14], ":");
+    }
+
+    #[test]
+    fn test_tarball_path_construction() {
+        let mirror_dir = std::path::Path::new("/mirror");
+        let package_name = "lodash";
+        let version = "4.17.21";
+        let tarball_path = mirror_dir.join(package_name).join(format!("{package_name}-{version}.tgz"));
+        assert_eq!(
+            tarball_path.to_string_lossy(),
+            "/mirror/lodash/lodash-4.17.21.tgz"
+        );
+    }
+
+    #[test]
+    fn test_install_from_mirror_not_found() {
+        let tmp = std::env::temp_dir().join("klyron_mirror_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let result = install_from_mirror("nonexistent", "1.0.0", &tmp, &tmp);
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MirrorMetadata {
     pub registry_url: String,

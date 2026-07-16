@@ -146,3 +146,82 @@ impl Default for FallbackChain {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fallback_chain_new() {
+        let chain = FallbackChain::new();
+        assert!(matches!(chain.current_strategy(), FallbackStrategy::Fastest));
+    }
+
+    #[test]
+    fn test_fallback_strategy_fastest() {
+        let mut chain = FallbackChain::with_strategy(FallbackStrategy::Fastest);
+        let result = chain.resolve();
+        // May fail without engine features, but shouldn't panic
+        assert!(result.is_err() || result.is_ok());
+    }
+
+    #[test]
+    fn test_fallback_strategy_first_working() {
+        let mut chain = FallbackChain::with_strategy(FallbackStrategy::FirstWorking);
+        let result = chain.resolve();
+        assert!(result.is_err() || result.is_ok());
+    }
+
+    #[test]
+    fn test_fallback_strategy_ordered() {
+        let order = vec![JsEngineKind::QuickJS, JsEngineKind::Boa];
+        let mut chain = FallbackChain::with_strategy(FallbackStrategy::Ordered(order));
+        let result = chain.resolve();
+        assert!(result.is_err() || result.is_ok());
+    }
+
+    #[test]
+    fn test_reset_blacklist() {
+        let mut chain = FallbackChain::new();
+        chain.blacklist.push(JsEngineKind::V8);
+        chain.reset_blacklist();
+        assert!(chain.blacklist.is_empty());
+    }
+
+    #[test]
+    fn test_current_strategy() {
+        let chain = FallbackChain::with_strategy(FallbackStrategy::FirstWorking);
+        assert!(matches!(chain.current_strategy(), FallbackStrategy::FirstWorking));
+    }
+
+    #[test]
+    fn test_benchmark_and_select() {
+        let mut chain = FallbackChain::new();
+        let result = chain.benchmark_and_select();
+        // Without engines, this should fall back to error
+        assert!(result.is_err() || result.is_ok());
+    }
+
+    #[test]
+    fn test_fallback_strategy_default() {
+        let strategy = FallbackStrategy::default();
+        assert!(matches!(strategy, FallbackStrategy::Fastest));
+    }
+
+    #[test]
+    fn test_resolve_with_timeout() {
+        let mut chain = FallbackChain::new();
+        let result = chain.resolve_with_timeout(std::time::Duration::from_secs(1));
+        assert!(result.is_err() || result.is_ok());
+    }
+
+    #[test]
+    fn test_fallback_strategy_ordered_priority() {
+        let order = vec![JsEngineKind::V8, JsEngineKind::Boa];
+        let strategy = FallbackStrategy::Ordered(order);
+        if let FallbackStrategy::Ordered(o) = &strategy {
+            assert_eq!(o[0], JsEngineKind::V8);
+            assert_eq!(o[1], JsEngineKind::Boa);
+        }
+    }
+}

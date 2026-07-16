@@ -2,6 +2,150 @@ use crate::PmError;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_license_compliance_allowed() {
+        let deps = vec![
+            DepInfo {
+                name: "lodash".into(), version: "4.17.21".into(),
+                license: Some("MIT".into()), path: None,
+            },
+            DepInfo {
+                name: "express".into(), version: "4.18.0".into(),
+                license: Some("MIT".into()), path: None,
+            },
+        ];
+        let allowed: Vec<String> = vec!["MIT".into()];
+        let violations = check_license_compliance(&deps, &allowed);
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn test_check_license_compliance_violation() {
+        let deps = vec![
+            DepInfo {
+                name: "bad-license".into(), version: "1.0.0".into(),
+                license: Some("GPL-3.0".into()), path: None,
+            },
+        ];
+        let allowed: Vec<String> = vec!["MIT".into(), "Apache-2.0".into()];
+        let violations = check_license_compliance(&deps, &allowed);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].package, "bad-license");
+        assert_eq!(violations[0].license, "GPL-3.0");
+        assert!(violations[0].required);
+    }
+
+    #[test]
+    fn test_check_license_compliance_unknown_license() {
+        let deps = vec![
+            DepInfo {
+                name: "no-license".into(), version: "1.0.0".into(),
+                license: None, path: None,
+            },
+        ];
+        let allowed: Vec<String> = vec!["MIT".into()];
+        let violations = check_license_compliance(&deps, &allowed);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].license, "unknown");
+        assert!(!violations[0].required);
+    }
+
+    #[test]
+    fn test_check_license_compliance_multiple_allowed() {
+        let deps = vec![
+            DepInfo {
+                name: "pkg-a".into(), version: "1.0.0".into(),
+                license: Some("MIT".into()), path: None,
+            },
+            DepInfo {
+                name: "pkg-b".into(), version: "2.0.0".into(),
+                license: Some("Apache-2.0".into()), path: None,
+            },
+            DepInfo {
+                name: "pkg-c".into(), version: "3.0.0".into(),
+                license: Some("BSD-3-Clause".into()), path: None,
+            },
+        ];
+        let allowed: Vec<String> = vec!["MIT".into(), "Apache-2.0".into()];
+        let violations = check_license_compliance(&deps, &allowed);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].package, "pkg-c");
+    }
+
+    #[test]
+    fn test_license_case_insensitive() {
+        let deps = vec![
+            DepInfo {
+                name: "pkg".into(), version: "1.0.0".into(),
+                license: Some("mit".into()), path: None,
+            },
+        ];
+        let allowed: Vec<String> = vec!["MIT".into()];
+        let violations = check_license_compliance(&deps, &allowed);
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn test_dep_info_creation() {
+        let dep = DepInfo {
+            name: "react".into(),
+            version: "18.0.0".into(),
+            license: Some("MIT".into()),
+            path: Some("node_modules/react".into()),
+        };
+        assert_eq!(dep.name, "react");
+        assert_eq!(dep.license.as_deref(), Some("MIT"));
+        assert_eq!(dep.path.as_deref(), Some("node_modules/react"));
+    }
+
+    #[test]
+    fn test_license_violation_display() {
+        let violation = LicenseViolation {
+            package: "bad".into(), version: "1.0.0".into(),
+            license: "GPL-3.0".into(), required: true,
+        };
+        assert_eq!(violation.package, "bad");
+        assert_eq!(violation.license, "GPL-3.0");
+    }
+
+    #[test]
+    fn test_empty_deps_no_violations() {
+        let deps: Vec<DepInfo> = vec![];
+        let allowed: Vec<String> = vec!["MIT".into()];
+        let violations = check_license_compliance(&deps, &allowed);
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn test_license_starts_with_matching() {
+        // The check uses starts_with, so "MIT" matches "MIT" and "MIT License"
+        let deps = vec![
+            DepInfo {
+                name: "pkg".into(), version: "1.0.0".into(),
+                license: Some("MIT License".into()), path: None,
+            },
+        ];
+        let allowed: Vec<String> = vec!["MIT".into()];
+        let violations = check_license_compliance(&deps, &allowed);
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn test_scan_node_modules_no_dir() {
+        let tmp = std::env::temp_dir().join("klyron_license_scan");
+        let _ = std::fs::remove_dir_all(&tmp);
+        // Directory doesn't exist
+        let result = scan_node_modules_for_licenses(&tmp);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LicenseViolation {
     pub package: String,

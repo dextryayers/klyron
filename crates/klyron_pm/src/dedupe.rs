@@ -395,6 +395,217 @@ fn rebuild_deduped(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_tree() -> DependencyTree {
+        DependencyTree {
+            name: "root".into(),
+            version: "1.0.0".into(),
+            resolved: true,
+            integrity: None,
+            dependencies: vec![
+                DependencyTree {
+                    name: "lodash".into(),
+                    version: "4.17.21".into(),
+                    resolved: true,
+                    integrity: None,
+                    dependencies: vec![],
+                },
+                DependencyTree {
+                    name: "lodash".into(),
+                    version: "4.17.20".into(),
+                    resolved: true,
+                    integrity: None,
+                    dependencies: vec![],
+                },
+                DependencyTree {
+                    name: "react".into(),
+                    version: "18.2.0".into(),
+                    resolved: true,
+                    integrity: None,
+                    dependencies: vec![DependencyTree {
+                        name: "lodash".into(),
+                        version: "4.17.19".into(),
+                        resolved: true,
+                        integrity: None,
+                        dependencies: vec![],
+                    }],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn test_flatten_tree() {
+        let flat = DedupeEngine::flatten_tree(&sample_tree(), 0);
+        assert_eq!(flat.len(), 5);
+        assert_eq!(flat[0].0, "root");
+    }
+
+    #[test]
+    fn test_satisfies_exact() {
+        assert!(DedupeEngine::satisfies("1.0.0", "1.0.0"));
+        assert!(!DedupeEngine::satisfies("1.0.0", "2.0.0"));
+    }
+
+    #[test]
+    fn test_satisfies_range() {
+        assert!(DedupeEngine::satisfies("1.5.0", ">=1.0.0"));
+        assert!(DedupeEngine::satisfies("1.9.0", "^1.0.0"));
+        assert!(!DedupeEngine::satisfies("0.9.0", ">=1.0.0"));
+        assert!(!DedupeEngine::satisfies("2.0.0", "^1.0.0"));
+    }
+
+    #[test]
+    fn test_highest_version() {
+        let versions = vec!["1.0.0".into(), "2.0.0".into(), "1.5.0".into()];
+        assert_eq!(DedupeEngine::highest_version(&versions), Some("2.0.0".into()));
+    }
+
+    #[test]
+    fn test_highest_version_fallback_non_semver() {
+        let versions = vec!["not-semver".into()];
+        assert_eq!(DedupeEngine::highest_version(&versions), Some("not-semver".into()));
+    }
+
+    #[test]
+    fn test_estimate_package_size_known() {
+        let size = DedupeEngine::estimate_package_size("lodash", "4.17.21");
+        assert_eq!(size, 788480);
+    }
+
+    #[test]
+    fn test_estimate_package_size_unknown() {
+        let size = DedupeEngine::estimate_package_size("unknown", "1.0.0");
+        assert_eq!(size, 112640);
+    }
+
+    #[test]
+    fn test_find_duplicates() {
+        let dups = DedupeEngine::find_duplicates(&sample_tree());
+        assert!(dups.iter().any(|d| d.name == "lodash"));
+    }
+
+    #[test]
+    fn test_analyze_savings() {
+        let report = DedupeEngine::analyze_savings(&sample_tree());
+        assert!(report.original_size > 0);
+        assert!(report.duplicates_found > 0);
+    }
+
+    #[test]
+    fn test_dedupe_tree() {
+        let deduped = DedupeEngine::dedupe_tree(&sample_tree());
+        assert_eq!(deduped.name, "root");
+        assert!(deduped.resolved);
+    }
+
+    #[test]
+    fn test_generate_report_json() {
+        let report = DedupeReport {
+            original_size: 1000, deduped_size: 800, savings_bytes: 200,
+            savings_percent: 20.0, duplicates_found: 2, duplicates_resolved: 1,
+            duplicate_details: vec![], hoist_opportunities: 0, hoist_savings: 0,
+        };
+        let json = DedupeEngine::generate_report(&report, ReportFormat::Json);
+        assert!(json.contains("original_size"));
+        assert!(json.contains("1000"));
+    }
+
+    #[test]
+    fn test_generate_report_text() {
+        let report = DedupeReport {
+            original_size: 1000, deduped_size: 800, savings_bytes: 200,
+            savings_percent: 20.0, duplicates_found: 2, duplicates_resolved: 1,
+            duplicate_details: vec![], hoist_opportunities: 0, hoist_savings: 0,
+        };
+        let text = DedupeEngine::generate_report(&report, ReportFormat::Text);
+        assert!(text.contains("size:1000"));
+    }
+
+    #[test]
+    fn test_generate_report_pretty() {
+        let report = DedupeReport {
+            original_size: 1000, deduped_size: 800, savings_bytes: 200,
+            savings_percent: 20.0, duplicates_found: 2, duplicates_resolved: 1,
+            duplicate_details: vec![], hoist_opportunities: 0, hoist_savings: 0,
+        };
+        let pretty = DedupeEngine::generate_report(&report, ReportFormat::Pretty);
+        assert!(pretty.contains("Deduplication Report"));
+    }
+
+    #[test]
+    fn test_build_dependency_tree() {
+        let mut packages = HashMap::new();
+        let mut versions = HashMap::new();
+        packages.insert("root".into(), [("foo".into(), "1.0.0".into())].into());
+        versions.insert(("foo".into(), "1.0.0".into()), vec![]);
+        let tree = build_dependency_tree("root", "1.0.0", &packages, &versions);
+        assert_eq!(tree.name, "root");
+        assert_eq!(tree.dependencies.len(), 1);
+        assert_eq!(tree.dependencies[0].name, "foo");
+    }
+
+    #[test]
+    fn test_hoist_deps() {
+        let hoisted = DedupeEngine::hoist_deps(&sample_tree());
+        assert_eq!(hoisted.name, "root");
+    }
+
+    #[test]
+    fn test_semver_utils_parse() {
+        let parsed = semver_utils::parse_version("1.2.3-alpha").unwrap();
+        assert_eq!(parsed, (1, 2, 3, "alpha".into()));
+    }
+
+    #[test]
+    fn test_semver_utils_satisfies() {
+        assert!(semver_utils::satisfies("1.2.3", ">=1.0.0"));
+        assert!(!semver_utils::satisfies("0.9.0", ">=1.0.0"));
+    }
+
+    #[test]
+    fn test_semver_utils_max_satisfying() {
+        let versions = vec!["1.0.0".into(), "2.0.0".into(), "1.5.0".into()];
+        assert_eq!(semver_utils::max_satisfying(&versions, "^1.0.0"), Some("1.5.0".into()));
+    }
+
+    #[test]
+    fn test_semver_utils_sort() {
+        let mut versions = vec!["2.0.0".into(), "1.0.0".into(), "1.5.0".into()];
+        semver_utils::sort_versions(&mut versions);
+        assert_eq!(versions, vec!["1.0.0", "1.5.0", "2.0.0"]);
+    }
+
+    #[test]
+    fn test_empty_tree_flatten() {
+        let tree = DependencyTree {
+            name: "alone".into(), version: "1.0.0".into(), resolved: true,
+            integrity: None, dependencies: vec![],
+        };
+        let flat = DedupeEngine::flatten_tree(&tree, 0);
+        assert_eq!(flat.len(), 1);
+    }
+
+    #[test]
+    fn test_no_duplicates() {
+        let tree = DependencyTree {
+            name: "root".into(), version: "1.0.0".into(), resolved: true,
+            integrity: None,
+            dependencies: vec![
+                DependencyTree {
+                    name: "foo".into(), version: "1.0.0".into(), resolved: true,
+                    integrity: None, dependencies: vec![],
+                },
+            ],
+        };
+        let dups = DedupeEngine::find_duplicates(&tree);
+        assert!(dups.is_empty());
+    }
+}
+
 fn perform_hoist(node: &mut DependencyTree, visited: &mut HashSet<(String, String)>) {
     let key = (node.name.clone(), node.version.clone());
     if !visited.insert(key) {

@@ -69,3 +69,72 @@ impl Default for WarmupCache {
         Self::new(64)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_warmup_cache_new() {
+        let cache = WarmupCache::new(10);
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_register_and_get() {
+        let cache = WarmupCache::new(10);
+        cache.register("test_key", "console.log('hello');");
+        assert!(cache.contains("test_key"));
+        let entry = cache.get("test_key").unwrap();
+        assert_eq!(entry.key, "test_key");
+        assert_eq!(entry.code, "console.log('hello');");
+    }
+
+    #[test]
+    fn test_get_nonexistent() {
+        let cache = WarmupCache::new(10);
+        assert!(cache.get("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_max_entries_eviction() {
+        let cache = WarmupCache::new(2);
+        cache.register("a", "code_a");
+        cache.register("b", "code_b");
+        cache.register("c", "code_c");
+        // Since len >= max_entries, cache is cleared before inserting
+        assert_eq!(cache.len(), 1);
+        assert!(cache.contains("c"));
+    }
+
+    #[test]
+    fn test_precompile_common() {
+        let cache = WarmupCache::new(10);
+        cache.precompile_common();
+        assert!(cache.contains("console_polyfill"));
+        assert!(cache.contains("json_polyfill"));
+        assert!(cache.contains("timers_polyfill"));
+    }
+
+    #[test]
+    fn test_clear() {
+        let cache = WarmupCache::new(10);
+        cache.register("k", "code");
+        cache.clear();
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_warmup_entry_compiled_size() {
+        let cache = WarmupCache::new(10);
+        cache.register("test", "some code here");
+        let entry = cache.get("test").unwrap();
+        assert_eq!(entry.compiled_size, "some code here".len());
+    }
+
+    #[test]
+    fn test_default() {
+        let cache = WarmupCache::default();
+        assert_eq!(cache.len(), 0);
+    }
+}

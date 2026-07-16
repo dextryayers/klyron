@@ -276,3 +276,104 @@ impl JSCAdapter {
         klyron_engine_jsc::JSCEngine::new().map(JSCEngineWrapper).map(Adapter::wrap).map_err(|e| e.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_engine_kind_name() {
+        assert_eq!(JsEngineKind::V8.name(), "v8");
+        assert_eq!(JsEngineKind::Boa.name(), "boa");
+        assert_eq!(JsEngineKind::QuickJS.name(), "quickjs");
+        assert_eq!(JsEngineKind::JSC.name(), "jsc");
+    }
+
+    #[test]
+    fn test_engine_kind_display() {
+        assert_eq!(JsEngineKind::V8.to_string(), "v8");
+        assert_eq!(JsEngineKind::Boa.to_string(), "boa");
+    }
+
+    #[test]
+    fn test_engine_kind_all() {
+        let all = JsEngineKind::all();
+        assert_eq!(all.len(), 4);
+        assert!(all.contains(&JsEngineKind::V8));
+        assert!(all.contains(&JsEngineKind::Boa));
+        assert!(all.contains(&JsEngineKind::QuickJS));
+        assert!(all.contains(&JsEngineKind::JSC));
+    }
+
+    #[test]
+    fn test_engine_kind_equality() {
+        assert_eq!(JsEngineKind::V8, JsEngineKind::V8);
+        assert_ne!(JsEngineKind::V8, JsEngineKind::Boa);
+    }
+
+    #[test]
+    fn test_engine_kind_clone() {
+        let kind = JsEngineKind::QuickJS;
+        let cloned = kind;
+        assert_eq!(kind, cloned);
+    }
+
+    #[test]
+    fn test_engine_kind_serialize_roundtrip() {
+        let kinds = vec![JsEngineKind::V8, JsEngineKind::Boa, JsEngineKind::QuickJS, JsEngineKind::JSC];
+        for kind in kinds {
+            let json = serde_json::to_string(&kind).unwrap();
+            let deserialized: JsEngineKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(kind, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_bench_result_default() {
+        let result = BenchResult {
+            eval_time: std::time::Duration::from_secs(1),
+            success: true,
+            error: None,
+        };
+        assert!(result.success);
+        assert!(result.error.is_none());
+        assert_eq!(result.eval_time.as_secs(), 1);
+    }
+
+    #[test]
+    fn test_bench_result_with_error() {
+        let result = BenchResult {
+            eval_time: std::time::Duration::default(),
+            success: false,
+            error: Some("engine failed".to_string()),
+        };
+        assert!(!result.success);
+        assert_eq!(result.error.unwrap(), "engine failed");
+    }
+
+    #[test]
+    fn test_engine_runtime_new_unavailable() {
+        let result = EngineRuntime::new(JsEngineKind::V8);
+        // With default features, no engines are available
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_engine_runtime_with_fallback_unavailable() {
+        let result = EngineRuntime::with_fallback();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_detect_best_engine_fallback() {
+        let best = detect_best_engine();
+        // Without engines, falls back to Boa
+        assert_eq!(best, JsEngineKind::Boa);
+    }
+
+    #[test]
+    fn test_jsvalue_type_alias() {
+        let val: JsValue = serde_json::json!({"key": "value"});
+        assert_eq!(val["key"], "value");
+    }
+}

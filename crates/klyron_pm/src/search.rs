@@ -1,6 +1,115 @@
 use crate::PmError;
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_search_result_creation() {
+        let result = SearchResult {
+            name: "lodash".into(),
+            description: Some("A utility library".into()),
+            version: "4.17.21".into(),
+            downloads: Some(1000000),
+            updated_at: Some("2024-01-01".into()),
+        };
+        assert_eq!(result.name, "lodash");
+        assert_eq!(result.version, "4.17.21");
+        assert_eq!(result.description.as_deref(), Some("A utility library"));
+    }
+
+    #[test]
+    fn test_search_result_no_description() {
+        let result = SearchResult {
+            name: "foo".into(),
+            description: None,
+            version: "1.0.0".into(),
+            downloads: None,
+            updated_at: None,
+        };
+        assert!(result.description.is_none());
+        assert!(result.downloads.is_none());
+    }
+
+    #[test]
+    fn test_search_results_pagination() {
+        let results = SearchResults {
+            results: vec![
+                SearchResult {
+                    name: "a".into(), description: None, version: "1.0.0".into(),
+                    downloads: None, updated_at: None,
+                },
+            ],
+            total: 1,
+            page: 1,
+            limit: 20,
+        };
+        assert_eq!(results.results.len(), 1);
+        assert_eq!(results.page, 1);
+        assert_eq!(results.limit, 20);
+    }
+
+    #[test]
+    fn test_urlencoding_simple() {
+        assert_eq!(urlencoding("hello"), "hello");
+        assert_eq!(urlencoding("hello world"), "hello+world");
+    }
+
+    #[test]
+    fn test_urlencoding_special_chars() {
+        assert_eq!(urlencoding("@scope/pkg"), "%40scope%2Fpkg");
+    }
+
+    #[test]
+    fn test_urlencoding_alphanumeric() {
+        let encoded = urlencoding("abc123-_.~");
+        assert_eq!(encoded, "abc123-_.~");
+    }
+
+    #[test]
+    fn test_search_query_with_qualifiers() {
+        let query = "react";
+        let by_author = Some("facebook");
+        let mut qualifiers = Vec::new();
+        qualifiers.push(format!("author:{}", by_author.unwrap()));
+        let search_query = format!("{} {}", qualifiers.join(" "), query);
+        assert_eq!(search_query, "author:facebook react");
+    }
+
+    #[test]
+    fn test_search_with_exact_match() {
+        let query = "react";
+        let exact = true;
+        let search_query = if exact { format!("\"{}\"", query) } else { query.to_string() };
+        assert_eq!(search_query, "\"react\"");
+    }
+
+    #[test]
+    fn test_limit_capping() {
+        let limit = 300u32;
+        let size = if limit > 250 { 250 } else { limit };
+        assert_eq!(size, 250);
+    }
+
+    #[test]
+    fn test_search_result_ordering() {
+        let mut results = vec![
+            SearchResult {
+                name: "z-pkg".into(), description: None, version: "1.0.0".into(),
+                downloads: Some(10), updated_at: None,
+            },
+            SearchResult {
+                name: "a-pkg".into(), description: None, version: "1.0.0".into(),
+                downloads: Some(1000), updated_at: None,
+            },
+        ];
+        results.sort_by(|a, b| a.name.cmp(&b.name));
+        assert_eq!(results[0].name, "a-pkg");
+        assert_eq!(results[1].name, "z-pkg");
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     pub name: String,

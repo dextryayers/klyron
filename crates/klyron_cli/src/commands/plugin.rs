@@ -156,7 +156,7 @@ fn run_list() -> anyhow::Result<()> {
     println!(" Installed plugins ({}):", infos.len());
     println!();
 
-    for info in infos {
+    for info in &infos {
         let enabled_mark = if info.enabled { " " } else { " " };
         let compatible = if info.is_compatible() { "" } else { " [INCOMPATIBLE]" };
         println!(

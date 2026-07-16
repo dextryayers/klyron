@@ -3,6 +3,64 @@ use crate::PmError;
 use std::path::PathBuf;
 use std::time::Instant;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_publish_config_defaults() {
+        let config = PublishConfig::default();
+        assert_eq!(config.root, PathBuf::from("."));
+        assert_eq!(config.registry_url, "https://registry.npmjs.org");
+        assert_eq!(config.tag, "latest");
+        assert_eq!(config.access, "public");
+        assert!(!config.dry_run);
+        assert!(config.token.is_none());
+    }
+
+    #[test]
+    fn test_publish_report_creation() {
+        let report = PublishReport {
+            package_name: "my-pkg".into(),
+            version: "1.0.0".into(),
+            tarball_size: 1024,
+            registry_url: "https://registry.npmjs.org".into(),
+            duration_ms: 200,
+        };
+        assert_eq!(report.package_name, "my-pkg");
+        assert_eq!(report.version, "1.0.0");
+        assert_eq!(report.tarball_size, 1024);
+    }
+
+    #[test]
+    fn test_publish_config_custom() {
+        let config = PublishConfig {
+            root: "/tmp/pkg".into(),
+            registry_url: "https://custom.registry".into(),
+            token: Some("mytoken".into()),
+            tag: "next".into(),
+            access: "restricted".into(),
+            dry_run: true,
+        };
+        assert_eq!(config.tag, "next");
+        assert_eq!(config.access, "restricted");
+        assert!(config.dry_run);
+        assert_eq!(config.token.as_deref(), Some("mytoken"));
+    }
+
+    #[test]
+    fn test_package_metadata_extraction() {
+        let pkg_json = serde_json::json!({
+            "name": "test-pkg",
+            "version": "2.0.0",
+        });
+        let name = pkg_json["name"].as_str().unwrap();
+        let version = pkg_json["version"].as_str().unwrap();
+        assert_eq!(name, "test-pkg");
+        assert_eq!(version, "2.0.0");
+    }
+}
+
 /// Configuration for publishing
 #[derive(Debug, Clone)]
 pub struct PublishConfig {

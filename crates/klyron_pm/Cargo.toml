@@ -30,3 +30,4 @@ ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
 reqwest = { workspace = true, features = ["blocking"] }
 tracing = { workspace = true }
 blake3 = "1"
+serde_yaml = "0.9"

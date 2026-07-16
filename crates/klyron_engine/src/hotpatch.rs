@@ -111,3 +111,120 @@ impl Default for HotpatchManager {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn test_hotpatch_manager_new() {
+        let manager = HotpatchManager::new();
+        assert!(manager.all_modules().is_empty());
+    }
+
+    #[test]
+    fn test_register_module() {
+        let manager = HotpatchManager::new();
+        let path = Path::new("/tmp/test_module.js");
+        manager.register_module("test_mod", path, b"content", vec![]);
+        let module = manager.get_module("test_mod").unwrap();
+        assert_eq!(module.name, "test_mod");
+        assert_eq!(module.module_path, path);
+        assert!(!module.content_hash.is_empty());
+    }
+
+    #[test]
+    fn test_register_module_with_deps() {
+        let manager = HotpatchManager::new();
+        let path = Path::new("/tmp/mod.js");
+        manager.register_module("main", path, b"main content", vec!["dep1".to_string(), "dep2".to_string()]);
+        let module = manager.get_module("main").unwrap();
+        assert_eq!(module.dependencies.len(), 2);
+    }
+
+    #[test]
+    fn test_get_module_nonexistent() {
+        let manager = HotpatchManager::new();
+        assert!(manager.get_module("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_update_module() {
+        let manager = HotpatchManager::new();
+        let path = Path::new("/tmp/test.js");
+        manager.register_module("m", path, b"old", vec![]);
+        let old_hash = manager.get_module("m").unwrap().content_hash;
+        manager.update_module("m", b"new content").unwrap();
+        let new_hash = manager.get_module("m").unwrap().content_hash;
+        assert_ne!(old_hash, new_hash);
+    }
+
+    #[test]
+    fn test_update_nonexistent_module() {
+        let manager = HotpatchManager::new();
+        let result = manager.update_module("nonexistent", b"content");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_dependents() {
+        let manager = HotpatchManager::new();
+        let path = Path::new("/tmp/test.js");
+        manager.register_module("parent", path, b"parent", vec!["child".to_string()]);
+        let dependents = manager.get_dependents("child");
+        assert_eq!(dependents, vec!["parent"]);
+    }
+
+    #[test]
+    fn test_get_dependents_none() {
+        let manager = HotpatchManager::new();
+        let path = Path::new("/tmp/test.js");
+        manager.register_module("orphan", path, b"orphan", vec![]);
+        let dependents = manager.get_dependents("orphan");
+        assert!(dependents.is_empty());
+    }
+
+    #[test]
+    fn test_all_modules() {
+        let manager = HotpatchManager::new();
+        let p = Path::new("/tmp/a.js");
+        manager.register_module("a", p, b"a", vec![]);
+        manager.register_module("b", p, b"b", vec![]);
+        assert_eq!(manager.all_modules().len(), 2);
+    }
+
+    #[test]
+    fn test_clear() {
+        let manager = HotpatchManager::new();
+        let p = Path::new("/tmp/test.js");
+        manager.register_module("m", p, b"content", vec![]);
+        manager.clear();
+        assert!(manager.all_modules().is_empty());
+    }
+
+    #[test]
+    fn test_content_hash_consistency() {
+        let manager = HotpatchManager::new();
+        let p = Path::new("/tmp/test.js");
+        manager.register_module("m", p, b"same content", vec![]);
+        let hash1 = manager.get_module("m").unwrap().content_hash;
+        manager.update_module("m", b"same content").unwrap();
+        let hash2 = manager.get_module("m").unwrap().content_hash;
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_module_export_serialization() {
+        let export = ModuleExport {
+            name: "test".to_string(),
+            module_path: PathBuf::from("/tmp/test.js"),
+            content_hash: "abc123".to_string(),
+            dependencies: vec!["dep".to_string()],
+        };
+        let json = serde_json::to_string(&export).unwrap();
+        let deserialized: ModuleExport = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.name, "test");
+        assert_eq!(deserialized.dependencies, vec!["dep"]);
+    }
+}

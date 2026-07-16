@@ -1,7 +1,140 @@
 use crate::PmError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn with_klyron_home<F>(dir: &std::path::Path, f: F)
+    where
+        F: FnOnce(),
+    {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let original = std::env::var("KLYRON_HOME").ok();
+        unsafe { std::env::set_var("KLYRON_HOME", dir) };
+        f();
+        unsafe {
+            if let Some(val) = original {
+                std::env::set_var("KLYRON_HOME", val);
+            } else {
+                std::env::remove_var("KLYRON_HOME");
+            }
+        }
+    }
+
+    #[test]
+    fn test_global_package_info_creation() {
+        let info = GlobalPackageInfo {
+            name: "typescript".into(),
+            version: "5.4.0".into(),
+            installed_at: "2024-01-01T00:00:00Z".into(),
+            bin: Some(vec!["tsc".into(), "tsserver".into()]),
+        };
+        assert_eq!(info.name, "typescript");
+        assert_eq!(info.version, "5.4.0");
+        assert_eq!(info.bin.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_global_package_info_no_bin() {
+        let info = GlobalPackageInfo {
+            name: "some-lib".into(),
+            version: "1.0.0".into(),
+            installed_at: "2024-06-15T10:30:00Z".into(),
+            bin: None,
+        };
+        assert!(info.bin.is_none());
+    }
+
+    #[test]
+    fn test_klyron_home_env_var() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let original = std::env::var("KLYRON_HOME").ok();
+        unsafe { std::env::set_var("KLYRON_HOME", "/tmp/klyron-test-home"); }
+        let home = klyron_home();
+        assert_eq!(home, std::path::PathBuf::from("/tmp/klyron-test-home"));
+        unsafe {
+            if let Some(val) = original {
+                std::env::set_var("KLYRON_HOME", val);
+            } else {
+                std::env::remove_var("KLYRON_HOME");
+            }
+        }
+    }
+
+    #[test]
+    fn test_global_paths() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let original = std::env::var("KLYRON_HOME").ok();
+        unsafe { std::env::set_var("KLYRON_HOME", "/tmp/klyron-test-paths"); }
+        assert_eq!(global_dir(), std::path::PathBuf::from("/tmp/klyron-test-paths/global"));
+        assert_eq!(bin_dir(), std::path::PathBuf::from("/tmp/klyron-test-paths/bin"));
+        assert_eq!(
+            manifest_path(),
+            std::path::PathBuf::from("/tmp/klyron-test-paths/global/manifest.json")
+        );
+        unsafe {
+            if let Some(val) = original {
+                std::env::set_var("KLYRON_HOME", val);
+            } else {
+                std::env::remove_var("KLYRON_HOME");
+            }
+        }
+    }
+
+    #[test]
+    fn test_klyron_home_default() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let original = std::env::var("KLYRON_HOME").ok();
+        unsafe { std::env::remove_var("KLYRON_HOME"); }
+        let home = klyron_home();
+        assert!(home.to_string_lossy().ends_with(".klyron"));
+        unsafe {
+            if let Some(val) = original {
+                std::env::set_var("KLYRON_HOME", val);
+            }
+        }
+    }
+
+    #[test]
+    fn test_install_global_with_klyron_home() {
+        let tmp = std::env::temp_dir().join("klyron-global-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        with_klyron_home(&tmp, || {
+            let result = install_global("my-test-pkg", "1.0.0");
+            assert!(result.is_ok());
+            let info = result.unwrap();
+            assert_eq!(info.name, "my-test-pkg");
+            assert_eq!(info.version, "1.0.0");
+            assert!(tmp.join("global").join("my-test-pkg").exists());
+            assert!(tmp.join("global").join("manifest.json").exists());
+
+            let listed = list_global();
+            assert!(listed.iter().any(|p| p.name == "my-test-pkg"));
+
+            let remove_result = remove_global("my-test-pkg");
+            assert!(remove_result.is_ok());
+            assert!(!tmp.join("global").join("my-test-pkg").exists());
+        });
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_remove_nonexistent_global() {
+        let tmp = std::env::temp_dir().join("klyron-global-rm-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        with_klyron_home(&tmp, || {
+            let result = remove_global("nonexistent-pkg");
+            assert!(result.is_err());
+        });
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalPackageInfo {

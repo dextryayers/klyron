@@ -211,3 +211,125 @@ fn load_from_disk(path: &Path) -> Result<CachedBytecode, String> {
     let data = std::fs::read(path).map_err(|e| format!("Failed to read cache: {}", e))?;
     bincode::deserialize(&data).map_err(|e| format!("Failed to deserialize cache: {}", e))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bytecode_cache_new() {
+        let cache = BytecodeCache::new();
+        assert_eq!(cache.len(), 0);
+        assert_eq!(cache.total_size_bytes(), 0);
+    }
+
+    #[test]
+    fn test_hash_content() {
+        let h1 = hash_content("hello");
+        let h2 = hash_content("hello");
+        let h3 = hash_content("world");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, h3);
+    }
+
+    #[test]
+    fn test_hash_content_empty() {
+        let hash = hash_content("");
+        assert!(!hash.is_empty());
+    }
+
+    #[test]
+    fn test_cache_key_format() {
+        let key = cache_key("/path/to/mod.js", "abc123", JsEngineKind::V8);
+        assert!(key.contains("/path/to/mod.js"));
+        assert!(key.contains("abc123"));
+        assert!(key.contains("v8"));
+    }
+
+    #[test]
+    fn test_cache_key_different_engines() {
+        let key1 = cache_key("mod.js", "hash", JsEngineKind::V8);
+        let key2 = cache_key("mod.js", "hash", JsEngineKind::Boa);
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_cache_key_different_paths() {
+        let key1 = cache_key("a.js", "hash", JsEngineKind::V8);
+        let key2 = cache_key("b.js", "hash", JsEngineKind::V8);
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_cached_bytecode_serialization() {
+        let entry = CachedBytecode {
+            engine_kind: JsEngineKind::QuickJS,
+            path: "test.js".to_string(),
+            content_hash: "hash123".to_string(),
+            bytecode: vec![0, 1, 2],
+            compiled_at: 1000,
+            version: 1,
+            size_bytes: 3,
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let deserialized: CachedBytecode = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.path, "test.js");
+        assert_eq!(deserialized.bytecode, vec![0, 1, 2]);
+        assert_eq!(deserialized.version, 1);
+    }
+
+    #[test]
+    fn test_hash_content_blake3() {
+        let h = BytecodeCache::hash_content_blake3("test content");
+        assert_eq!(h.len(), 64);
+    }
+
+    #[test]
+    fn test_clear_empty_cache() {
+        let cache = BytecodeCache::new();
+        cache.clear();
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_invalidate_nonexistent() {
+        let cache = BytecodeCache::new();
+        cache.invalidate("nonexistent");
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_get_or_compile_fallback() {
+        let cache = BytecodeCache::new();
+        let result = cache.get_or_compile(
+            "test.js",
+            "code",
+            JsEngineKind::V8,
+            |path, content| {
+                assert_eq!(path, "test.js");
+                assert_eq!(content, "code");
+                Ok(vec![1, 2, 3])
+            },
+        );
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_get_or_compile_compiler_error() {
+        let cache = BytecodeCache::new();
+        let result = cache.get_or_compile(
+            "bad.js",
+            "code",
+            JsEngineKind::Boa,
+            |_, _| Err("compile error".to_string()),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_with_max_size() {
+        let cache = BytecodeCache::with_max_size(1024);
+        assert_eq!(cache.total_size_bytes(), 0);
+    }
+}

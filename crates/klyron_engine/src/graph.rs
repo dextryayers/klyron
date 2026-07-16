@@ -147,3 +147,177 @@ impl Default for ModuleGraph {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_graph_empty() {
+        let graph = ModuleGraph::new();
+        assert!(graph.edges.is_empty());
+        assert!(graph.cycles.is_empty());
+    }
+
+    #[test]
+    fn test_add_edges() {
+        let mut graph = ModuleGraph::new();
+        graph.add_edges(vec![
+            ModuleGraphEdge { from: "a".to_string(), to: "b".to_string() },
+            ModuleGraphEdge { from: "b".to_string(), to: "c".to_string() },
+        ]);
+        assert_eq!(graph.edges.len(), 2);
+    }
+
+    #[test]
+    fn test_adjacency_list() {
+        let mut graph = ModuleGraph::new();
+        graph.add_edges(vec![
+            ModuleGraphEdge { from: "a".to_string(), to: "b".to_string() },
+            ModuleGraphEdge { from: "a".to_string(), to: "c".to_string() },
+        ]);
+        let adj = graph.adjacency_list();
+        assert_eq!(adj.get("a").unwrap().len(), 2);
+        assert!(adj.get("a").unwrap().contains(&"b".to_string()));
+        assert!(adj.get("a").unwrap().contains(&"c".to_string()));
+    }
+
+    #[test]
+    fn test_no_cycles() {
+        let mut graph = ModuleGraph::new();
+        graph.add_edges(vec![
+            ModuleGraphEdge { from: "a".to_string(), to: "b".to_string() },
+            ModuleGraphEdge { from: "b".to_string(), to: "c".to_string() },
+        ]);
+        let cycles = graph.detect_cycles();
+        assert!(cycles.is_empty());
+        assert!(!graph.has_cycles());
+    }
+
+    #[test]
+    fn test_simple_cycle() {
+        let mut graph = ModuleGraph::new();
+        graph.add_edges(vec![
+            ModuleGraphEdge { from: "a".to_string(), to: "b".to_string() },
+            ModuleGraphEdge { from: "b".to_string(), to: "a".to_string() },
+        ]);
+        let cycles = graph.detect_cycles();
+        assert!(!cycles.is_empty());
+        assert!(graph.has_cycles());
+    }
+
+    #[test]
+    fn test_triangular_cycle() {
+        let mut graph = ModuleGraph::new();
+        graph.add_edges(vec![
+            ModuleGraphEdge { from: "a".to_string(), to: "b".to_string() },
+            ModuleGraphEdge { from: "b".to_string(), to: "c".to_string() },
+            ModuleGraphEdge { from: "c".to_string(), to: "a".to_string() },
+        ]);
+        let cycles = graph.detect_cycles();
+        assert!(!cycles.is_empty());
+    }
+
+    #[test]
+    fn test_self_cycle() {
+        let mut graph = ModuleGraph::new();
+        graph.add_edges(vec![
+            ModuleGraphEdge { from: "a".to_string(), to: "a".to_string() },
+        ]);
+        let cycles = graph.detect_cycles();
+        assert!(!cycles.is_empty());
+    }
+
+    #[test]
+    fn test_dot_output_no_cycles() {
+        let mut graph = ModuleGraph::new();
+        graph.add_edges(vec![
+            ModuleGraphEdge { from: "main".to_string(), to: "lib".to_string() },
+        ]);
+        let dot = graph.export_dot();
+        assert!(dot.starts_with("digraph ModuleGraph {"));
+        assert!(dot.contains("\"main\" -> \"lib\""));
+        assert!(dot.ends_with("}\n"));
+    }
+
+    #[test]
+    fn test_dot_output_with_cycles() {
+        let mut graph = ModuleGraph::new();
+        graph.add_edges(vec![
+            ModuleGraphEdge { from: "a".to_string(), to: "b".to_string() },
+            ModuleGraphEdge { from: "b".to_string(), to: "a".to_string() },
+        ]);
+        graph.detect_cycles();
+        let dot = graph.export_dot();
+        assert!(dot.contains("[color=red"));
+    }
+
+    #[test]
+    fn test_parse_source_simple_import() {
+        let edges = ModuleGraph::parse_source("import { foo } from './bar';", "main.js");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].from, "main.js");
+        assert_eq!(edges[0].to, "./bar");
+    }
+
+    #[test]
+    fn test_parse_source_require() {
+        let edges = ModuleGraph::parse_source("const x = require('./module');", "main.js");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].to, "./module");
+    }
+
+    #[test]
+    fn test_parse_source_multiple_imports() {
+        let edges = ModuleGraph::parse_source(
+            "import a from 'a';\nimport b from 'b';\nconst c = require('c');",
+            "main.js",
+        );
+        assert_eq!(edges.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_source_no_imports() {
+        let edges = ModuleGraph::parse_source("const x = 1;", "main.js");
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn test_clear_graph() {
+        let mut graph = ModuleGraph::new();
+        graph.add_edges(vec![
+            ModuleGraphEdge { from: "a".to_string(), to: "b".to_string() },
+        ]);
+        graph.detect_cycles();
+        graph.clear();
+        assert!(graph.edges.is_empty());
+        assert!(graph.cycles.is_empty());
+    }
+
+    #[test]
+    fn test_disconnected_components() {
+        let mut graph = ModuleGraph::new();
+        graph.add_edges(vec![
+            ModuleGraphEdge { from: "a".to_string(), to: "b".to_string() },
+            ModuleGraphEdge { from: "c".to_string(), to: "d".to_string() },
+        ]);
+        let cycles = graph.detect_cycles();
+        assert!(cycles.is_empty());
+    }
+
+    #[test]
+    fn test_cycle_contains_correct_nodes() {
+        let mut graph = ModuleGraph::new();
+        graph.add_edges(vec![
+            ModuleGraphEdge { from: "x".to_string(), to: "y".to_string() },
+            ModuleGraphEdge { from: "y".to_string(), to: "z".to_string() },
+            ModuleGraphEdge { from: "z".to_string(), to: "x".to_string() },
+        ]);
+        let cycles = graph.detect_cycles();
+        assert!(!cycles.is_empty());
+        let cycle = &cycles[0];
+        assert!(cycle.contains(&"x".to_string()));
+        assert!(cycle.contains(&"y".to_string()));
+        assert!(cycle.contains(&"z".to_string()));
+    }
+}

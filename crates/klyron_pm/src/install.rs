@@ -2,6 +2,56 @@ use crate::{LockfileV3, PmError};
 use std::path::PathBuf;
 use std::time::Instant;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_install_config_defaults() {
+        let config = InstallConfig::default();
+        assert_eq!(config.root, PathBuf::from("."));
+        assert!(!config.production);
+        assert!(!config.frozen_lockfile);
+        assert!(!config.ignore_scripts);
+        assert_eq!(config.registry_url, "https://registry.npmjs.org");
+        assert_eq!(config.cache_dir, PathBuf::from(".klyron-cache"));
+    }
+
+    #[test]
+    fn test_install_report_creation() {
+        let report = InstallReport {
+            total: 10,
+            installed: 8,
+            from_cache: 2,
+            duration_ms: 150,
+        };
+        assert_eq!(report.total, 10);
+        assert_eq!(report.installed, 8);
+        assert_eq!(report.from_cache, 2);
+    }
+
+    #[test]
+    fn test_install_config_custom() {
+        let config = InstallConfig {
+            root: "/tmp/test".into(),
+            production: true,
+            frozen_lockfile: true,
+            ignore_scripts: true,
+            registry_url: "https://custom.registry".into(),
+            cache_dir: "/tmp/cache".into(),
+        };
+        assert_eq!(config.root, PathBuf::from("/tmp/test"));
+        assert!(config.production);
+        assert!(config.frozen_lockfile);
+    }
+
+    #[test]
+    fn test_install_engine_creation() {
+        let _engine = InstallEngine;
+        // Engine is a unit struct, just verify it exists
+    }
+}
+
 /// Configuration for the install command
 #[derive(Debug, Clone)]
 pub struct InstallConfig {

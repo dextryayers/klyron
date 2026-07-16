@@ -458,4 +458,152 @@ mod tests {
         pool.release();
         assert!(pool.try_acquire());
     }
+
+    #[test]
+    fn test_server_config_defaults() {
+        let config = ServerConfig::default();
+        assert_eq!(config.host, "0.0.0.0");
+        assert_eq!(config.port, 3000);
+        assert!(config.cors_enabled);
+        assert_eq!(config.max_body_size, 10 * 1024 * 1024);
+        assert_eq!(config.max_connections, 1024);
+        assert_eq!(config.keep_alive_timeout, Duration::from_secs(30));
+        assert!(config.enable_http2);
+    }
+
+    #[test]
+    fn test_connection_pool_active_count() {
+        let pool = ConnectionPool::new(5);
+        assert_eq!(pool.active(), 0);
+        assert!(pool.try_acquire());
+        assert_eq!(pool.active(), 1);
+        pool.release();
+        assert_eq!(pool.active(), 0);
+    }
+
+    #[test]
+    fn test_connection_pool_release_unwinds() {
+        let pool = ConnectionPool::new(3);
+        assert!(pool.try_acquire());
+        assert!(pool.try_acquire());
+        assert_eq!(pool.active(), 2);
+        pool.release();
+        assert_eq!(pool.active(), 1);
+        pool.release();
+        assert_eq!(pool.active(), 0);
+    }
+
+    #[test]
+    fn test_http_scheme_variants() {
+        assert!(matches!(HttpScheme::Http, HttpScheme::Http));
+        assert!(matches!(HttpScheme::Https, HttpScheme::Https));
+    }
+
+    #[test]
+    fn test_http_client_creation() {
+        let client = HttpClient::new();
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn test_route_method_types_all() {
+        let server = HttpServer::new("127.0.0.1", 0)
+            .route("GET", "/get")
+            .route("POST", "/post")
+            .route("PUT", "/put")
+            .route("DELETE", "/delete")
+            .route("PATCH", "/patch")
+            .route("HEAD", "/head")
+            .route("OPTIONS", "/options");
+        let routes = server.get_routes();
+        assert!(routes.iter().any(|r| r.method == "GET" && r.path == "/get"));
+        assert!(routes.iter().any(|r| r.method == "POST" && r.path == "/post"));
+        assert!(routes.iter().any(|r| r.method == "PUT" && r.path == "/put"));
+        assert!(routes.iter().any(|r| r.method == "DELETE" && r.path == "/delete"));
+        assert!(routes.iter().any(|r| r.method == "PATCH" && r.path == "/patch"));
+        assert!(routes.iter().any(|r| r.method == "HEAD" && r.path == "/head"));
+        assert!(routes.iter().any(|r| r.method == "OPTIONS" && r.path == "/options"));
+    }
+
+    #[test]
+    fn test_route_method_unknown_fallback() {
+        let server = HttpServer::new("127.0.0.1", 0)
+            .route("UNKNOWN", "/api/custom");
+        let routes = server.get_routes();
+        assert!(routes.iter().any(|r| r.method == "UNKNOWN" && r.path == "/api/custom"));
+    }
+
+    #[test]
+    fn test_route_method_case_insensitive() {
+        let server = HttpServer::new("127.0.0.1", 0)
+            .route("get", "/api/lower")
+            .route("Post", "/api/mixed");
+        let routes = server.get_routes();
+        assert!(routes.iter().any(|r| r.method == "GET" && r.path == "/api/lower"));
+        assert!(routes.iter().any(|r| r.method == "POST" && r.path == "/api/mixed"));
+    }
+
+    #[test]
+    fn test_route_config_struct() {
+        let rc = RouteConfig {
+            method: "PATCH".to_string(),
+            path: "/api/resource".to_string(),
+        };
+        assert_eq!(rc.method, "PATCH");
+        assert_eq!(rc.path, "/api/resource");
+    }
+
+    #[test]
+    fn test_tls_config_struct() {
+        let tls = TlsConfig {
+            cert_path: PathBuf::from("/etc/certs/cert.pem"),
+            key_path: PathBuf::from("/etc/certs/key.pem"),
+        };
+        assert_eq!(tls.cert_path.to_str().unwrap(), "/etc/certs/cert.pem");
+        assert_eq!(tls.key_path.to_str().unwrap(), "/etc/certs/key.pem");
+    }
+
+    #[test]
+    fn test_server_addr_parsing() {
+        let server = HttpServer::new("127.0.0.1", 8080);
+        assert_eq!(server.addr().port(), 8080);
+        assert_eq!(server.addr().ip().to_string(), "127.0.0.1");
+    }
+
+    #[test]
+    fn test_server_config_accessors() {
+        let config = ServerConfig::default();
+        let server = HttpServer::with_config(config);
+        assert_eq!(server.config().host, "0.0.0.0");
+        assert_eq!(server.config().port, 3000);
+        assert_eq!(server.pool().active(), 0);
+    }
+
+    #[test]
+    fn test_server_with_config_cors_disabled() {
+        let config = ServerConfig {
+            cors_enabled: false,
+            ..Default::default()
+        };
+        let server = HttpServer::with_config(config);
+        assert!(!server.config().cors_enabled);
+    }
+
+    #[test]
+    fn test_connection_pool_multi_thread() {
+        use std::sync::Arc;
+        use std::thread;
+        let pool = Arc::new(ConnectionPool::new(100));
+        let mut handles = vec![];
+        for _ in 0..50 {
+            let p = pool.clone();
+            handles.push(thread::spawn(move || {
+                assert!(p.try_acquire());
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(pool.active(), 50);
+    }
 }

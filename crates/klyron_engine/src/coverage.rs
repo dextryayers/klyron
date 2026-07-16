@@ -150,3 +150,144 @@ impl Default for CoverageTracker {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_coverage_tracker_new() {
+        let tracker = CoverageTracker::new();
+        assert!(!tracker.is_enabled());
+    }
+
+    #[test]
+    fn test_coverage_tracker_enable_disable() {
+        let tracker = CoverageTracker::new();
+        tracker.enable();
+        assert!(tracker.is_enabled());
+        tracker.disable();
+        assert!(!tracker.is_enabled());
+    }
+
+    #[test]
+    fn test_track_line_disabled() {
+        let tracker = CoverageTracker::new();
+        tracker.track_line("mod", "file.js", 10);
+        let summary = tracker.summary();
+        assert!(summary.contains("0.0%"));
+    }
+
+    #[test]
+    fn test_track_line_enabled() {
+        let tracker = CoverageTracker::new();
+        tracker.enable();
+        tracker.track_line("mod", "file.js", 10);
+        let summary = tracker.summary();
+        assert!(summary.contains("100.0%"));
+    }
+
+    #[test]
+    fn test_track_line_multiple_hits() {
+        let tracker = CoverageTracker::new();
+        tracker.enable();
+        tracker.track_line("mod", "file.js", 10);
+        tracker.track_line("mod", "file.js", 10);
+        tracker.track_line("mod", "file.js", 20);
+        let summary = tracker.summary();
+        assert!(summary.contains("100.0%"));
+    }
+
+    #[test]
+    fn test_track_branch_taken() {
+        let tracker = CoverageTracker::new();
+        tracker.enable();
+        tracker.track_branch("mod", "file.js", 5, true);
+        let summary = tracker.summary();
+        assert!(summary.contains("0.0%"));
+    }
+
+    #[test]
+    fn test_track_branch_not_taken() {
+        let tracker = CoverageTracker::new();
+        tracker.enable();
+        tracker.track_branch("mod", "file.js", 5, false);
+        let lcov = tracker.export_lcov();
+        assert!(lcov.contains("BRDA:5,0,0,-"));
+    }
+
+    #[test]
+    fn test_export_lcov_format() {
+        let tracker = CoverageTracker::new();
+        tracker.enable();
+        tracker.track_line("mod", "src/file.js", 1);
+        tracker.track_line("mod", "src/file.js", 2);
+        tracker.track_branch("mod", "src/file.js", 5, true);
+        let lcov = tracker.export_lcov();
+        assert!(lcov.contains("SF:src/file.js"));
+        assert!(lcov.contains("DA:1,1"));
+        assert!(lcov.contains("DA:2,1"));
+        assert!(lcov.contains("LF:2"));
+        assert!(lcov.contains("LH:2"));
+        assert!(lcov.contains("end_of_record"));
+    }
+
+    #[test]
+    fn test_clear_coverage() {
+        let tracker = CoverageTracker::new();
+        tracker.enable();
+        tracker.track_line("mod", "file.js", 1);
+        tracker.clear();
+        let summary = tracker.summary();
+        assert!(!summary.contains("mod"));
+    }
+
+    #[test]
+    fn test_multiple_modules() {
+        let tracker = CoverageTracker::new();
+        tracker.enable();
+        tracker.track_line("mod_a", "a.js", 1);
+        tracker.track_line("mod_b", "b.js", 1);
+        let summary = tracker.summary();
+        assert!(summary.contains("mod_a"));
+        assert!(summary.contains("mod_b"));
+    }
+
+    #[test]
+    fn test_branch_coverage_tracking() {
+        let tracker = CoverageTracker::new();
+        tracker.enable();
+        tracker.track_branch("mod", "file.js", 10, true);
+        tracker.track_branch("mod", "file.js", 10, false);
+        tracker.track_branch("mod", "file.js", 10, true);
+        let lcov = tracker.export_lcov();
+        assert!(lcov.contains("BRDA:10,0,0,2"));
+    }
+
+    #[test]
+    fn test_line_coverage_structure() {
+        let line = LineCoverage { line_number: 42, executed: 5 };
+        assert_eq!(line.line_number, 42);
+        assert_eq!(line.executed, 5);
+    }
+
+    #[test]
+    fn test_branch_coverage_structure() {
+        let branch = BranchCoverage { line_number: 7, taken: 3, not_taken: 1 };
+        assert_eq!(branch.line_number, 7);
+        assert_eq!(branch.taken, 3);
+        assert_eq!(branch.not_taken, 1);
+    }
+
+    #[test]
+    fn test_module_coverage_structure() {
+        let module = ModuleCoverage {
+            module_name: "test".to_string(),
+            source_file: "test.js".to_string(),
+            lines: vec![LineCoverage { line_number: 1, executed: 1 }],
+            branches: vec![],
+        };
+        assert_eq!(module.module_name, "test");
+        assert_eq!(module.lines.len(), 1);
+    }
+}

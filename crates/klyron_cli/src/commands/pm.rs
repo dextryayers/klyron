@@ -1,5 +1,6 @@
 use clap::Args;
 use klyron_pm::KlyronLockfile;
+use klyron_pm::lockfile;
 use std::path::{Path, PathBuf};
 
 #[derive(Args)]
@@ -648,23 +649,7 @@ pub fn run_why(package_name: &str) -> anyhow::Result<()> {
     };
 
     if let Some(lock) = lockfile {
-        // Convert to KlyronLockfile (the main one)
-        let mut klock = KlyronLockfile::new(None);
-        for (key, pkg) in &lock.packages {
-            klock.packages.insert(key.clone(), klyron_pm::KlyronLockPackage {
-                version: pkg.version.clone(),
-                resolved: Some(pkg.resolved.clone()),
-                integrity: Some(pkg.integrity.clone()),
-                link: None,
-                dev: None,
-                optional: None,
-                dependencies: Some(pkg.dependencies.clone()),
-                optional_dependencies: Some(pkg.optional_dependencies.clone()),
-                peer_dependencies: Some(pkg.peer_dependencies.clone()),
-                engines: None,
-            });
-        }
-        match klyron_pm::why_package(package_name, &klock) {
+        match klyron_pm::why_package(package_name, &lock) {
             Ok(paths) => {
                 if paths.is_empty() {
                     println!("{package_name} is a root dependency or not found");

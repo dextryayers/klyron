@@ -167,3 +167,118 @@ impl FeatureDetector {
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_feature_detector_detect_v8() {
+        let features = FeatureDetector::detect(JsEngineKind::V8);
+        assert!(!features.is_empty());
+        for f in &features {
+            assert!(f.supported, "V8 should support {}", f.name);
+        }
+    }
+
+    #[test]
+    fn test_feature_detector_detect_boa() {
+        let features = FeatureDetector::detect(JsEngineKind::Boa);
+        assert!(!features.is_empty());
+        for f in &features {
+            if f.es_version == "ES2024" || f.es_version == "ES2025" {
+                assert!(!f.supported, "Boa should not support {}", f.name);
+            }
+        }
+    }
+
+    #[test]
+    fn test_feature_detector_detect_quickjs() {
+        let features = FeatureDetector::detect(JsEngineKind::QuickJS);
+        assert!(!features.is_empty());
+        for f in &features {
+            if f.es_version == "ES2023" || f.es_version == "ES2024" || f.es_version == "ES2025" {
+                assert!(!f.supported, "QuickJS should not support {}", f.name);
+            }
+        }
+    }
+
+    #[test]
+    fn test_feature_detector_detect_jsc() {
+        let features = FeatureDetector::detect(JsEngineKind::JSC);
+        assert!(!features.is_empty());
+        for f in &features {
+            if f.es_version == "ES2025" {
+                assert!(!f.supported, "JSC should not support {}", f.name);
+            }
+        }
+    }
+
+    #[test]
+    fn test_unsupported_features_quickjs() {
+        let unsupported = FeatureDetector::unsupported_features(JsEngineKind::QuickJS);
+        assert!(!unsupported.is_empty());
+        assert!(unsupported.contains(&"array_find_last"));
+    }
+
+    #[test]
+    fn test_feature_matrix_all_engines() {
+        let matrix = FeatureDetector::feature_matrix();
+        assert_eq!(matrix.len(), 4);
+        for kind in JsEngineKind::all() {
+            assert!(matrix.contains_key(&kind));
+        }
+    }
+
+    #[test]
+    fn test_auto_polyfill_no_unsupported_v8() {
+        let result = FeatureDetector::auto_polyfill("console.log('hi');", JsEngineKind::V8);
+        assert!(result.starts_with("console.log('hi');"));
+    }
+
+    #[test]
+    fn test_auto_polyfill_adds_polyfills_quickjs() {
+        let result = FeatureDetector::auto_polyfill("const x = a?.b;", JsEngineKind::QuickJS);
+        assert!(result.contains("polyfill: optional chaining not supported"));
+        assert!(result.contains("const x = a?.b;"));
+    }
+
+    #[test]
+    fn test_auto_polyfill_nullish_coalescing() {
+        let result = FeatureDetector::auto_polyfill("x ?? 'default';", JsEngineKind::QuickJS);
+        assert!(result.contains("nullish coalescing not supported"));
+    }
+
+    #[test]
+    fn test_auto_polyfill_bigint() {
+        let result = FeatureDetector::auto_polyfill("BigInt(42);", JsEngineKind::QuickJS);
+        assert!(result.contains("BigInt not supported"));
+    }
+
+    #[test]
+    fn test_auto_polyfill_array_find_last() {
+        let result = FeatureDetector::auto_polyfill("arr.findLast(fn);", JsEngineKind::QuickJS);
+        assert!(result.contains("Array.findLast not supported"));
+    }
+
+    #[test]
+    fn test_auto_polyfill_generic_fallback() {
+        let result = FeatureDetector::auto_polyfill("new Set();", JsEngineKind::QuickJS);
+        assert!(result.contains("not available, manual workaround needed"));
+    }
+
+    #[test]
+    fn test_feature_structure() {
+        let feature = JsFeature { name: "async_await", es_version: "ES2017", supported: true };
+        assert_eq!(feature.name, "async_await");
+        assert_eq!(feature.es_version, "ES2017");
+        assert!(feature.supported);
+    }
+
+    #[test]
+    fn test_jsc_unsupported_features() {
+        let unsupported = FeatureDetector::unsupported_features(JsEngineKind::JSC);
+        assert!(unsupported.contains(&"iterator_helpers"));
+        assert!(unsupported.contains(&"set_methods"));
+    }
+}

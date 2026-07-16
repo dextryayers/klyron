@@ -2,6 +2,87 @@ use crate::PmError;
 use sha2::{Digest, Sha512};
 use std::path::Path;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn test_verify_integrity_compute_hash() {
+        let data = b"test package data";
+        let mut hasher = Sha512::new();
+        hasher.update(data);
+        let hash = format!("sha512-{}", hex::encode(hasher.finalize()));
+        assert!(hash.starts_with("sha512-"));
+        assert_eq!(hash.len(), 128 + 7); // "sha512-" + 128 hex chars
+    }
+
+    #[test]
+    fn test_verify_integrity_mismatch() {
+        let data = b"original data";
+        let mut hasher = Sha512::new();
+        hasher.update(data);
+        let hash = format!("sha512-{}", hex::encode(hasher.finalize()));
+
+        let wrong_data = b"tampered data";
+        let mut wrong_hasher = Sha512::new();
+        wrong_hasher.update(wrong_data);
+        let wrong_hash = format!("sha512-{}", hex::encode(wrong_hasher.finalize()));
+
+        assert_ne!(hash, wrong_hash);
+    }
+
+    #[test]
+    fn test_pack_dry_run_no_package_json() {
+        let tmp = std::env::temp_dir().join("klyron_test_verify");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let result = pack_dry_run(&tmp);
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_pack_dry_run_with_package_json() {
+        let tmp = std::env::temp_dir().join("klyron_test_verify_pkg");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let mut file = std::fs::File::create(tmp.join("package.json")).unwrap();
+        file.write_all(b"{\"name\":\"test\"}").unwrap();
+        std::fs::create_dir_all(tmp.join("src")).unwrap();
+        std::fs::write(tmp.join("src").join("index.js"), "module.exports = {};").unwrap();
+        let result = pack_dry_run(&tmp).unwrap();
+        assert!(result.contains(&"package/src/index.js".to_string()));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_pack_dry_run_excludes_dot_git() {
+        let tmp = std::env::temp_dir().join("klyron_test_verify_excl");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("package.json"), "{}").unwrap();
+        std::fs::create_dir_all(tmp.join(".git")).unwrap();
+        std::fs::write(tmp.join(".git").join("config"), "dummy").unwrap();
+        let result = pack_dry_run(&tmp).unwrap();
+        assert!(!result.iter().any(|f| f.contains(".git")));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_pack_dry_run_excludes_node_modules() {
+        let tmp = std::env::temp_dir().join("klyron_test_verify_nm");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("package.json"), "{}").unwrap();
+        std::fs::create_dir_all(tmp.join("node_modules").join("dep")).unwrap();
+        std::fs::write(tmp.join("node_modules").join("dep").join("index.js"), "").unwrap();
+        let result = pack_dry_run(&tmp).unwrap();
+        assert!(!result.iter().any(|f| f.contains("node_modules")));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
 pub fn verify_integrity(tarball_path: &Path, expected_hash: &str) -> Result<bool, PmError> {
     let data = std::fs::read(tarball_path)?;
     let mut hasher = Sha512::new();
@@ -15,7 +96,7 @@ pub fn verify_signature(tarball_path: &Path, sig_path: &Path, pubkey_path: &Path
     let signature = std::fs::read(sig_path)?;
     let pem = std::fs::read_to_string(pubkey_path)?;
 
-    use ed25519_dalek::{Signature, Signer, Verifier, VerifyingKey};
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
     use ed25519_dalek::pkcs8::DecodePublicKey;
 
     if signature.len() != 64 {

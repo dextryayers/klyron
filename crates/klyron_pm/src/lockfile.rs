@@ -137,6 +137,27 @@ impl KlyronLockfile {
         errors
     }
 
+    pub fn get_package(&self, name: &str) -> Option<&LockfilePackage> {
+        self.packages.values().find(|p| p.name == name)
+    }
+
+    pub fn verify_integrity(&self, dir: &Path) -> Result<Vec<String>, PmError> {
+        let mut mismatches = Vec::new();
+        for (key, pkg) in &self.packages {
+            let pkg_dir = dir.join("node_modules").join(&pkg.name);
+            let pkg_json = pkg_dir.join("package.json");
+            if pkg_json.exists() {
+                if let Ok(data) = std::fs::read(&pkg_json) {
+                    let computed = Self::compute_integrity(&data);
+                    if computed != pkg.integrity && !pkg.integrity.is_empty() {
+                        mismatches.push(format!("{}: integrity mismatch", key));
+                    }
+                }
+            }
+        }
+        Ok(mismatches)
+    }
+
     pub fn compute_integrity(data: &[u8]) -> String {
         let hash = Sha512::digest(data);
         format!("sha512-{}", base64::encode(hash))

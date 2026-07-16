@@ -333,11 +333,11 @@ pub fn run_registry(action: RegistryAction) -> anyhow::Result<()> {
             }
         }
         RegistryAction::GenerateKeypair => {
-            let keypair = klyron_pm::signing::generate_keypair();
-            klyron_pm::signing::save_keypair("default", &keypair)
+            let (secret, public) = klyron_pm::signing::generate_keypair();
+            klyron_pm::signing::save_keypair("default", &secret, &public)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             println!("Generated keypair and saved to ~/.config/klyron/keys/");
-            println!("Public key:\n{}", keypair.public_key_pem);
+            println!("Public key:\n{}", hex::encode(&public));
         }
     }
     Ok(())

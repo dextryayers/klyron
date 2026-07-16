@@ -4,6 +4,185 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn make_scripts() -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert("build".into(), "echo build".into());
+        m.insert("test".into(), "echo test".into());
+        m.insert("prebuild".into(), "echo prebuild".into());
+        m.insert("postbuild".into(), "echo postbuild".into());
+        m.insert("start".into(), "echo start".into());
+        m
+    }
+
+    #[test]
+    fn test_script_config_creation() {
+        let scripts = make_scripts();
+        let hooks = get_lifecycle_scripts(&scripts);
+        let config = ScriptConfig { scripts: scripts.clone(), lifecycle_hooks: hooks };
+        assert!(config.scripts.contains_key("build"));
+        assert!(config.lifecycle_hooks.prebuild.is_some());
+    }
+
+    #[test]
+    fn test_get_lifecycle_scripts() {
+        let scripts = make_scripts();
+        let hooks = get_lifecycle_scripts(&scripts);
+        assert_eq!(hooks.prebuild.as_deref(), Some("echo prebuild"));
+        assert_eq!(hooks.build.as_deref(), Some("echo build"));
+        assert_eq!(hooks.postbuild.as_deref(), Some("echo postbuild"));
+        assert!(hooks.install.is_none());
+    }
+
+    #[test]
+    fn test_get_lifecycle_order() {
+        let order = get_lifecycle_order("build");
+        assert_eq!(order[0], "prebuild");
+        assert_eq!(order[1], "build");
+        assert_eq!(order[2], "postbuild");
+    }
+
+    #[test]
+    fn test_lifecycle_events_constant() {
+        assert!(LIFECYCLE_EVENTS.contains(&"preinstall"));
+        assert!(LIFECYCLE_EVENTS.contains(&"postinstall"));
+        assert!(LIFECYCLE_EVENTS.contains(&"build"));
+        assert!(LIFECYCLE_EVENTS.contains(&"test"));
+        assert!(LIFECYCLE_EVENTS.contains(&"start"));
+        assert_eq!(LIFECYCLE_EVENTS.len(), 18);
+    }
+
+    #[test]
+    fn test_script_runner_creation() {
+        let runner = ScriptRunner::new(std::path::Path::new("/tmp"));
+        assert_eq!(runner.shell, "sh");
+        assert_eq!(runner.shell_args, vec!["-c"]);
+    }
+
+    #[test]
+    fn test_script_runner_with_env() {
+        let env: HashMap<String, String> = [("NODE_ENV".into(), "test".into())].into();
+        let runner = ScriptRunner::new(std::path::Path::new("/tmp")).with_env(env);
+        assert_eq!(runner.env.get("NODE_ENV").unwrap(), "test");
+    }
+
+    #[test]
+    fn test_script_runner_with_shell() {
+        let runner = ScriptRunner::new(std::path::Path::new("/tmp"))
+            .with_shell("bash", vec!["-c"]);
+        assert_eq!(runner.shell, "bash");
+    }
+
+    #[test]
+    fn test_find_script_references_none() {
+        let names: HashSet<&str> = ["build", "test"].into();
+        let refs = find_script_references("echo hello", &names);
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn test_find_script_references_run() {
+        let names: HashSet<&str> = ["build", "test"].into();
+        let refs = find_script_references("npm run build", &names);
+        assert!(refs.contains(&"build"));
+    }
+
+    #[test]
+    fn test_find_script_references_yarn() {
+        let names: HashSet<&str> = ["test"].into();
+        let refs = find_script_references("yarn test", &names);
+        assert!(refs.contains(&"test"));
+    }
+
+    #[test]
+    fn test_detect_no_circular() {
+        let mut scripts = HashMap::new();
+        scripts.insert("build".into(), "echo build".into());
+        scripts.insert("test".into(), "npm run build".into());
+        let runner = ScriptRunner::new(std::path::Path::new("/tmp"));
+        let cycles = runner.detect_circular_scripts(&scripts);
+        assert!(cycles.is_empty());
+    }
+
+    #[test]
+    fn test_detect_circular() {
+        let mut scripts = HashMap::new();
+        scripts.insert("a".into(), "npm run b".into());
+        scripts.insert("b".into(), "npm run a".into());
+        let runner = ScriptRunner::new(std::path::Path::new("/tmp"));
+        let cycles = runner.detect_circular_scripts(&scripts);
+        assert!(!cycles.is_empty());
+    }
+
+    #[test]
+    fn test_sort_by_dependency() {
+        let packages = vec![
+            ("a".to_string(), [("build".into(), "echo a".into())].into()),
+            ("b".to_string(), [("build".into(), "npm run build".into())].into()),
+        ];
+        let runner = ScriptRunner::new(std::path::Path::new("/tmp"));
+        let _ = runner.sort_by_dependency(&packages);
+    }
+
+    #[test]
+    fn test_run_result_format_output() {
+        let result = RunResult {
+            exit_code: 0, stdout: "out".into(), stderr: "".into(),
+            duration: std::time::Duration::from_millis(100), success: true,
+        };
+        let formatted = result.format_output(false);
+        assert!(formatted.contains("exit: 0"));
+    }
+
+    #[test]
+    fn test_run_result_check_success() {
+        let ok = RunResult {
+            exit_code: 0, stdout: "".into(), stderr: "".into(),
+            duration: std::time::Duration::default(), success: true,
+        };
+        assert!(ok.check_success().is_ok());
+
+        let fail = RunResult {
+            exit_code: 1, stdout: "".into(), stderr: "error".into(),
+            duration: std::time::Duration::default(), success: false,
+        };
+        assert!(fail.check_success().is_err());
+    }
+
+    #[test]
+    fn test_script_error_display() {
+        let err = ScriptError::NotFound("test".into());
+        assert_eq!(err.to_string(), "Script not found: test");
+
+        let err = ScriptError::CircularDependency(vec!["a".into(), "b".into()]);
+        assert_eq!(err.to_string(), "Circular dependency: a -> b");
+    }
+
+    #[test]
+    fn test_lifecycle_hooks_empty() {
+        let scripts = HashMap::new();
+        let hooks = get_lifecycle_scripts(&scripts);
+        assert!(hooks.prebuild.is_none());
+        assert!(hooks.build.is_none());
+        assert!(hooks.install.is_none());
+    }
+
+    #[test]
+    fn test_run_result_format_output_verbose() {
+        let result = RunResult {
+            exit_code: 0, stdout: "hello".into(), stderr: "".into(),
+            duration: std::time::Duration::from_millis(50), success: true,
+        };
+        let formatted = result.format_output(true);
+        assert!(formatted.contains("stdout"));
+        assert!(formatted.contains("hello"));
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ScriptConfig {
     pub scripts: HashMap<String, String>,
