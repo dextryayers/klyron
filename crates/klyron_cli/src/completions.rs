@@ -44,7 +44,7 @@ complete -F _klyron_completions klyron
         --output) _filedir; return ;;
 "#,
             case_cmd = r#"
-        eval) COMPREPLY=($(compgen -W "--tsx --typescript --input-file $global_opts" -- "$cur"));;
+        eval) COMPREPLY=($(compgen -W "--ts --typescript --jsx --input-file $global_opts" -- "$cur"));;
         run) COMPREPLY=($(compgen -W "--watch $global_opts" -- "$cur")); _filedir;;
         repl|shell) COMPREPLY=($(compgen -W "$global_opts" -- "$cur"));;
         bundle) COMPREPLY=($(compgen -W "--output --minify $global_opts" -- "$cur")); _filedir;;

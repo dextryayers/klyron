@@ -47,7 +47,7 @@ fn check_framework_compat(dir: &std::path::Path, framework: &str) -> anyhow::Res
     println!("🔍 {} Compatibility Check", framework);
     if content.contains(framework) {
         println!("  ✅ {} detected in dependencies", framework);
-        println!("  ⚠️  Full compatibility requires Node.js runtime (Phase 3)");
+        println!("  ⚠️  Full compatibility requires Node.js runtime integration");
         println!("  ℹ️  Scaffold via: klyron create {}", framework);
     } else {
         println!("  ❌ {} not found in dependencies", framework);

@@ -391,7 +391,7 @@ fn run_publish(path: Option<&Path>, _token: Option<&str>) -> anyhow::Result<()> 
     }
     println!("  (Publishing to registry.klyron.dev requires authentication)");
     println!("  Run: klyron login first, then klyron plugin publish --token <token>");
-    println!(" Publish aborted: registry upload not yet implemented in this version.");
+    println!(" Publish aborted: plugin registry upload not available. Use `klyron pack` to create a tarball.");
 
     Ok(())
 }

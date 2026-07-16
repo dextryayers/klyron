@@ -11,6 +11,67 @@ use crate::transpiler::Transpiler;
 
 extension!(klyron_core,);
 
+const REQUIRE_POLYFILL: &str = r#"
+(function() {
+  if (typeof globalThis.require !== 'undefined') return;
+  const builtins = new Map();
+  function loadNodeModule(name) {
+    const path = name.startsWith('node:') ? 'node:' + name.slice(5) : 'node:' + name;
+    if (builtins.has(path)) return builtins.get(path);
+    const exports = {};
+    builtins.set(path, exports);
+    return exports;
+  }
+  globalThis.require = function(id) {
+    if (id.startsWith('node:') || id === 'fs' || id === 'path' || id === 'os' ||
+        id === 'buffer' || id === 'crypto' || id === 'events' || id === 'stream' ||
+        id === 'util' || id === 'url' || id === 'querystring' || id === 'assert' ||
+        id === 'child_process' || id === 'string_decoder') {
+      return loadNodeModule(id);
+    }
+    if (id.startsWith('.')) {
+      try {
+        const content = Deno.core.ops.op_fs_read_file(id);
+        return content;
+      } catch(e) {
+        console.error('require() for relative files requires Node.js compat module');
+        return {};
+      }
+    }
+    if (id === 'react' || id === 'react/jsx-runtime' || id === 'react/jsx-dev-runtime') {
+      return {
+        jsx: function(type, props, key) {
+          return { $$typeof: Symbol.for('react.element'), type: type, props: props || {}, key: key };
+        },
+        jsxs: function(type, props, key) {
+          return { $$typeof: Symbol.for('react.element'), type: type, props: props || {}, key: key };
+        },
+        Fragment: Symbol.for('react.fragment'),
+        createElement: globalThis.React && globalThis.React.createElement,
+      };
+    }
+    console.warn('require("' + id + '") not implemented. Install package with `klyron add ' + id + '`');
+    return {};
+  };
+  if (typeof globalThis.React === 'undefined') {
+    globalThis.React = {
+      createElement: function(tag, props) {
+        var children = Array.prototype.slice.call(arguments, 2).filter(function(c) { return c != null; });
+        return { $$typeof: Symbol.for('react.element'), type: tag, props: props || {}, children: children, key: null };
+      },
+      Fragment: Symbol.for('react.fragment'),
+      createRef: function() { return { current: null }; },
+      createContext: function(defaultValue) { return { Provider: {$$typeof: Symbol.for('react.provider')}, Consumer: {$$typeof: Symbol.for('react.context')}, _defaultValue: defaultValue }; },
+      useState: function(init) { return [init, function(){}]; },
+      useEffect: function() {},
+      useRef: function(init) { return { current: init }; },
+      useCallback: function(fn) { return fn; },
+      useMemo: function(fn) { return fn(); },
+    };
+  }
+})();
+"#;
+
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct RuntimeMemoryUsage {
     pub heap_used: u64,
@@ -118,6 +179,8 @@ impl Runtime {
       }
     } else { (code.to_string(), None) };
 
+    let _ = js.execute_script("<require_setup>", FastString::from(REQUIRE_POLYFILL.to_string()));
+
     let global = js.execute_script("<eval>", FastString::from(code))?;
     deno_core::scope!(scope, &mut *js);
     let local = v8::Local::new(scope, global);
@@ -137,6 +200,8 @@ impl Runtime {
         (final_source, sm)
       } else { (source.to_string(), None) }
     } else { (source.to_string(), None) };
+
+    let _ = js.execute_script("<require_setup>", FastString::from(REQUIRE_POLYFILL.to_string()));
 
     let global = js.execute_script(name.to_string(), FastString::from(final_source))?;
     deno_core::scope!(scope, &mut *js);

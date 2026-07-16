@@ -240,7 +240,27 @@ pub fn run_whoami() -> anyhow::Result<()> {
             Ok(())
         }
         Err(_e) => {
-            crate::run_cmd("npm", &["whoami"], &std::env::current_dir()?)
+            let npm_check = std::process::Command::new("npm").arg("--version").output();
+            match npm_check {
+                Ok(_) => {
+                    let dir = std::env::current_dir()?;
+                    let status = std::process::Command::new("npm")
+                        .args(["whoami"])
+                        .current_dir(&dir)
+                        .status();
+                    match status {
+                        Ok(s) if s.success() => Ok(()),
+                        _ => {
+                            println!("Not logged in. Run `klyron login` to authenticate.");
+                            Ok(())
+                        }
+                    }
+                }
+                Err(_) => {
+                    println!("Not logged in. Run `klyron login` to authenticate.");
+                    Ok(())
+                }
+            }
         }
     }
 }

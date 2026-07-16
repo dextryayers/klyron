@@ -11,6 +11,70 @@ use serde::{Deserialize, Serialize};
 pub mod assertions;
 pub mod property;
 
+/// Discover JS/TS test files in a directory tree
+pub fn discover_js_test_files(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let patterns = &[
+        "**/*.test.js", "**/*.test.jsx", "**/*.test.ts", "**/*.test.tsx",
+        "**/*.spec.js", "**/*.spec.jsx", "**/*.spec.ts", "**/*.spec.tsx",
+    ];
+    for pattern in patterns {
+        if let Ok(glob_results) = glob::glob(&dir.join(pattern).to_string_lossy()) {
+            for entry in glob_results.flatten() {
+                files.push(entry);
+            }
+        }
+    }
+    files.sort();
+    files.dedup();
+    files
+}
+
+/// Check if a project has a test script in package.json
+pub fn has_test_script(dir: &Path) -> bool {
+    let pkg = dir.join("package.json");
+    let content = match std::fs::read_to_string(pkg) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    if let Some(scripts) = json.get("scripts").and_then(|s| s.as_object()) {
+        if let Some(test) = scripts.get("test").and_then(|v| v.as_str()) {
+            if !test.is_empty() && test != "echo \"Error: no test specified\"" {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Check if a project has a specific JS test framework dependency
+pub fn has_test_framework_dep(dir: &Path) -> bool {
+    let frameworks = ["vitest", "jest", "mocha", "ava", "tape", "uvu", "node:test"];
+    let pkg = dir.join("package.json");
+    let content = match std::fs::read_to_string(pkg) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    for section in &["dependencies", "devDependencies"] {
+        if let Some(deps) = json.get(section).and_then(|d| d.as_object()) {
+            for fw in &frameworks {
+                if deps.contains_key(*fw) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TestBackend {
   Vitest,

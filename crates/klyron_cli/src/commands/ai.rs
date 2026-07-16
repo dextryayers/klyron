@@ -21,38 +21,41 @@ pub fn run_ai(args: AiArgs) -> anyhow::Result<()> {
 
 fn ai_generate(prompt: &str) -> anyhow::Result<()> {
     println!("🤖 AI Generate: {}", prompt);
-    println!("  (AI integration coming in Phase 10)");
-    println!("  For now, try: klyron create <framework> for scaffold templates");
+    println!("  AI features not available in this build.");
+    println!("  Try: klyron create <framework> for scaffold templates");
     Ok(())
 }
 
 fn ai_optimize(path: &str) -> anyhow::Result<()> {
     println!("🤖 AI Optimize: {}", path);
-    println!("  (AI optimization coming in Phase 10)");
+    println!("  AI features not available in this build.");
+    println!("  Use klyron build --release for optimizations");
     Ok(())
 }
 
 fn ai_review(path: &str) -> anyhow::Result<()> {
     println!("🤖 AI Review: {}", path);
-    println!("  (AI code review coming in Phase 10)");
+    println!("  AI features not available in this build.");
+    println!("  Use klyron lint && klyron check for static analysis");
     Ok(())
 }
 
 fn ai_docs(path: &str) -> anyhow::Result<()> {
     println!("🤖 AI Docs: {}", path);
-    println!("  (AI documentation coming in Phase 10)");
+    println!("  AI features not available in this build.");
     Ok(())
 }
 
 fn ai_test(path: &str) -> anyhow::Result<()> {
     println!("🤖 AI Test: {}", path);
-    println!("  (AI test generation coming in Phase 10)");
+    println!("  AI features not available in this build.");
+    println!("  Use klyron test for running tests");
     Ok(())
 }
 
 fn ai_migrate(args: &[String]) -> anyhow::Result<()> {
     println!("🤖 AI Migrate: {:?}", args);
-    println!("  (AI migration coming in Phase 10)");
+    println!("  AI features not available in this build.");
     println!("  Planned: React ↔ Vue, Express → Fastify, JS → TS, CJS → ESM");
     Ok(())
 }

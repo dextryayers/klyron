@@ -184,3 +184,64 @@ pub fn get_test_results_json() -> &'static str {
         }))
     })))"
 }
+
+/// Wrap a user's JS test code with the built-in assertion library.
+/// Prepends globals, appends a result extractor, and returns the complete JS.
+pub fn prepare_js_test(user_code: &str) -> String {
+    format!(
+        r#"{globals}
+// --- user test code ---
+try {{
+{user_code}
+}} catch(e) {{
+    if (typeof __klyron !== 'undefined' && __klyron.currentTest) {{
+        __klyron.currentTest.assertions.push({{
+            passed: false,
+            description: e.message || "Unknown error",
+            error: e.stack || e.message,
+            location: null,
+        }});
+    }} else {{
+        console.error("Unhandled error:", e);
+    }}
+}}
+// --- collect results ---
+(function() {{
+    const output = {output_expr};
+    console.log(output);
+}})();
+"#,
+        globals = generate_assertion_globals(),
+        output_expr = "JSON.stringify({ __klyron_suites: __klyron ? __klyron.suites : [] })"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prepare_js_test_basic() {
+        let code = "describe('suite', () => { it('passes', () => { expect(1).toBe(1); }); });";
+        let wrapped = prepare_js_test(code);
+        assert!(wrapped.contains("function describe"));
+        assert!(wrapped.contains("function it"));
+        assert!(wrapped.contains("function expect"));
+        assert!(wrapped.contains("__klyron_suites"));
+        assert!(wrapped.contains("describe('suite'"));
+    }
+
+    #[test]
+    fn test_get_test_results_json_contains_suites() {
+        let expr = get_test_results_json();
+        assert!(expr.contains("__klyron.suites"));
+    }
+
+    #[test]
+    fn test_generate_assertion_globals_contains_globals() {
+        let globals = generate_assertion_globals();
+        assert!(globals.contains("globalThis.describe"));
+        assert!(globals.contains("globalThis.it"));
+        assert!(globals.contains("globalThis.expect"));
+    }
+}

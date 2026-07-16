@@ -729,7 +729,7 @@ pub fn install_with_lockfile(dir: &Path, frozen: bool) -> Result<(), PmError> {
     Ok(())
 }
 
-fn download_and_extract_tarball(url: &str, target_dir: &Path) -> Result<(), PmError> {
+pub fn download_and_extract_tarball(url: &str, target_dir: &Path) -> Result<(), PmError> {
     let response = reqwest::blocking::get(url)
         .map_err(|e| PmError::IoError(format!("HTTP request failed: {e}")))?;
     if !response.status().is_success() {

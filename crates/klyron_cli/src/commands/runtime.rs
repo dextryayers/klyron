@@ -11,7 +11,7 @@ pub struct EvalArgs {
     pub policy: Option<PolicyTemplate>,
     #[arg(short, long)]
     pub module: bool,
-    #[arg(long)]
+    #[arg(long, alias = "ts")]
     pub typescript: bool,
     #[arg(long)]
     pub jsx: bool,

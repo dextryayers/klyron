@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum CacheAction {
+    #[clap(alias = "clear")]
     Clean {
         #[arg(long)]
         all: bool,

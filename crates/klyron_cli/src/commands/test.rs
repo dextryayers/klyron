@@ -40,8 +40,17 @@ pub fn run_test(args: TestArgs) -> anyhow::Result<()> {
     }
 
     let project_type = crate::detect_project_type(dir);
-    let runner = detect_test_runner(dir);
-    println!("Detected project type: {project_type}, test runner: {runner}");
+    let external_runner = detect_test_runner(dir);
+    println!("Detected project type: {project_type}, test runner: {external_runner}");
+
+    // Use native JS runner when no external tool is detected and JS/TS test files exist
+    if external_runner == "unknown" && (project_type == "node" || project_type == "typescript") {
+        let test_files = klyron_test::discover_js_test_files(dir);
+        if !test_files.is_empty() && !klyron_test::has_test_framework_dep(dir) {
+            println!("Using klyron native JS test runner ({} files)", test_files.len());
+            return run_native_js_tests(dir, &test_files, &args);
+        }
+    }
 
     if args.shuffle {
         eprintln!("Shuffle mode: randomized test order");
@@ -102,6 +111,135 @@ pub fn run_test(args: TestArgs) -> anyhow::Result<()> {
         result.passed, result.failed, result.skipped, result.time
     );
     if result.failed > 0 {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn run_native_js_tests(
+    dir: &std::path::Path,
+    test_files: &[std::path::PathBuf],
+    args: &TestArgs,
+) -> anyhow::Result<()> {
+    use klyron_core::Runtime;
+    use klyron_test::assertions::prepare_js_test;
+    use std::time::Instant;
+
+    let start = Instant::now();
+    let mut total_passed = 0u64;
+    let mut total_failed = 0u64;
+
+    let runtime = Runtime::builder()
+        .enable_typescript(test_files.iter().any(|f| {
+            f.extension().map(|e| e == "ts" || e == "tsx").unwrap_or(false)
+        }))
+        .build()?;
+
+    for file_path in test_files {
+        let file_name = file_path
+            .strip_prefix(dir)
+            .unwrap_or(file_path)
+            .to_string_lossy()
+            .to_string();
+
+        let code = std::fs::read_to_string(file_path)?;
+        let wrapped = prepare_js_test(&code);
+
+        match runtime.eval(&wrapped) {
+            Ok(output) => {
+                // Parse the JSON output from the last line
+                let parsed = output
+                    .lines()
+                    .filter_map(|l| {
+                        let trimmed = l.trim();
+                        if trimmed.starts_with("{\"") || trimmed.starts_with("{\"__klyron_suites") {
+                            serde_json::from_str::<serde_json::Value>(trimmed).ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .last();
+
+                if let Some(json) = parsed {
+                    if let Some(suites) = json.get("__klyron_suites").and_then(|v| v.as_array()) {
+                        for suite in suites {
+                            let suite_name = suite
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unnamed");
+                            if let Some(tests) = suite.get("tests").and_then(|v| v.as_array()) {
+                                for test_case in tests {
+                                    let test_name = test_case
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unnamed");
+
+                                    let failed_assertions = test_case
+                                        .get("assertions")
+                                        .and_then(|v| v.as_array())
+                                        .map(|a| {
+                                            a.iter()
+                                                .filter(|a| {
+                                                    a.get("passed")
+                                                        .and_then(|v| v.as_bool())
+                                                        .unwrap_or(false)
+                                                        == false
+                                                })
+                                                .count()
+                                        })
+                                        .unwrap_or(0);
+
+                                    if failed_assertions > 0 {
+                                        total_failed += 1;
+                                        if args.verbose {
+                                            println!("  FAIL  {suite_name} > {test_name}");
+                                            for a in test_case
+                                                .get("assertions")
+                                                .and_then(|v| v.as_array())
+                                                .unwrap_or(&vec![])
+                                            {
+                                                if a.get("passed")
+                                                    .and_then(|v| v.as_bool())
+                                                    .unwrap_or(false)
+                                                    == false
+                                                {
+                                                    if let Some(err) =
+                                                        a.get("error").and_then(|v| v.as_str())
+                                                    {
+                                                        println!("    {err}");
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        total_passed += 1;
+                                        if args.verbose {
+                                            println!("  PASS  {suite_name} > {test_name}");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if args.verbose {
+                    println!("  {file_name}: {output}");
+                }
+            }
+            Err(e) => {
+                total_failed += 1;
+                eprintln!("  FAIL  {file_name}: {e}");
+            }
+        }
+    }
+
+    let elapsed = start.elapsed();
+    let color = if total_failed > 0 { "31" } else { "32" };
+    println!(
+        "\x1b[{color}mTests: {total_passed} passed, {total_failed} failed, {} total in {:.2}s\x1b[0m",
+        total_passed + total_failed,
+        elapsed.as_secs_f64(),
+    );
+    if total_failed > 0 {
         std::process::exit(1);
     }
     Ok(())
