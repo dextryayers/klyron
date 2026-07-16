@@ -1,3 +1,30 @@
+//! Klyron Plugin System
+//!
+//! WASM-based plugin system with lifecycle hooks and sandboxed execution.
+//! Plugins can hook into Klyron events at various phases of the lifecycle:
+//!
+//! - **Startup/Shutdown** — Init, cleanup
+//! - **Build** — Before/after compilation, bundling, transpilation
+//! - **Deploy** — Before/after deployment
+//! - **Runtime** — Request handling, HTTP middleware
+//! - **Package** — Install/resolve hooks
+//!
+//! ## Architecture
+//!
+//! - [`PluginManifest`] — Plugin metadata, version, capabilities
+//! - [`HookRegistry`] — Central event hub dispatching to plugins
+//! - [`PluginRuntime`] — WASM execution via wasmtime/wasmer
+//! - [`Sandbox`] — Resource-limited sandbox for untrusted plugins
+//!
+//! ## Example
+//!
+//! ```rust,ignore
+//! use klyron_plugin::{PluginManifest, HookRegistry};
+//!
+//! let registry = HookRegistry::new(10);
+//! let manifest = PluginManifest::new("my-plugin", "1.0.0");
+//! ```
+
 pub mod manifest;
 pub mod hooks;
 pub mod runtime;

@@ -26,9 +26,7 @@ struct ConnectResult {
   peer_addr: String,
 }
 
-#[op2]
-#[serde]
-fn op_net_connect(state: &mut OpState, #[string] addr: String) -> Result<ConnectResult, JsErrorBox> {
+fn op_net_connect_impl(state: &mut OpState, addr: String) -> Result<ConnectResult, JsErrorBox> {
   let rt = tokio::runtime::Handle::current();
   let conn = rt.block_on(async { TcpStream::connect(&addr).await }).map_err(|e| JsErrorBox::generic(format!("connect {addr}: {e}")))?;
   let local_addr = conn.local_addr().map(|a| a.to_string()).unwrap_or_default();
@@ -42,8 +40,13 @@ fn op_net_connect(state: &mut OpState, #[string] addr: String) -> Result<Connect
   Ok(ConnectResult { rid, local_addr, peer_addr })
 }
 
-#[op2(fast)]
-fn op_net_send(state: &mut OpState, rid: i32, #[string] data: String) -> Result<(), JsErrorBox> {
+#[op2]
+#[serde]
+fn op_net_connect(state: &mut OpState, #[string] addr: String) -> Result<ConnectResult, JsErrorBox> {
+  op_net_connect_impl(state, addr)
+}
+
+fn op_net_send_impl(state: &mut OpState, rid: i32, data: String) -> Result<(), JsErrorBox> {
   let store = state.borrow::<ConnStore>();
   let guard = store.lock().unwrap();
   if let Some(Some(stream)) = guard.get(rid as usize) {
@@ -55,9 +58,12 @@ fn op_net_send(state: &mut OpState, rid: i32, #[string] data: String) -> Result<
   }
 }
 
-#[op2]
-#[string]
-fn op_net_recv(state: &mut OpState, rid: i32) -> Result<String, JsErrorBox> {
+#[op2(fast)]
+fn op_net_send(state: &mut OpState, rid: i32, #[string] data: String) -> Result<(), JsErrorBox> {
+  op_net_send_impl(state, rid, data)
+}
+
+fn op_net_recv_impl(state: &mut OpState, rid: i32) -> Result<String, JsErrorBox> {
   let store = state.borrow::<ConnStore>();
   let guard = store.lock().unwrap();
   if let Some(Some(stream)) = guard.get(rid as usize) {
@@ -73,8 +79,13 @@ fn op_net_recv(state: &mut OpState, rid: i32) -> Result<String, JsErrorBox> {
   }
 }
 
-#[op2(fast)]
-fn op_net_close(state: &mut OpState, rid: i32) -> Result<(), JsErrorBox> {
+#[op2]
+#[string]
+fn op_net_recv(state: &mut OpState, rid: i32) -> Result<String, JsErrorBox> {
+  op_net_recv_impl(state, rid)
+}
+
+fn op_net_close_impl(state: &mut OpState, rid: i32) -> Result<(), JsErrorBox> {
   let store = state.borrow_mut::<ConnStore>();
   let mut guard = store.lock().unwrap();
   if let Some(slot) = guard.get_mut(rid as usize) {
@@ -85,10 +96,14 @@ fn op_net_close(state: &mut OpState, rid: i32) -> Result<(), JsErrorBox> {
   }
 }
 
+#[op2(fast)]
+fn op_net_close(state: &mut OpState, rid: i32) -> Result<(), JsErrorBox> {
+  op_net_close_impl(state, rid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::runtime::Runtime;
 
     #[test]
     fn test_init_returns_extension() {
@@ -96,57 +111,58 @@ mod tests {
         assert_eq!(ext.name, "klyron_net");
     }
 
+    fn run_in_runtime(f: impl FnOnce()) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        f();
+    }
+
     #[test]
     fn test_net_connect_refused() {
-        let rt = Runtime::new().unwrap();
-        rt.block_on(async {
-            let mut state = OpState::default();
+        run_in_runtime(|| {
+            let mut state = OpState::new(None);
             state.put::<ConnStore>(Arc::new(Mutex::new(Vec::new())));
-            let result = op_net_connect(&mut state, "127.0.0.1:1".to_string());
+            let result = op_net_connect_impl(&mut state, "127.0.0.1:1".to_string());
             assert!(result.is_err());
         });
     }
 
     #[test]
     fn test_net_close_invalid_rid() {
-        let rt = Runtime::new().unwrap();
-        rt.block_on(async {
-            let mut state = OpState::default();
+        run_in_runtime(|| {
+            let mut state = OpState::new(None);
             state.put::<ConnStore>(Arc::new(Mutex::new(Vec::new())));
-            let result = op_net_close(&mut state, 999);
+            let result = op_net_close_impl(&mut state, 999);
             assert!(result.is_err());
         });
     }
 
     #[test]
     fn test_net_send_invalid_rid() {
-        let rt = Runtime::new().unwrap();
-        rt.block_on(async {
-            let mut state = OpState::default();
+        run_in_runtime(|| {
+            let mut state = OpState::new(None);
             state.put::<ConnStore>(Arc::new(Mutex::new(Vec::new())));
-            let result = op_net_send(&mut state, 999, "data".to_string());
+            let result = op_net_send_impl(&mut state, 999, "data".to_string());
             assert!(result.is_err());
         });
     }
 
     #[test]
     fn test_net_recv_invalid_rid() {
-        let rt = Runtime::new().unwrap();
-        rt.block_on(async {
-            let mut state = OpState::default();
+        run_in_runtime(|| {
+            let mut state = OpState::new(None);
             state.put::<ConnStore>(Arc::new(Mutex::new(Vec::new())));
-            let result = op_net_recv(&mut state, 999);
+            let result = op_net_recv_impl(&mut state, 999);
             assert!(result.is_err());
         });
     }
 
     #[test]
     fn test_net_connect_empty_addr() {
-        let rt = Runtime::new().unwrap();
-        rt.block_on(async {
-            let mut state = OpState::default();
+        run_in_runtime(|| {
+            let mut state = OpState::new(None);
             state.put::<ConnStore>(Arc::new(Mutex::new(Vec::new())));
-            let result = op_net_connect(&mut state, "".to_string());
+            let result = op_net_connect_impl(&mut state, "".to_string());
             assert!(result.is_err());
         });
     }

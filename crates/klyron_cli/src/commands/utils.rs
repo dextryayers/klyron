@@ -490,9 +490,9 @@ fn fs_available_space(_path: &std::path::Path) -> Option<f64> {
 
 #[derive(Args)]
 pub struct ConfigArgs {
-    #[arg(short, long)]
+    #[arg(short = 'k', long)]
     pub key: Option<String>,
-    #[arg(short, long)]
+    #[arg(short = 'a', long)]
     pub value: Option<String>,
     #[arg(long)]
     pub json: bool,

@@ -1,3 +1,26 @@
+//! Klyron Package Manager (`klyron_pm`)
+//!
+//! A cross-language package manager compatible with npm, with support for:
+//! - Dependency resolution and lockfile generation (JSON, binary, Yarn, pnpm formats)
+//! - Package publishing, dist-tags, and verification
+//! - TUF (The Update Framework) for secure package distribution
+//! - Workspace/monorepo management
+//! - Global package linking
+//! - License checking and TUF mirror support
+//!
+//! ## Key Types
+//!
+//! - [`KlyronLockPackage`] / [`LockfilePackage`] — Lockfile entries
+//! - [`PackageManager`] — High-level PM operations
+//! - [`WorkspaceManager`] — Monorepo management
+//!
+//! ## Example
+//!
+//! ```rust,ignore
+//! use klyron_pm::install::install;
+//! # async fn f() { install(&["react"], false, false, false).await; }
+//! ```
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 use std::collections::{BTreeMap, HashMap};

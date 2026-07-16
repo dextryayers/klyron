@@ -59,9 +59,7 @@ pub fn init() -> Extension {
   klyron_ffi::init()
 }
 
-#[op2]
-#[string]
-fn op_ffi_open(#[string] path: String) -> Result<String, JsErrorBox> {
+fn op_ffi_open_impl(path: String) -> Result<String, JsErrorBox> {
     let cpath = CString::new(path.clone())
         .map_err(|_| JsErrorBox::generic("path contains null byte"))?;
     let handle = unsafe { dlopen(cpath.as_ptr(), RTLD_NOW) };
@@ -77,7 +75,11 @@ fn op_ffi_open(#[string] path: String) -> Result<String, JsErrorBox> {
 
 #[op2]
 #[string]
-fn op_ffi_call(#[string] lib_id: String, #[string] fn_name: String, #[string] args_json: String) -> Result<String, JsErrorBox> {
+fn op_ffi_open(#[string] path: String) -> Result<String, JsErrorBox> {
+    op_ffi_open_impl(path)
+}
+
+fn op_ffi_call_impl(lib_id: String, fn_name: String, args_json: String) -> Result<String, JsErrorBox> {
     let handle_ptr = {
         let mut entry: Option<(LibHandle, String)> = None;
         with_libs(|map| { entry = map.remove(&lib_id); });
@@ -98,6 +100,12 @@ fn op_ffi_call(#[string] lib_id: String, #[string] fn_name: String, #[string] ar
     Ok(result.to_string())
 }
 
+#[op2]
+#[string]
+fn op_ffi_call(#[string] lib_id: String, #[string] fn_name: String, #[string] args_json: String) -> Result<String, JsErrorBox> {
+    op_ffi_call_impl(lib_id, fn_name, args_json)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,19 +118,19 @@ mod tests {
 
     #[test]
     fn test_ffi_open_nonexistent() {
-        let result = op_ffi_open("/tmp/nonexistent_lib_xyz.so".to_string());
+        let result = op_ffi_open_impl("/tmp/nonexistent_lib_xyz.so".to_string());
         assert!(result.is_err());
     }
 
     #[test]
     fn test_ffi_call_no_lib() {
-        let result = op_ffi_call("lib_99999".to_string(), "foo".to_string(), "[]".to_string());
+        let result = op_ffi_call_impl("lib_99999".to_string(), "foo".to_string(), "[]".to_string());
         assert!(result.is_err());
     }
 
     #[test]
     fn test_ffi_open_null_path() {
-        let result = op_ffi_open("lib\0test.so".to_string());
+        let result = op_ffi_open_impl("lib\0test.so".to_string());
         assert!(result.is_err());
     }
 }

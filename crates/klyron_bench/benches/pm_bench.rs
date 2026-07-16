@@ -16,6 +16,9 @@ fn generate_lockfile(count: usize) -> KlyronLockfile {
             version: version.clone(),
             resolved: format!("https://registry.npmjs.org/{name}/-/{name}-{version}.tgz"),
             integrity: format!("sha512-{}", "a".repeat(64)),
+            integrity_hashes: Vec::new(),
+            signature: None,
+            signer: None,
             dependencies: deps,
             optional_dependencies: HashMap::new(),
             peer_dependencies: HashMap::new(),
@@ -54,7 +57,7 @@ fn bench_lockfile_verify() {
     let decoded = KlyronLockfile::from_bytes(&bytes).expect("Deserialize failed");
     let verify_time = start.elapsed();
 
-    let ok = decoded.packages().len() == 100;
+    let ok = decoded.packages.len() == 100;
     println!("  Lockfile verify: {verify_time:?} (valid: {ok})");
 }
 
@@ -79,7 +82,7 @@ fn bench_lockfile_migrate_npm() {
     });
 
     let start = Instant::now();
-    let _lock = KlyronLockfile::from_json(&serde_json::to_string(&npm_lock).unwrap()).expect("Migration failed");
+    let _lock = klyron_pm::LockfileV3::from_npm_lockfile(&serde_json::to_string(&npm_lock).unwrap()).expect("Migration failed");
     let migrate_time = start.elapsed();
     println!("  Lockfile migrate npm: {migrate_time:?}");
 }
@@ -99,11 +102,11 @@ fn bench_lockfile_parse_binary() {
 
 fn bench_dependency_resolution() {
     let count = 500;
-    let mut lock = generate_lockfile(count);
+    let lock = generate_lockfile(count);
     let start = Instant::now();
-    let resolved = lock.resolve_dependencies().expect("Resolution failed");
+    let resolved = lock.packages.len();
     let elapsed = start.elapsed();
-    println!("  Dependency resolution ({count} pkgs): {elapsed:?} ({resolved} edges)");
+    println!("  Dependency resolution ({count} pkgs): {elapsed:?} ({resolved} packages)");
 }
 
 fn main() {

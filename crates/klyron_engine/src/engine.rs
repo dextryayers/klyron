@@ -353,22 +353,29 @@ mod tests {
 
     #[test]
     fn test_engine_runtime_new_unavailable() {
-        let result = EngineRuntime::new(JsEngineKind::V8);
-        // With default features, no engines are available
-        assert!(result.is_err());
+        #[cfg(not(feature = "v8"))]
+        {
+            let result = EngineRuntime::new(JsEngineKind::V8);
+            assert!(result.is_err());
+        }
     }
 
     #[test]
     fn test_engine_runtime_with_fallback_unavailable() {
         let result = EngineRuntime::with_fallback();
-        assert!(result.is_err());
+        // May succeed if any engine is available, or fail if none are
+        if cfg!(not(any(feature = "v8", feature = "boa", feature = "quickjs", feature = "jsc"))) {
+            assert!(result.is_err());
+        }
     }
 
     #[test]
     fn test_detect_best_engine_fallback() {
         let best = detect_best_engine();
-        // Without engines, falls back to Boa
-        assert_eq!(best, JsEngineKind::Boa);
+        // If no engines are available, falls back to Boa
+        if cfg!(not(any(feature = "v8", feature = "boa", feature = "quickjs", feature = "jsc"))) {
+            assert_eq!(best, JsEngineKind::Boa);
+        }
     }
 
     #[test]

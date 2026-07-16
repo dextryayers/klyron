@@ -39,41 +39,43 @@ mod tests {
         assert_eq!(ext.name, "klyron_klyron");
     }
 
+    fn version_impl() -> String { env!("CARGO_PKG_VERSION").to_string() }
+    fn arch_impl() -> String { std::env::consts::ARCH.to_string() }
+    fn platform_impl() -> String { std::env::consts::OS.to_string() }
+
     #[test]
     fn test_klyron_version_not_empty() {
-        let version = op_klyron_version();
-        assert!(!version.is_empty());
-        assert!(version.contains('.'));
+        let v = version_impl();
+        assert!(!v.is_empty());
+        assert!(v.contains('.'));
     }
 
     #[test]
     fn test_klyron_arch_not_empty() {
-        let arch = op_klyron_arch();
-        assert!(!arch.is_empty());
+        assert!(!arch_impl().is_empty());
     }
 
     #[test]
     fn test_klyron_platform_not_empty() {
-        let platform = op_klyron_platform();
-        assert!(!platform.is_empty());
+        assert!(!platform_impl().is_empty());
     }
 
     #[test]
     fn test_klyron_arch_known() {
-        let arch = op_klyron_arch();
-        assert!(arch == "x86_64" || arch == "aarch64" || arch == "x86" || !arch.is_empty());
+        let a = arch_impl();
+        assert!(a == "x86_64" || a == "aarch64" || a == "x86");
     }
 
     #[test]
     fn test_klyron_platform_known() {
-        let platform = op_klyron_platform();
-        assert!(platform == "linux" || platform == "macos" || platform == "windows" || !platform.is_empty());
+        let p = platform_impl();
+        assert!(p == "linux" || p == "macos" || p == "windows");
     }
 
     #[test]
     fn test_klyron_version_semver() {
-        let version = op_klyron_version();
-        let parts: Vec<&str> = version.split('.').collect();
+        let v = version_impl();
+        let parts: Vec<&str> = v.split('.').collect();
         assert!(parts.len() >= 2);
     }
 }

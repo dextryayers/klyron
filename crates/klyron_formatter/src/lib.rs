@@ -512,6 +512,9 @@ mod tests {
       use_cache: false,
     };
     let formatter = Formatter::with_config(config);
+    if std::process::Command::new("rustfmt").arg("--version").output().is_err() {
+      return; // skip if rustfmt is not installed
+    }
     let report = formatter.format_diff(dir.path()).unwrap();
     assert!(report.files_unchanged >= 1);
     assert_eq!(report.files_changed, 0);

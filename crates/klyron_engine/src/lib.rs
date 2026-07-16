@@ -1,3 +1,27 @@
+//! Klyron JavaScript Engine Abstraction
+//!
+//! Provides a unified interface over multiple JavaScript/TypeScript engines:
+//! - **Boa** — Rust-native JS engine
+//! - **QuickJS** — Lightweight embeddable engine
+//! - **JavaScriptCore** (JSC) — Apple's high-performance engine
+//! - **V8** — Google's high-performance engine
+//!
+//! ## Features
+//!
+//! - `detect_best_engine()` — Auto-detect the optimal engine on the host system
+//! - `benchmark_all_engines()` — Run benchmarks to determine fastest engine
+//! - Engine pooling, sandboxing, snapshots, warmup caching
+//! - Polyglot script execution (JS, Python, Ruby, PHP via shell engines)
+//!
+//! ## Example
+//!
+//! ```rust,ignore
+//! use klyron_engine::{EngineRuntime, JsEngineKind, detect_best_engine};
+//!
+//! let engine = EngineRuntime::new(JsEngineKind::QuickJs).unwrap();
+//! let result = engine.eval("1 + 2").unwrap();
+//! ```
+
 pub mod process;
 pub mod traits;
 pub mod engine;

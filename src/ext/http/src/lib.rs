@@ -92,9 +92,7 @@ fn op_http_stop(state: &mut OpState) -> Result<(), JsErrorBox> {
   Ok(())
 }
 
-#[op2]
-#[string]
-fn op_http_json(#[string] data: String, status: f64) -> String {
+fn op_http_json_impl(data: String, status: f64) -> String {
   let code = status as u16;
   let body = data;
   let status_line = match code {
@@ -124,7 +122,11 @@ fn op_http_json(#[string] data: String, status: f64) -> String {
 
 #[op2]
 #[string]
-fn op_http_html(#[string] data: String, status: f64) -> String {
+fn op_http_json(#[string] data: String, status: f64) -> String {
+  op_http_json_impl(data, status)
+}
+
+fn op_http_html_impl(data: String, status: f64) -> String {
   let code = status as u16;
   let status_line = match code {
     200 => "HTTP/1.1 200 OK",
@@ -143,12 +145,17 @@ fn op_http_html(#[string] data: String, status: f64) -> String {
 
 #[op2]
 #[string]
-fn op_http_text(#[string] data: String, status: f64) -> String {
+fn op_http_html(#[string] data: String, status: f64) -> String {
+  op_http_html_impl(data, status)
+}
+
+fn op_http_text_impl(data: String, status: f64) -> String {
   let code = status as u16;
   let status_line = match code {
     200 => "HTTP/1.1 200 OK",
     201 => "HTTP/1.1 201 Created",
     400 => "HTTP/1.1 400 Bad Request",
+    403 => "HTTP/1.1 403 Forbidden",
     404 => "HTTP/1.1 404 Not Found",
     500 => "HTTP/1.1 500 Internal Server Error",
     _ => "HTTP/1.1 200 OK",
@@ -163,7 +170,11 @@ fn op_http_text(#[string] data: String, status: f64) -> String {
 
 #[op2]
 #[string]
-fn op_http_redirect(#[string] location: String, status: f64) -> String {
+fn op_http_text(#[string] data: String, status: f64) -> String {
+  op_http_text_impl(data, status)
+}
+
+fn op_http_redirect_impl(location: String, status: f64) -> String {
   let code = status as u16;
   let status_line = match code {
     301 => "HTTP/1.1 301 Moved Permanently",
@@ -180,6 +191,12 @@ fn op_http_redirect(#[string] location: String, status: f64) -> String {
   )
 }
 
+#[op2]
+#[string]
+fn op_http_redirect(#[string] location: String, status: f64) -> String {
+  op_http_redirect_impl(location, status)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_http_json_200() {
-        let result = op_http_json(r#"{"message":"ok"}"#.to_string(), 200.0);
+        let result = op_http_json_impl(r#"{"message":"ok"}"#.to_string(), 200.0);
         assert!(result.starts_with("HTTP/1.1 200 OK"));
         assert!(result.contains("Content-Type: application/json"));
         assert!(result.contains(r#"{"message":"ok"}"#));
@@ -200,125 +217,125 @@ mod tests {
 
     #[test]
     fn test_http_json_404() {
-        let result = op_http_json(r#"{"error":"not found"}"#.to_string(), 404.0);
+        let result = op_http_json_impl(r#"{"error":"not found"}"#.to_string(), 404.0);
         assert!(result.starts_with("HTTP/1.1 404 Not Found"));
     }
 
     #[test]
     fn test_http_json_500() {
-        let result = op_http_json(r#"{"error":"server error"}"#.to_string(), 500.0);
+        let result = op_http_json_impl(r#"{"error":"server error"}"#.to_string(), 500.0);
         assert!(result.starts_with("HTTP/1.1 500 Internal Server Error"));
     }
 
     #[test]
     fn test_http_html_200() {
-        let result = op_http_html("<h1>Hello</h1>".to_string(), 200.0);
+        let result = op_http_html_impl("<h1>Hello</h1>".to_string(), 200.0);
         assert!(result.starts_with("HTTP/1.1 200 OK"));
         assert!(result.contains("Content-Type: text/html"));
     }
 
     #[test]
     fn test_http_html_404() {
-        let result = op_http_html("not found".to_string(), 404.0);
+        let result = op_http_html_impl("not found".to_string(), 404.0);
         assert!(result.starts_with("HTTP/1.1 404 Not Found"));
     }
 
     #[test]
     fn test_http_text_200() {
-        let result = op_http_text("plain text".to_string(), 200.0);
+        let result = op_http_text_impl("plain text".to_string(), 200.0);
         assert!(result.starts_with("HTTP/1.1 200 OK"));
         assert!(result.contains("Content-Type: text/plain"));
     }
 
     #[test]
     fn test_http_text_400() {
-        let result = op_http_text("bad request".to_string(), 400.0);
+        let result = op_http_text_impl("bad request".to_string(), 400.0);
         assert!(result.starts_with("HTTP/1.1 400 Bad Request"));
     }
 
     #[test]
     fn test_http_redirect_301() {
-        let result = op_http_redirect("/new-location".to_string(), 301.0);
+        let result = op_http_redirect_impl("/new-location".to_string(), 301.0);
         assert!(result.starts_with("HTTP/1.1 301 Moved Permanently"));
         assert!(result.contains("Location: /new-location"));
     }
 
     #[test]
     fn test_http_redirect_302() {
-        let result = op_http_redirect("/temp".to_string(), 302.0);
+        let result = op_http_redirect_impl("/temp".to_string(), 302.0);
         assert!(result.starts_with("HTTP/1.1 302 Found"));
     }
 
     #[test]
     fn test_http_redirect_308() {
-        let result = op_http_redirect("/perm".to_string(), 308.0);
+        let result = op_http_redirect_impl("/perm".to_string(), 308.0);
         assert!(result.starts_with("HTTP/1.1 308 Permanent Redirect"));
     }
 
     #[test]
     fn test_http_json_201() {
-        let result = op_http_json(r#"{"created":true}"#.to_string(), 201.0);
+        let result = op_http_json_impl(r#"{"created":true}"#.to_string(), 201.0);
         assert!(result.starts_with("HTTP/1.1 201 Created"));
     }
 
     #[test]
     fn test_http_text_content_length() {
-        let result = op_http_text("hello".to_string(), 200.0);
+        let result = op_http_text_impl("hello".to_string(), 200.0);
         assert!(result.contains("Content-Length: 5"));
     }
 
     #[test]
     fn test_http_json_content_length() {
         let body = r#"{"x":1}"#;
-        let result = op_http_json(body.to_string(), 200.0);
+        let result = op_http_json_impl(body.to_string(), 200.0);
         assert!(result.contains(&format!("Content-Length: {}", body.len())));
     }
 
     #[test]
     fn test_http_json_unauthorized() {
-        let result = op_http_json("error".to_string(), 401.0);
+        let result = op_http_json_impl("error".to_string(), 401.0);
         assert!(result.starts_with("HTTP/1.1 401 Unauthorized"));
     }
 
     #[test]
     fn test_http_text_forbidden() {
-        let result = op_http_text("forbidden".to_string(), 403.0);
+        let result = op_http_text_impl("forbidden".to_string(), 403.0);
         assert!(result.starts_with("HTTP/1.1 403 Forbidden"));
     }
 
     #[test]
     fn test_http_json_conflict() {
-        let result = op_http_json("conflict".to_string(), 409.0);
+        let result = op_http_json_impl("conflict".to_string(), 409.0);
         assert!(result.starts_with("HTTP/1.1 409 Conflict"));
     }
 
     #[test]
     fn test_http_json_422() {
-        let result = op_http_json("error".to_string(), 422.0);
+        let result = op_http_json_impl("error".to_string(), 422.0);
         assert!(result.starts_with("HTTP/1.1 422 Unprocessable Entity"));
     }
 
     #[test]
     fn test_http_json_429() {
-        let result = op_http_json("rate limited".to_string(), 429.0);
+        let result = op_http_json_impl("rate limited".to_string(), 429.0);
         assert!(result.starts_with("HTTP/1.1 429 Too Many Requests"));
     }
 
     #[test]
     fn test_http_html_201() {
-        let result = op_http_html("<p>created</p>".to_string(), 201.0);
+        let result = op_http_html_impl("<p>created</p>".to_string(), 201.0);
         assert!(result.starts_with("HTTP/1.1 201 Created"));
     }
 
     #[test]
     fn test_http_redirect_303() {
-        let result = op_http_redirect("/other".to_string(), 303.0);
+        let result = op_http_redirect_impl("/other".to_string(), 303.0);
         assert!(result.starts_with("HTTP/1.1 303 See Other"));
     }
 
     #[test]
     fn test_http_redirect_307() {
-        let result = op_http_redirect("/temp".to_string(), 307.0);
+        let result = op_http_redirect_impl("/temp".to_string(), 307.0);
         assert!(result.starts_with("HTTP/1.1 307 Temporary Redirect"));
     }
 }

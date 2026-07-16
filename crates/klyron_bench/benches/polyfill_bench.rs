@@ -37,6 +37,7 @@ fn bench_node_fs_read(count: usize) {
 
 fn bench_node_crypto_hash(sizes: &[usize]) {
     use sha2::{Sha256, Digest};
+    use sha2::digest::Digest as _;
     for &size in sizes {
         let data = vec![0xABu8; size];
         let start = Instant::now();
@@ -56,11 +57,12 @@ fn bench_node_crypto_hash(sizes: &[usize]) {
 fn bench_node_path_operations(count: usize) {
     use std::path::Path;
 
-    let paths: Vec<&str> = (0..count).map(|i| {
+    let path_strings: Vec<String> = (0..count).map(|i| {
         if i % 3 == 0 { format!("/usr/local/lib/node_modules/pkg-{i}/index.js") }
         else if i % 3 == 1 { format!("./src/components/Component{i}.tsx") }
         else { format!("../node_modules/.pnpm/pkg@{i}/node_modules/pkg/index.mjs") }
     }).collect();
+    let paths: Vec<&str> = path_strings.iter().map(|s| s.as_str()).collect();
 
     let start = Instant::now();
     for p in &paths {

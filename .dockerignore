@@ -1,0 +1,11 @@
+target/
+.git/
+node_modules/
+*.md
+.idea/
+.vscode/
+*.lock
+*.pdb
+engines/*/bindings/
+crates/*/bindings/
+bindings/

@@ -13,3 +13,4 @@ rayon = "1"
 chrono = { version = "0.4", features = ["serde"] }
 klyron_engine = { path = "../klyron_engine", features = ["all-engines"] }
 klyron_pm = { path = "../klyron_pm" }
+sha2 = "0.10"

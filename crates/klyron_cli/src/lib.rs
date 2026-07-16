@@ -1,3 +1,24 @@
+//! Klyron - Universal Polyglot Runtime CLI
+//!
+//! `klyron_cli` is the command-line interface for the Klyron runtime.
+//! It provides commands for running JavaScript/TypeScript, managing packages,
+//! scaffolding projects, database management, testing, deployment, and more.
+//!
+//! ## Quick Start
+//!
+//! ```bash
+//! klyron run app.ts
+//! klyron create next my-app
+//! klyron install react
+//! klyron dev
+//! ```
+//!
+//! ## Architecture
+//!
+//! The CLI dispatches to sub-commands via the [`Commands`] enum. Each command
+//! module under [`commands`] implements the actual logic. Engine operations
+//! use the [`klyron_engine`] crate for JavaScript execution.
+
 pub mod engines;
 pub mod commands;
 pub mod scaffold_inline;
@@ -120,7 +141,6 @@ pub fn all_extensions() -> Vec<deno_core::Extension> {
         klyron_ext_html::init(),
         klyron_ext_ffi::init(),
         klyron_ext_ws::init(),
-        klyron_ext_process::init(),
     ]
 }
 
