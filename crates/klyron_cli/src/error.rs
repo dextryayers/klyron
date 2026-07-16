@@ -162,22 +162,94 @@ impl From<std::io::Error> for KlyronError {
     }
 }
 
+use crate::colors::{Color, supports_color};
+
+fn code_for_error(err: &KlyronError) -> &str {
+    match err {
+        KlyronError::Io(_) => "FS001",
+        KlyronError::Network(_) => "NET001",
+        KlyronError::Tls(_) => "NET002",
+        KlyronError::Dns(_) => "NET003",
+        KlyronError::Timeout(_) => "NET004",
+        KlyronError::ConfigNotFound(_) => "CFG001",
+        KlyronError::ConfigParse(_) => "CFG002",
+        KlyronError::ConfigInvalid(_) => "CFG003",
+        KlyronError::ConfigMissing(_) => "CFG004",
+        KlyronError::EngineFailure(_) => "ENG001",
+        KlyronError::ScriptError { .. } => "SCR001",
+        KlyronError::ModuleNotFound(_) => "MOD001",
+        KlyronError::SyntaxError(_) => "SYN001",
+        KlyronError::PackageNotFound(_) => "PM001",
+        KlyronError::VersionNotFound(_) => "PM002",
+        KlyronError::LockfileStale => "PM003",
+        KlyronError::LockfileCorrupt(_) => "PM004",
+        KlyronError::IntegrityError(_) => "SEC001",
+        KlyronError::ResolutionError(_) => "PM005",
+        KlyronError::DownloadError(_) => "PM006",
+        KlyronError::RegistryError(_) => "REG001",
+        KlyronError::PermissionDenied(_) => "SEC002",
+        KlyronError::NetworkBlocked(_) => "SEC003",
+        KlyronError::FileSystemBlocked(_) => "SEC004",
+        KlyronError::Internal(_) => "INT001",
+        KlyronError::Unimplemented(_) => "GEN001",
+        KlyronError::Bug(_) => "BUG001",
+    }
+}
+
 pub fn format_error(err: &KlyronError, verbose: bool) -> String {
-    let mut out = format!("\u{274C} Error: {}", err.user_message());
+    let use_color = supports_color();
+    let code = code_for_error(err);
+    let msg = err.user_message();
+
+    if !use_color {
+        let mut out = format!("error[{code}]: {msg}");
+        if let Some(suggestion) = err.suggestion() {
+            out.push_str(&format!("\n  Suggestion: {suggestion}"));
+        }
+        if verbose {
+            out.push_str(&format!("\n  Context: {}", err.context()));
+            out.push_str(&format!("\n  Exit code: {}", err.exit_code().into_integer()));
+        }
+        return out;
+    }
+
+    let red = Color::RED;
+    let yellow = Color::YELLOW;
+    let cyan = Color::CYAN;
+    let dim = Color::DIM;
+    let bold = Color::BOLD;
+
+    let border = "\u{2500}";
+    let top = format!(
+        "{bold}{red}{border}{border}{border} Klyron Error {border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{reset}",
+        bold = bold.code, red = red.code, reset = Color::RESET.code
+    );
+    let bottom = format!(
+        "{bold}{red}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{border}{reset}",
+        bold = bold.code, red = red.code, reset = Color::RESET.code
+    );
+
+    let mut out = String::new();
+    out.push_str(&top);
+    out.push_str(&format!("\n{red}\u{2718} {bold}error[{code}]: {msg}{reset}", red = red.code, bold = bold.code, reset = Color::RESET.code));
 
     if verbose {
-        out.push_str(&format!("\n   Context: {}", err.context()));
-        out.push_str(&format!("\n   Exit code: {}", err.exit_code().into_integer()));
+        out.push_str(&format!("\n{cyan}  Context:{reset} {}", cyan.code, Color::RESET.code, err.context()));
+        out.push_str(&format!("\n{dim}  Location: (see trace){reset}", dim = dim.code, reset = Color::RESET.code));
     }
 
     if let Some(suggestion) = err.suggestion() {
-        out.push_str(&format!("\n   \u{1F4A1} {suggestion}"));
+        out.push_str(&format!("\n\n{yellow}  \u{2500}{border} Did you know? {border}{border}{border}{reset}", yellow = yellow.code, border = border, reset = Color::RESET.code));
+        for (i, line) in suggestion.lines().enumerate() {
+            out.push_str(&format!("\n{yellow}    {}. {}{reset}", yellow.code, line, Color::RESET.code, i + 1));
+        }
     }
 
     if err.should_report_bug() {
-        out.push_str("\n   \u{1F41B} This looks like a bug! Please report it at https://github.com/dextryayers/klyron/issues");
+        out.push_str(&format!("\n\n{cyan}  This looks like a bug! Report at https://github.com/dextryayers/klyron/issues{reset}", cyan = cyan.code, reset = Color::RESET.code));
     }
 
+    out.push_str(&format!("\n{}", bottom));
     out
 }
 

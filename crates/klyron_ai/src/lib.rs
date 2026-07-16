@@ -84,10 +84,68 @@ struct Delta {
 type CacheKey = String;
 type CacheValue = String;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LlmProvider {
+    OpenAI { api_key: String, model: String },
+    Anthropic { api_key: String, model: String },
+    Google { api_key: String, model: String },
+    Ollama { endpoint: String, model: String },
+    Custom { endpoint: String, api_key: Option<String> },
+}
+
+impl LlmProvider {
+    pub fn openai_gpt4(api_key: String) -> Self {
+        Self::OpenAI { api_key, model: "gpt-4".into() }
+    }
+    pub fn anthropic_sonnet(api_key: String) -> Self {
+        Self::Anthropic { api_key, model: "claude-sonnet-4-20250514".into() }
+    }
+    pub fn to_config(&self) -> AiConfig {
+        match self {
+            Self::OpenAI { api_key, model } => AiConfig {
+                api_key: api_key.clone(),
+                endpoint: "https://api.openai.com/v1".into(),
+                model: model.clone(),
+                temperature: 0.7,
+                max_tokens: 4096,
+            },
+            Self::Anthropic { api_key, model } => AiConfig {
+                api_key: api_key.clone(),
+                endpoint: "https://api.anthropic.com/v1".into(),
+                model: model.clone(),
+                temperature: 0.7,
+                max_tokens: 4096,
+            },
+            Self::Google { api_key, model } => AiConfig {
+                api_key: api_key.clone(),
+                endpoint: "https://generativelanguage.googleapis.com/v1".into(),
+                model: model.clone(),
+                temperature: 0.7,
+                max_tokens: 4096,
+            },
+            Self::Ollama { endpoint, model } => AiConfig {
+                api_key: String::new(),
+                endpoint: endpoint.clone(),
+                model: model.clone(),
+                temperature: 0.7,
+                max_tokens: 4096,
+            },
+            Self::Custom { endpoint, api_key } => AiConfig {
+                api_key: api_key.clone().unwrap_or_default(),
+                endpoint: endpoint.clone(),
+                model: "custom".into(),
+                temperature: 0.7,
+                max_tokens: 4096,
+            },
+        }
+    }
+}
+
 pub struct AiEngine {
     client: Client,
     config: AiConfig,
     cache: Arc<RwLock<LruCache<CacheKey, CacheValue>>>,
+    system_prompt: Option<String>,
 }
 
 impl AiEngine {
@@ -105,7 +163,50 @@ impl AiEngine {
             client,
             config,
             cache,
+            system_prompt: None,
         }
+    }
+
+    pub fn provider(&self) -> LlmProvider {
+        // Best-effort reconstruction from config
+        if self.config.endpoint.contains("openai") {
+            LlmProvider::OpenAI {
+                api_key: self.config.api_key.clone(),
+                model: self.config.model.clone(),
+            }
+        } else if self.config.endpoint.contains("anthropic") {
+            LlmProvider::Anthropic {
+                api_key: self.config.api_key.clone(),
+                model: self.config.model.clone(),
+            }
+        } else if self.config.endpoint.contains("googleapis") {
+            LlmProvider::Google {
+                api_key: self.config.api_key.clone(),
+                model: self.config.model.clone(),
+            }
+        } else if self.config.endpoint.contains("localhost") || self.config.endpoint.contains("127.0.0.1") {
+            LlmProvider::Ollama {
+                endpoint: self.config.endpoint.clone(),
+                model: self.config.model.clone(),
+            }
+        } else {
+            LlmProvider::Custom {
+                endpoint: self.config.endpoint.clone(),
+                api_key: Some(self.config.api_key.clone()),
+            }
+        }
+    }
+
+    pub fn model(&self) -> &str { &self.config.model }
+    pub fn system_prompt(&self) -> Option<&str> { self.system_prompt.as_deref() }
+
+    pub fn from_provider(provider: LlmProvider) -> Self {
+        Self::new(provider.to_config())
+    }
+
+    pub fn with_system_prompt(mut self, prompt: &str) -> Self {
+        self.system_prompt = Some(prompt.to_string());
+        self
     }
 
     pub fn with_config(mut self, config: AiConfig) -> Self {
@@ -326,6 +427,29 @@ impl AiEngine {
         self.chat_completion(&system, code).await
     }
 
+    pub async fn commit_message(&self, diff: &str) -> Result<String> {
+        let system = "\
+            You are a commit message generator following Conventional Commits.\n\
+            Analyze the git diff and generate a concise, descriptive commit message.\n\
+            Format: <type>(<scope>): <description>\n\n\
+            <body>\n\n\
+            <footer>"
+            .to_string();
+        self.chat_completion(&system, diff).await
+    }
+
+    pub async fn suggest_fix(&self, error: &str, code: &str) -> Result<String> {
+        let system = "\
+            You are a debugging expert. Given a compile error and the relevant code:\n\
+            1. Explain the error in simple terms\n\
+            2. Provide the corrected code\n\
+            3. Explain why the fix works\n\
+            Return the fix wrapped in a code block."
+            .to_string();
+        let prompt = format!("Error: {error}\n\nCode:\n{code}");
+        self.chat_completion(&system, &prompt).await
+    }
+
     pub async fn generate_code_stream(
         &self,
         prompt: &str,
@@ -405,6 +529,37 @@ mod tests {
         let config = AiConfig::default();
         let engine = AiEngine::new(config);
         assert_eq!(engine.cache_size(), 0);
+    }
+
+    #[test]
+    fn test_llm_provider_openai_config() {
+        let provider = LlmProvider::openai_gpt4("sk-test".into());
+        let config = provider.to_config();
+        assert_eq!(config.model, "gpt-4");
+        assert_eq!(config.api_key, "sk-test");
+        assert!(config.endpoint.contains("openai"));
+    }
+
+    #[test]
+    fn test_llm_provider_anthropic() {
+        let provider = LlmProvider::anthropic_sonnet("sk-ant-test".into());
+        let config = provider.to_config();
+        assert_eq!(config.model, "claude-sonnet-4-20250514");
+        assert!(config.endpoint.contains("anthropic"));
+    }
+
+    #[test]
+    fn test_ai_engine_from_provider() {
+        let provider = LlmProvider::openai_gpt4("test-key".into());
+        let engine = AiEngine::from_provider(provider);
+        assert_eq!(engine.model(), "gpt-4");
+    }
+
+    #[test]
+    fn test_ai_engine_with_system_prompt() {
+        let provider = LlmProvider::openai_gpt4("test".into());
+        let engine = AiEngine::from_provider(provider).with_system_prompt("Be helpful");
+        assert_eq!(engine.system_prompt(), Some("Be helpful"));
     }
 
     #[test]
