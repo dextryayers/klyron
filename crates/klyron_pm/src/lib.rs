@@ -6,6 +6,9 @@ use thiserror::Error;
 
 pub mod lockfile;
 pub mod signing;
+pub mod yarn_lock;
+pub mod pnpm_lock;
+pub mod binary_lockfile;
 pub mod registry;
 pub mod tuf;
 pub mod integrity;
@@ -16,6 +19,7 @@ pub mod resolver;
 pub mod pack;
 pub mod install;
 pub mod publish;
+pub mod registry_config;
 
 // ── Errors ───────────────────────────────────────────────────────────────────
 
@@ -513,6 +517,7 @@ mod tests {
         std::fs::create_dir_all(&tmp).unwrap();
         std::fs::write(tmp.join("pnpm-lock.yaml"), "").unwrap();
         assert_eq!(PackageManagerKind::detect(&tmp), PackageManagerKind::Pnpm);
+        std::fs::remove_file(tmp.join("pnpm-lock.yaml")).unwrap();
         std::fs::write(tmp.join("yarn.lock"), "").unwrap();
         assert_eq!(PackageManagerKind::detect(&tmp), PackageManagerKind::Yarn);
         let _ = std::fs::remove_dir_all(&tmp);

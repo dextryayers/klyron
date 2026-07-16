@@ -16,6 +16,8 @@ pub mod profiler;
 pub mod cache;
 pub mod streaming;
 pub mod parallel;
+pub mod script_classifier;
+pub mod polyglot;
 
 pub use process::{EngineProcess, EngineInput, EngineOutput, FileEntry, find_engine_path};
 pub use traits::EngineTrait;
@@ -33,6 +35,7 @@ pub use lazy_compile::{LazyCompiler, CompiledModule};
 pub use pre_warm::{EnginePreWarmer, default_pre_warm_scripts};
 pub use profiler::{JitProfiler, ProfilingStats, IndividualProfile};
 pub use cache::{TwoTierCache, MemoryCache, DiskCache, CacheConfig, CacheEntry};
+pub use script_classifier::{ScriptFeatures, ScriptClassifier, ExponentialMovingAverage, predict_engine};
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -125,63 +128,102 @@ pub fn profile_all_engines(iterations: u64) -> Vec<EngineProfile> {
 }
 
 pub struct AutoSwitcher {
-    usage_counts: HashMap<JsEngineKind, u64>,
-    avg_latencies: HashMap<JsEngineKind, f64>,
-    current: JsEngineKind,
-    switch_threshold: u64,
-    sample_count: u64,
+    v8_latency: ExponentialMovingAverage,
+    boa_latency: ExponentialMovingAverage,
+    quickjs_latency: ExponentialMovingAverage,
+    jsc_latency: ExponentialMovingAverage,
+    script_classifier: ScriptClassifier,
+    min_samples: usize,
+    switch_threshold: f64,
+    hot_path_threshold: u64,
+    hot_path_cache: HashMap<String, u64>,
+    sample_count: usize,
 }
 
 impl AutoSwitcher {
     pub fn new() -> Self {
         Self {
-            usage_counts: HashMap::new(),
-            avg_latencies: HashMap::new(),
-            current: JsEngineKind::Boa,
-            switch_threshold: 100,
+            v8_latency: ExponentialMovingAverage::new(0.3),
+            boa_latency: ExponentialMovingAverage::new(0.3),
+            quickjs_latency: ExponentialMovingAverage::new(0.3),
+            jsc_latency: ExponentialMovingAverage::new(0.3),
+            script_classifier: ScriptClassifier::new(),
+            min_samples: 5,
+            switch_threshold: 1.5,
+            hot_path_threshold: 100u64,
+            hot_path_cache: HashMap::new(),
             sample_count: 0,
         }
     }
 
-    pub fn record_latency(&mut self, kind: JsEngineKind, latency_ns: f64) {
-        let count = self.usage_counts.entry(kind).or_insert(0);
-        *count += 1;
-        self.sample_count += 1;
-
-        let avg = self.avg_latencies.entry(kind).or_insert(0.0);
-        *avg = (*avg * (*count - 1) as f64 + latency_ns) / *count as f64;
-    }
-
-    pub fn select_engine(&mut self, script_size: usize, is_hot_path: bool) -> JsEngineKind {
-        if is_hot_path {
+    pub fn select(&mut self, script: &str) -> JsEngineKind {
+        // 1. Check if script is on hot path (same script >= 100x)
+        if self.is_hot_path(script) {
             return JsEngineKind::V8;
         }
-        if script_size < 1024 {
-            return JsEngineKind::QuickJS;
+
+        // 2. Classify script characteristics
+        let features = self.script_classifier.extract(script);
+
+        // 3. Predict best engine using decision tree
+        self.predict(&features)
+    }
+
+    fn is_hot_path(&mut self, script: &str) -> bool {
+        let count = self.hot_path_cache.entry(script.to_string()).or_insert(0);
+        *count += 1;
+        *count >= self.hot_path_threshold
+    }
+
+    fn predict(&self, features: &ScriptFeatures) -> JsEngineKind {
+        match features {
+            f if f.expected_runtime_ms < 5.0 => JsEngineKind::QuickJS,
+            f if f.has_loops && f.expected_runtime_ms > 100.0 => JsEngineKind::V8,
+            f if f.has_async && f.expected_runtime_ms < 50.0 => JsEngineKind::Boa,
+            f if f.import_count > 50 => JsEngineKind::JSC,
+            _ => JsEngineKind::V8,
         }
-        if self.sample_count > self.switch_threshold {
-            let best = self.avg_latencies.iter()
-                .min_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|(kind, _)| *kind)
-                .unwrap_or(JsEngineKind::Boa);
-            self.current = best;
-            return best;
+    }
+
+    pub fn record_latency(&mut self, kind: JsEngineKind, latency_ms: f64) {
+        self.sample_count += 1;
+        let ema = match kind {
+            JsEngineKind::V8 => &mut self.v8_latency,
+            JsEngineKind::Boa => &mut self.boa_latency,
+            JsEngineKind::QuickJS => &mut self.quickjs_latency,
+            JsEngineKind::JSC => &mut self.jsc_latency,
+        };
+        ema.update(latency_ms);
+    }
+
+    pub fn best_engine(&self) -> Option<JsEngineKind> {
+        if self.sample_count < self.min_samples {
+            return None;
         }
-        self.current
+
+        let latencies = [
+            (JsEngineKind::V8, self.v8_latency.value()),
+            (JsEngineKind::Boa, self.boa_latency.value()),
+            (JsEngineKind::QuickJS, self.quickjs_latency.value()),
+            (JsEngineKind::JSC, self.jsc_latency.value()),
+        ];
+
+        latencies.iter()
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(kind, _)| *kind)
     }
 
-    pub fn current_engine(&self) -> JsEngineKind {
-        self.current
+    pub fn stats(&self) -> HashMap<JsEngineKind, f64> {
+        let mut m = HashMap::new();
+        m.insert(JsEngineKind::V8, self.v8_latency.value());
+        m.insert(JsEngineKind::Boa, self.boa_latency.value());
+        m.insert(JsEngineKind::QuickJS, self.quickjs_latency.value());
+        m.insert(JsEngineKind::JSC, self.jsc_latency.value());
+        m
     }
 
-    pub fn set_current(&mut self, kind: JsEngineKind) {
-        self.current = kind;
-    }
-
-    pub fn stats(&self) -> HashMap<JsEngineKind, (u64, f64)> {
-        self.usage_counts.iter().map(|(k, c)| {
-            (*k, (*c, *self.avg_latencies.get(k).unwrap_or(&0.0)))
-        }).collect()
+    pub fn latencies(&self) -> HashMap<JsEngineKind, f64> {
+        self.stats()
     }
 }
 
