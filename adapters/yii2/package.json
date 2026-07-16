@@ -1,0 +1,12 @@
+{
+  "name": "@opencode/adapter-yii2",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Yii2 adapter for opencode",
+  "main": "src/index.js",
+  "license": "MIT",
+  "dependencies": {},
+  "opencode": {
+    "adapter": true
+  }
+}

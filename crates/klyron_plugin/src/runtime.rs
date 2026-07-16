@@ -14,7 +14,7 @@ pub struct PluginRuntime {
     engine: Engine,
 }
 
-struct RuntimeCtx {
+pub struct RuntimeCtx {
     table: ResourceTable,
     wasi: WasiP1Ctx,
 }

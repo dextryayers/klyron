@@ -10,6 +10,8 @@ use sha3::{Sha3_256, Sha3_512};
 use uuid::Uuid;
 use x25519_dalek::{PublicKey, StaticSecret};
 
+pub mod cron;
+
 pub struct CryptoProvider;
 
 impl CryptoProvider {
@@ -247,6 +249,69 @@ impl Default for CryptoProvider {
     }
 }
 
+// ── Password Hashing ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub enum PasswordAlgorithm {
+    Bcrypt { cost: u32 },
+    Argon2 { m_cost: u64, t_cost: u32, p_cost: u32 },
+}
+
+impl PasswordAlgorithm {
+    pub fn default_bcrypt() -> Self {
+        Self::Bcrypt { cost: 12 }
+    }
+
+    pub fn default_argon2() -> Self {
+        Self::Argon2 { m_cost: 19_456, t_cost: 2, p_cost: 1 }
+    }
+
+    pub fn hash(&self, password: &str) -> String {
+        match self {
+            Self::Bcrypt { cost } => {
+                bcrypt::hash(password, *cost).expect("bcrypt hash failed")
+            }
+            Self::Argon2 { m_cost, t_cost, p_cost } => {
+                use argon2::Argon2;
+                use password_hash::{PasswordHasher, SaltString};
+
+                let salt = SaltString::generate(&mut rand::thread_rng());
+                let params = argon2::Params::new(*m_cost as u32, *t_cost, *p_cost, Some(32))
+                    .expect("invalid argon2 params");
+                let argon2 = Argon2::new(
+                    argon2::Algorithm::Argon2id,
+                    argon2::Version::V0x13,
+                    params,
+                );
+                argon2
+                    .hash_password(password.as_bytes(), &salt)
+                    .expect("argon2 hash failed")
+                    .to_string()
+            }
+        }
+    }
+
+    pub fn verify(&self, password: &str, hash: &str) -> bool {
+        match self {
+            Self::Bcrypt { .. } => bcrypt::verify(password, hash).unwrap_or(false),
+            Self::Argon2 { .. } => {
+                use argon2::Argon2;
+                use password_hash::{PasswordHash, PasswordVerifier};
+
+                let parsed = match PasswordHash::new(hash) {
+                    Ok(p) => p,
+                    Err(_) => return false,
+                };
+                Argon2::default()
+                    .verify_password(password.as_bytes(), &parsed)
+                    .is_ok()
+            }
+        }
+    }
+}
+
+// ── Free functions ───────────────────────────────────────────────────────────
+
 #[inline]
 pub fn sha256(data: &[u8]) -> String {
     CryptoProvider::new().sha256(data)
@@ -340,6 +405,26 @@ mod tests {
         let alice_shared = crypto.x25519_key_exchange(&alice_priv, &bob_pub);
         let bob_shared = crypto.x25519_key_exchange(&bob_priv, &alice_pub);
         assert_eq!(alice_shared, bob_shared);
+    }
+
+    #[test]
+    fn test_bcrypt_hash_verify() {
+        let pw = "correct-horse-battery-staple";
+        let algo = PasswordAlgorithm::default_bcrypt();
+        let hash = algo.hash(pw);
+        assert!(hash.starts_with("$2b$") || hash.starts_with("$2a$"));
+        assert!(algo.verify(pw, &hash));
+        assert!(!algo.verify("wrong", &hash));
+    }
+
+    #[test]
+    fn test_argon2_hash_verify() {
+        let pw = "p@ssw0rd!";
+        let algo = PasswordAlgorithm::default_argon2();
+        let hash = algo.hash(pw);
+        assert!(hash.starts_with("$argon2id$"));
+        assert!(algo.verify(pw, &hash));
+        assert!(!algo.verify("wrong", &hash));
     }
 
     #[test]

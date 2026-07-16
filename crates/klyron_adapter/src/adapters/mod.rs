@@ -37,6 +37,10 @@ mod hexo;
 mod symfony;
 mod codeigniter;
 mod wordpress;
+mod cakephp;
+mod yii2;
+mod fastapi;
+mod flask;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -81,6 +85,10 @@ pub use hexo::HexoAdapter;
 pub use symfony::SymfonyAdapter;
 pub use codeigniter::CodeIgniterAdapter;
 pub use wordpress::WordPressAdapter;
+pub use cakephp::CakePHPAdapter;
+pub use yii2::Yii2Adapter;
+pub use fastapi::FastApiAdapter;
+pub use flask::FlaskAdapter;
 
 pub fn register_all(registry: &mut AdapterRegistry) {
     registry.register(Arc::new(ReactAdapter));
@@ -122,10 +130,14 @@ pub fn register_all(registry: &mut AdapterRegistry) {
     registry.register(Arc::new(SymfonyAdapter));
     registry.register(Arc::new(CodeIgniterAdapter));
     registry.register(Arc::new(WordPressAdapter));
+    registry.register(Arc::new(CakePHPAdapter));
+    registry.register(Arc::new(Yii2Adapter));
+    registry.register(Arc::new(FastApiAdapter));
+    registry.register(Arc::new(FlaskAdapter));
 }
 
 pub fn detect_adapter(dir: &Path) -> Option<&'static str> {
-    let adapters: [&dyn crate::FrameworkAdapter; 39] = [
+    let adapters: [&dyn crate::FrameworkAdapter; 43] = [
         &ReactAdapter,
         &VueAdapter,
         &NextAdapter,
@@ -165,6 +177,10 @@ pub fn detect_adapter(dir: &Path) -> Option<&'static str> {
         &SymfonyAdapter,
         &CodeIgniterAdapter,
         &WordPressAdapter,
+        &CakePHPAdapter,
+        &Yii2Adapter,
+        &FastApiAdapter,
+        &FlaskAdapter,
     ];
     for adapter in &adapters {
         if adapter.detect(dir) {

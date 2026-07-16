@@ -1,0 +1,8 @@
+{
+  "name": "@klyron/adapter-rails",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ruby on Rails adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module"
+}

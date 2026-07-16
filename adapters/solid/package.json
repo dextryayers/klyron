@@ -1,0 +1,11 @@
+{
+  "name": "@klyron/adapter-solid",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Solid.js adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module",
+  "dependencies": {
+    "solid-js": "^1.9.0"
+  }
+}

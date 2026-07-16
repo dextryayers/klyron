@@ -1,0 +1,11 @@
+{
+  "name": "@klyron/adapter-sveltekit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SvelteKit adapter for Klyron",
+  "main": "src/index.js",
+  "type": "module",
+  "dependencies": {
+    "@sveltejs/kit": "^2.0.0"
+  }
+}
