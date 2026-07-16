@@ -1,13 +1,7 @@
-use hex;
-use once_cell::sync::Lazy;
-use regex::Regex;
-use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::SystemTime;
 use thiserror::Error;
 
 pub mod lockfile;
@@ -438,12 +432,15 @@ pub fn check_package_security(
 pub fn verify_package_signature_on_install(
     tarball: &[u8],
     signature: &[u8],
-    public_key_pem: &str,
+    public_key: &[u8],
 ) -> Result<bool, PmError> {
     use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-    use ed25519_dalek::pkcs8::DecodePublicKey;
 
-    let verifying_key = VerifyingKey::from_public_key_pem(public_key_pem)
+    let pub_arr: [u8; 32] = match public_key.try_into() {
+        Ok(b) => b,
+        Err(_) => return Err(PmError::SignatureError("Invalid public key length (expected 32 bytes)".into())),
+    };
+    let verifying_key = VerifyingKey::from_bytes(&pub_arr)
         .map_err(|e| PmError::SignatureError(format!("Invalid public key: {e}")))?;
 
     if signature.len() != 64 {
@@ -557,3 +554,4 @@ mod tests {
         };
         assert!(lf.find_package("nonexistent").is_none());
     }
+}

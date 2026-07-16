@@ -1,71 +1,46 @@
-pub mod runtime;
-pub mod isolate;
-pub mod module_loader;
-pub mod bindings;
-pub mod binding;
-pub mod value;
-pub mod promise;
-pub mod error;
-pub mod snapshot;
-pub mod permissions;
+mod runtime;
+mod value;
+mod error;
+mod isolate;
+mod snapshot;
+mod bindings;
+mod binding;
+mod module_loader;
+mod permissions;
+mod promise;
 
 pub use runtime::QuickJSRuntime;
-pub use isolate::QuickJSIsolate;
 pub use error::QuickJSError;
 pub use value::QuickJSValue;
-pub use binding::{QuickJSEngine as QuickJSBindingEngine, QuickJSContext, QJSMemoryUsage};
+pub use isolate::QuickJSIsolate;
+pub use snapshot::QuickJSSnapshot;
+pub use bindings::QuickJSBindings;
+pub use binding::{QuickJSContext, QuickJSBindingEngine};
+pub use module_loader::QuickJSModuleLoader;
+pub use permissions::QuickJSPermissions;
+pub use promise::QuickJSPromise;
 
 pub struct QuickJSEngine {
-    pub runtime: QuickJSRuntime,
-    pub binding: QuickJSBindingEngine,
+    inner: QuickJSRuntime,
 }
 
 impl QuickJSEngine {
     pub fn new() -> Result<Self, QuickJSError> {
-        Ok(Self {
-            runtime: QuickJSRuntime::new()?,
-            binding: QuickJSBindingEngine::new()?,
-        })
+        QuickJSRuntime::new()
+            .map(|inner| Self { inner })
+            .map_err(|e| QuickJSError::RuntimeError(e))
     }
 
     pub fn eval(&self, code: &str) -> Result<String, QuickJSError> {
-        self.runtime.eval(code)
+        self.inner.eval(code).map_err(QuickJSError::EvalError)
     }
 
     pub fn execute_script(&self, filename: &str, source: &str) -> Result<String, QuickJSError> {
-        self.runtime.execute_script(filename, source)
+        self.inner.execute_script(filename, source).map_err(QuickJSError::EvalError)
     }
 
     pub fn execute_module(&self, filename: &str, source: &str) -> Result<String, QuickJSError> {
-        self.runtime.execute_module(filename, source)
-    }
-
-    pub fn snapshot(&self) -> Result<snapshot::QuickJSSnapshot, QuickJSError> {
-        snapshot::QuickJSSnapshot::create(&self.runtime)
-    }
-
-    pub fn binding_eval(&self, code: &str) -> Result<String, QuickJSError> {
-        self.binding.eval(code)
-    }
-
-    pub fn call_function(&self, name: &str, args: &[&str]) -> Result<String, QuickJSError> {
-        self.binding.call_function(name, args)
-    }
-
-    pub fn get_global(&self, key: &str) -> Result<Option<String>, QuickJSError> {
-        self.binding.get_global(key)
-    }
-
-    pub fn set_global(&self, key: &str, value: &str) -> Result<(), QuickJSError> {
-        self.binding.set_global(key, value)
-    }
-
-    pub fn memory_usage(&self) -> QJSMemoryUsage {
-        self.binding.memory_usage()
-    }
-
-    pub fn set_sandboxed(&mut self, sandboxed: bool) {
-        self.binding.set_sandboxed(sandboxed);
+        self.execute_script(filename, source)
     }
 }
 
@@ -139,17 +114,6 @@ mod tests {
             let result = engine.execute_module("test.mjs", "export const x = 1;");
             match result {
                 Ok(val) => assert!(!val.is_empty()),
-                Err(_) => {}
-            }
-        }
-    }
-
-    #[test]
-    fn test_quickjs_snapshot() {
-        if let Ok(engine) = QuickJSEngine::new() {
-            let result = engine.snapshot();
-            match result {
-                Ok(_snap) => {}
                 Err(_) => {}
             }
         }

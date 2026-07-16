@@ -11,11 +11,3 @@ impl QuickJSBindings {
         Ok(())
     }
 }
-
-pub fn register_bindings() -> Vec<&'static str> {
-    vec!["console", "timers"]
-}
-
-pub fn get_native_binding(_name: &str) -> Option<fn() -> String> {
-    None
-}

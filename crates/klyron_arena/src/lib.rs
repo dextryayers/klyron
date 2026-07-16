@@ -65,8 +65,9 @@ impl Arena {
         let layout = Layout::new::<T>();
         let ptr = self.alloc_raw(layout);
         unsafe {
-            ptr.as_ptr().write(val);
-            &mut *ptr.as_ptr()
+            let p = ptr.as_ptr() as *mut T;
+            p.write(val);
+            &mut *p
         }
     }
 

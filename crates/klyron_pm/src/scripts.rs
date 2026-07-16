@@ -225,7 +225,7 @@ impl ScriptRunner {
         &self,
         name: &str,
         scripts: &HashMap<String, String>,
-        main_result: &RunResult,
+        _main_result: &RunResult,
     ) -> Result<Option<RunResult>, ScriptError> {
         let post_name = format!("post{name}");
         match scripts.get(&post_name) {
@@ -285,7 +285,7 @@ impl ScriptRunner {
                 .map(|(_, s)| s.keys().map(|k| k.as_str()).collect())
                 .collect();
 
-            for (j, (_, scripts_j)) in packages.iter().enumerate() {
+            for (j, (_, _scripts_j)) in packages.iter().enumerate() {
                 if i == j {
                     continue;
                 }
@@ -303,7 +303,7 @@ impl ScriptRunner {
         let mut queue: VecDeque<usize> = in_degree
             .iter()
             .enumerate()
-            .filter(|(_, &deg)| deg == 0)
+            .filter(|(_, deg)| **deg == 0)
             .map(|(i, _)| i)
             .collect();
 

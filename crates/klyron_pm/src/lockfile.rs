@@ -1,7 +1,7 @@
 use crate::PmError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 const KLYRON_MAGIC: &[u8] = b"KLYR";

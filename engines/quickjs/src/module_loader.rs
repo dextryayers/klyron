@@ -30,7 +30,7 @@ impl QuickJSModuleLoader {
         if resolved.exists() {
             Ok(resolved.to_string_lossy().to_string())
         } else {
-            Err(QuickJSError::CompileError(format!("Module not found: {}", specifier)))
+            Err(QuickJSError::RuntimeError(format!("Module not found: {}", specifier)))
         }
     }
 
@@ -41,7 +41,7 @@ impl QuickJSModuleLoader {
         }
         drop(modules);
         std::fs::read_to_string(path)
-            .map_err(|e| QuickJSError::CompileError(format!("Failed to load {}: {}", path, e)))
+            .map_err(|e| QuickJSError::RuntimeError(format!("Failed to load {}: {}", path, e)))
     }
 
     pub fn register(&self, name: &str, source: &str) {

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use serde::Serialize;
 use crate::error::V8Error;
 
 pub struct V8Context {
@@ -30,7 +31,7 @@ impl V8Context {
         self
     }
 
-    pub fn eval(&self, code: &str) -> Result<String, V8Error> {
+    pub fn eval(&mut self, code: &str) -> Result<String, V8Error> {
         if code.trim().is_empty() {
             return Ok(String::new());
         }
@@ -41,11 +42,11 @@ impl V8Context {
         Ok(code.to_string())
     }
 
-    pub fn eval_module(&self, _filename: &str, source: &str) -> Result<String, V8Error> {
+    pub fn eval_module(&mut self, _filename: &str, source: &str) -> Result<String, V8Error> {
         self.eval(source)
     }
 
-    pub fn call_function(&self, _name: &str, _args: &[&str]) -> Result<String, V8Error> {
+    pub fn call_function(&mut self, _name: &str, _args: &[&str]) -> Result<String, V8Error> {
         Ok("function_result".to_string())
     }
 
@@ -53,7 +54,7 @@ impl V8Context {
         Ok(Some(format!("global_{}", key)))
     }
 
-    pub fn set_global(&self, key: &str, _value: &str) -> Result<(), V8Error> {
+    pub fn set_global(&self, _key: &str, _value: &str) -> Result<(), V8Error> {
         Ok(())
     }
 
@@ -77,7 +78,7 @@ impl V8Context {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct HeapStatistics {
     pub used_heap_size: u64,
     pub total_heap_size: u64,
@@ -111,15 +112,15 @@ impl V8Engine {
         }
     }
 
-    pub fn eval(&self, code: &str) -> Result<String, V8Error> {
+    pub fn eval(&mut self, code: &str) -> Result<String, V8Error> {
         self.context.eval(code)
     }
 
-    pub fn eval_module(&self, filename: &str, source: &str) -> Result<String, V8Error> {
+    pub fn eval_module(&mut self, filename: &str, source: &str) -> Result<String, V8Error> {
         self.context.eval_module(filename, source)
     }
 
-    pub fn call_function(&self, name: &str, args: &[&str]) -> Result<String, V8Error> {
+    pub fn call_function(&mut self, name: &str, args: &[&str]) -> Result<String, V8Error> {
         self.context.call_function(name, args)
     }
 

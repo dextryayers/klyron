@@ -21,15 +21,20 @@ dirs = "5"
 regex = "1"
 chrono = "0.4"
 inferno = { version = "0.11", optional = true }
+rayon = { workspace = true }
 
 [features]
-v8 = ["dep:klyron-engine-v8"]
+v8 = ["dep:klyron-core"]
 boa = ["dep:klyron-engine-boa"]
 quickjs = ["dep:klyron-engine-quickjs"]
 jsc = ["dep:klyron-engine-jsc"]
 all-engines = ["v8", "boa", "quickjs", "jsc"]
 inferno = ["dep:inferno"]
 default = []
+
+[dependencies.klyron-core]
+optional = true
+path = "../../src/core"
 
 [dependencies.klyron-engine-v8]
 optional = true

@@ -37,7 +37,7 @@ impl PluginRuntime {
         config.consume_fuel(true);
 
         if let Some(ref s) = sandbox {
-            config.max_wasm_stack(s.limits.max_cpu_ms as usize * 4096)?;
+            config.max_wasm_stack(s.limits.max_cpu_ms as usize * 4096);
         }
 
         let engine = Engine::new(&config).context("Failed to create WASM engine")?;

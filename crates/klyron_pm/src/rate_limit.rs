@@ -102,7 +102,7 @@ impl RateLimiter {
         Self::new(RateLimitConfig::default())
     }
 
-    pub fn with_registry_config(mut self, registry: &str, config: RateLimitConfig) -> Self {
+    pub fn with_registry_config(self, registry: &str, config: RateLimitConfig) -> Self {
         let bucket = TokenBucket::new(config);
         self.registries.lock().unwrap().insert(registry.to_string(), bucket);
         self

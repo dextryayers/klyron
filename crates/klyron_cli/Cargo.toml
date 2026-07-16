@@ -54,8 +54,8 @@ tower-http = { version = "0.6", features = ["fs"] }
 clap_complete = "4.5"
 toml = { workspace = true }
 dirs = "5"
-ureq = "2"
-reqwest = { workspace = true, features = ["blocking", "json"] }
+ureq = "3"
+reqwest = { workspace = true, features = ["blocking"] }
 ctrlc = "3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 klyron_config = { path = "../klyron_config" }

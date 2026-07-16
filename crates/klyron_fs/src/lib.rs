@@ -9,7 +9,6 @@ use std::os::unix::fs::PermissionsExt;
 
 use memmap2::Mmap;
 use tokio::sync::Semaphore;
-use tracing::{debug, trace};
 
 static IO_SEMAPHORE: std::sync::LazyLock<Semaphore> =
     std::sync::LazyLock::new(|| Semaphore::new(32));

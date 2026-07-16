@@ -369,13 +369,15 @@ impl MmapFileCache {
 
 pub fn pre_warm_common_modules(cache: &BytecodeCacheV2, kind: JsEngineKind) {
     let common_scripts = default_pre_warm_scripts();
-    for (name, code) in common_scripts {
+    let script_count = common_scripts.len();
+    for (name, code) in &common_scripts {
         let key = format!("prewarm:{}:{}:{}", kind.name(), name, blake3::hash(code.as_bytes()).to_hex());
+        let code_owned = code.to_string();
         let _ = cache.get_or_compile(&key, || {
             let engine = EngineRuntime::new(kind)?;
-            engine.eval(code)?;
-            Ok(code.as_bytes().to_vec())
+            engine.eval(&code_owned)?;
+            Ok(code_owned.as_bytes().to_vec())
         });
     }
-    tracing::info!("Pre-warmed {} common modules for {}", common_scripts.len(), kind);
+    tracing::info!("Pre-warmed {} common modules for {}", script_count, kind);
 }

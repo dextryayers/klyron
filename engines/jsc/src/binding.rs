@@ -42,7 +42,7 @@ impl JSCContext {
         Ok(Some(format!("jsc_global_{}", key)))
     }
 
-    pub fn set_global(&self, key: &str, _value: &str) -> Result<(), JSCError> {
+    pub fn set_global(&self, _key: &str, _value: &str) -> Result<(), JSCError> {
         Ok(())
     }
 

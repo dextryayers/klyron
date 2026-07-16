@@ -48,9 +48,10 @@ impl ConnectionPool {
     pub async fn get(&self, host: &str) -> Option<TcpStream> {
         let _permit = self.semaphore.acquire().await.ok()?;
         let mut inner = self.inner.lock();
+        let timeout = inner.idle_timeout;
         if let Some(conns) = inner.connections.get_mut(host) {
             while let Some(mut conn) = conns.pop() {
-                if conn.is_expired(inner.idle_timeout) {
+                if conn.is_expired(timeout) {
                     trace!("Dropping expired connection to {}", host);
                     continue;
                 }
@@ -68,8 +69,9 @@ impl ConnectionPool {
 
     pub async fn put(&self, host: String, stream: TcpStream) {
         let mut inner = self.inner.lock();
+        let max = inner.max_per_host;
         let conns = inner.connections.entry(host.clone()).or_default();
-        if conns.len() < inner.max_per_host {
+        if conns.len() < max {
             let _ = set_tcp_nodelay(&stream);
             conns.push(PooledConnection {
                 stream,
@@ -103,10 +105,11 @@ impl ConnectionPool {
 
     pub fn evict_expired(&self) -> usize {
         let mut inner = self.inner.lock();
+        let timeout = inner.idle_timeout;
         let mut evicted = 0;
         for conns in inner.connections.values_mut() {
             let before = conns.len();
-            conns.retain(|c| !c.is_expired(inner.idle_timeout));
+            conns.retain(|c| !c.is_expired(timeout));
             evicted += before - conns.len();
         }
         evicted

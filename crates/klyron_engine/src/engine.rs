@@ -184,15 +184,16 @@ where
 }
 
 #[cfg(feature = "v8")]
-struct V8EngineWrapper(klyron_engine_v8::V8Engine);
+struct V8EngineWrapper(std::sync::Mutex<klyron_core::Runtime>);
 
 #[cfg(feature = "v8")]
 impl JsEngineInternal for V8EngineWrapper {
     fn eval_inner(&mut self, code: &str) -> Result<String, String> {
-        self.0.eval(code).map_err(|e| e.to_string())
+        self.0.lock().map_err(|e| e.to_string())?.eval(code).map_err(|e| e.to_string())
     }
     fn execute_script_inner(&mut self, filename: &str, source: &str) -> Result<String, String> {
-        self.0.execute_script(filename, source).map_err(|e| e.to_string())
+        self.0.lock().map_err(|e| e.to_string())?
+            .execute_script(filename, source).map_err(|e| e.to_string())
     }
 }
 
@@ -202,7 +203,8 @@ type V8Adapter = Adapter<V8EngineWrapper>;
 #[cfg(feature = "v8")]
 impl V8Adapter {
     fn new() -> Result<Self, String> {
-        klyron_engine_v8::V8Engine::new().map(V8EngineWrapper).map(Adapter::wrap).map_err(|e| e.to_string())
+        let runtime = klyron_core::Runtime::builder().build().map_err(|e| e.to_string())?;
+        Ok(Adapter::wrap(V8EngineWrapper(std::sync::Mutex::new(runtime))))
     }
 }
 

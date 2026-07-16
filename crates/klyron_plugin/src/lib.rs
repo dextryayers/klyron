@@ -271,7 +271,7 @@ impl PluginRegistry {
         if !self.no_rollback {
             self.rollback_stack.push(RollbackEntry::Install {
                 name: manifest.name.clone(),
-                wasm_path: wasm_dest,
+                wasm_path: wasm_dest.clone(),
                 manifest_path,
             });
         }
@@ -436,14 +436,14 @@ impl PluginRegistry {
 
         if has_failure && !self.no_rollback {
             for result in &results {
-                if let HookResult::Failure { ref plugin, ref error, .. } = result {
+                if let HookResult::Failure { plugin, error, .. } = result {
                     warn!("Rolling back hook {} for plugin {}: {}", phase.as_str(), plugin, error);
                     self.emit(PluginEvent::RolledBack {
                         name: plugin.clone(),
                         phase: phase.as_str().to_string(),
                     });
                 }
-                if let HookResult::Success { ref plugin, .. } = result {
+                if let HookResult::Success { plugin, .. } = result {
                     self.emit(PluginEvent::RolledBack {
                         name: plugin.clone(),
                         phase: phase.as_str().to_string(),
@@ -510,25 +510,28 @@ impl PluginRegistry {
             .ok_or_else(|| anyhow::anyhow!("Plugin '{}' not found", name))?;
 
         info.enabled = !info.enabled;
+        let enabled = info.enabled;
+        let name_owned = name.to_string();
+        drop(info);
 
         if !self.no_rollback {
             self.rollback_stack.push(RollbackEntry::Enable {
-                name: name.to_string(),
-                was_enabled: !info.enabled,
+                name: name_owned.clone(),
+                was_enabled: !enabled,
             });
         }
 
-        if info.enabled {
+        if enabled {
             self.emit(PluginEvent::Enabled {
-                name: name.to_string(),
+                name: name_owned,
             });
         } else {
             self.emit(PluginEvent::Disabled {
-                name: name.to_string(),
+                name: name_owned,
             });
         }
 
-        Ok(info.enabled)
+        Ok(enabled)
     }
 
     pub fn rollback(&mut self) -> Result<()> {

@@ -30,11 +30,11 @@ impl QuickJSPromise {
     }
 
     pub unsafe fn resolve_promise(_ctx: *mut std::ffi::c_void, _val: isize) -> Result<String, QuickJSError> {
-        Err(QuickJSError::ExecutionFailed("QuickJS native promise resolver not available".into()))
+        Err(QuickJSError::RuntimeError("QuickJS native promise resolver not available".into()))
     }
 
     pub unsafe fn reject_promise(_ctx: *mut std::ffi::c_void, _val: isize) -> Result<String, QuickJSError> {
-        Err(QuickJSError::ExecutionFailed("QuickJS native promise rejection not available".into()))
+        Err(QuickJSError::RuntimeError("QuickJS native promise rejection not available".into()))
     }
 
     pub fn resolve(&mut self, value: String) {

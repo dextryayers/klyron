@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use tokio::net::TcpStream;
 use axum::http::Method;
 use axum::response::Json;
 use axum::routing::{any, delete, get, head, options, patch, post, put};
@@ -220,7 +219,7 @@ impl HttpServer {
         println!("Klyron HTTP server listening on http://{}", self.addr);
 
         loop {
-            let (mut stream, peer) = listener.accept().await?;
+            let (stream, peer) = listener.accept().await?;
             let _ = stream.set_nodelay(true);
             if !self.pool.try_acquire() {
                 eprintln!("Connection limit reached, dropping {peer}");
@@ -248,7 +247,7 @@ impl HttpServer {
 
     async fn serve_h2(self, listener: tokio::net::TcpListener) -> anyhow::Result<()> {
         loop {
-            let (mut stream, peer) = listener.accept().await?;
+            let (stream, peer) = listener.accept().await?;
             let _ = stream.set_nodelay(true);
             if !self.pool.try_acquire() {
                 eprintln!("Connection limit reached, dropping {peer}");
@@ -293,7 +292,7 @@ impl HttpServer {
         println!("Klyron HTTPS server listening on https://{}", self.addr);
 
         loop {
-            let (mut stream, _) = listener.accept().await?;
+            let (stream, _) = listener.accept().await?;
             let _ = stream.set_nodelay(true);
             let acceptor = acceptor.clone();
             let app = self.app.clone();

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
@@ -9,16 +9,50 @@ use tracing::{debug, trace, warn};
 const METADATA_TTL: Duration = Duration::from_secs(300);
 const LRU_MAX_ENTRIES: usize = 1024;
 
+fn instant_to_nanos(inst: Instant) -> u128 {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let elapsed = inst.elapsed();
+    let epoch = now.checked_sub(elapsed).unwrap_or_default();
+    epoch.as_nanos()
+}
+
+fn nanos_to_instant(nanos: u128) -> Instant {
+    let now = Instant::now();
+    let epoch_dur = Duration::from_nanos(nanos as u64);
+    let now_dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let age = now_dur.checked_sub(epoch_dur).unwrap_or_default();
+    now - age
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedMetadata {
     pub data: Vec<u8>,
     pub etag: Option<String>,
-    pub cached_at: Instant,
+    #[serde(rename = "cached_at_ns")]
+    cached_at_ns: u128,
+    #[serde(skip)]
+    cached_at: Option<Instant>,
 }
 
 impl CachedMetadata {
+    pub fn new(data: Vec<u8>, etag: Option<String>) -> Self {
+        Self {
+            data,
+            etag,
+            cached_at_ns: instant_to_nanos(Instant::now()),
+            cached_at: None,
+        }
+    }
+
+    pub fn cached_at(&self) -> Instant {
+        self.cached_at.unwrap_or_else(|| {
+            let inst = nanos_to_instant(self.cached_at_ns);
+            inst
+        })
+    }
+
     pub fn is_fresh(&self) -> bool {
-        self.cached_at.elapsed() < METADATA_TTL
+        self.cached_at().elapsed() < METADATA_TTL
     }
 }
 
@@ -89,11 +123,7 @@ impl RegistryCache {
     }
 
     pub fn set_metadata(&self, key: &str, data: &[u8], etag: Option<String>) {
-        let meta = CachedMetadata {
-            data: data.to_vec(),
-            etag,
-            cached_at: Instant::now(),
-        };
+        let meta = CachedMetadata::new(data.to_vec(), etag);
         {
             let mut lru = self.lru.lock().ok();
             if let Some(ref mut lru) = lru {
@@ -195,7 +225,9 @@ mod tests {
         cache.set_metadata("test-pkg", b"{\"name\":\"test\"}", Some("\"abc123\"".into()));
         let got = cache.get_metadata("test-pkg");
         assert!(got.is_some());
-        assert_eq!(got.unwrap().data, b"{\"name\":\"test\"}");
+        let meta = got.as_ref().unwrap();
+        assert_eq!(meta.data, b"{\"name\":\"test\"}");
+        assert!(meta.is_fresh());
 
         cache.invalidate("test-pkg");
         assert!(cache.get_metadata("test-pkg").is_none());

@@ -1,19 +1,8 @@
-use std::cell::RefCell;
-
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-thread_local! {
-    static SERDE_BUFFER: RefCell<String> = const { RefCell::new(String::with_capacity(4096)) };
-}
-
 pub fn to_string<T: Serialize>(value: &T) -> serde_json::Result<String> {
-    SERDE_BUFFER.with(|buf| {
-        let mut buf = buf.borrow_mut();
-        buf.clear();
-        serde_json::to_writer(std::io::Cursor::new(buf.as_bytes()), value)?;
-        Ok(buf.clone())
-    })
+    serde_json::to_string(value)
 }
 
 pub fn to_string_pretty<T: Serialize>(value: &T) -> serde_json::Result<String> {
@@ -34,12 +23,13 @@ pub fn from_slice<T: DeserializeOwned>(v: &[u8]) -> serde_json::Result<T> {
 
 #[cfg(feature = "simd")]
 pub mod simd {
-    use serde::de::DeserializeOwned;
+    use serde::de::{DeserializeOwned, Error};
     use serde::Serialize;
 
     pub fn from_str<T: DeserializeOwned>(s: &str) -> serde_json::Result<T> {
-        let mut deserializer = simd_json::serde::Deserializer::new(simd_json::BorrowedValue::from(s));
-        T::deserialize(&mut deserializer)
+        let mut data = s.as_bytes().to_vec();
+        simd_json::from_slice(&mut data)
+            .map_err(|e| serde_json::error::Error::custom(format!("simd_json error: {}", e)))
     }
 
     pub fn to_string<T: Serialize>(value: &T) -> serde_json::Result<String> {
@@ -49,10 +39,6 @@ pub mod simd {
     pub fn to_vec<T: Serialize>(value: &T) -> serde_json::Result<Vec<u8>> {
         serde_json::to_vec(value)
     }
-}
-
-pub fn reuse_buffer(capacity: usize) -> String {
-    String::with_capacity(capacity)
 }
 
 #[cfg(test)]

@@ -104,7 +104,7 @@ impl TufRootMetadata {
         let mut valid_sigs = 0;
         for sig in &targets.signatures {
             if role.keyids.contains(&sig.keyid) {
-                if let Some(key) = self.keys.get(&sig.keyid) {
+                if let Some(_key) = self.keys.get(&sig.keyid) {
                     let payload = serde_json::to_string(&targets.signed)
                         .map_err(|e| PmError::AuditError(format!("Serialization: {e}")))?;
                     let hash = Sha256::digest(payload.as_bytes());

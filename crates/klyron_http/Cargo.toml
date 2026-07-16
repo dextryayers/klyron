@@ -19,4 +19,6 @@ futures-util = { version = "0.3", features = ["sink"] }
 rustls = { version = "0.23", features = ["ring"] }
 tokio-rustls = "0.26"
 rustls-pemfile = "2"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+parking_lot = "0.12"
+tracing = "0.1"
+reqwest = { workspace = true, features = ["rustls-tls"] }

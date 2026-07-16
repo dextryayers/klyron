@@ -84,15 +84,19 @@ impl MemoryCache {
 
     pub fn get(&mut self, key: &str) -> Option<CacheEntry> {
         let now = now_secs();
-        if let Some(entry) = self.cache.get(key) {
-            if entry.expires_at > 0 && now > entry.expires_at {
-                self.cache.pop(key);
-                self.current_size = self.current_size.saturating_sub(entry.size_bytes);
-                return None;
-            }
-            return Some(entry.clone());
+        if !self.cache.contains(key) {
+            return None;
         }
-        None
+        let is_expired = self.cache.peek(key)
+            .map_or(false, |e| e.expires_at > 0 && now > e.expires_at);
+        if is_expired {
+            let key_owned = key.to_string();
+            if let Some(removed) = self.cache.pop(&key_owned) {
+                self.current_size = self.current_size.saturating_sub(removed.size_bytes);
+            }
+            return None;
+        }
+        self.cache.get(key).map(|e| e.clone())
     }
 
     pub fn put(&mut self, key: String, value: Vec<u8>, ttl_secs: u64, content_type: String) {
@@ -144,7 +148,7 @@ impl MemoryCache {
         self.max_size
     }
 
-    pub fn contains(&self, key: &str) -> bool {
+    pub fn contains(&mut self, key: &str) -> bool {
         let now = now_secs();
         self.cache.get(key).map_or(false, |e| e.expires_at == 0 || now <= e.expires_at)
     }
@@ -308,7 +312,7 @@ impl TwoTierCache {
     }
 
     pub fn contains(&self, key: &str) -> bool {
-        self.memory.lock().map(|m| m.contains(key)).unwrap_or(false)
+        self.memory.lock().map(|mut m| m.contains(key)).unwrap_or(false)
             || self.disk.get(key).is_some()
     }
 }

@@ -2562,6 +2562,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
 ]
 
 [[package]]
@@ -2810,7 +2812,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tower-service",
- "webpki-roots 1.0.8",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -3507,6 +3509,7 @@ dependencies = [
  "klyron-engine-common",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -3515,8 +3518,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "klyron-engine-common",
+ "rquickjs",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -3746,6 +3751,7 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -3808,7 +3814,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "ureq 2.12.1",
+ "ureq",
 ]
 
 [[package]]
@@ -3819,7 +3825,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "ureq 3.3.0",
+ "ureq",
  "walkdir",
 ]
 
@@ -3900,6 +3906,7 @@ dependencies = [
  "criterion",
  "dirs 5.0.1",
  "inferno",
+ "klyron-core",
  "klyron-engine-boa",
  "klyron-engine-jsc",
  "klyron-engine-quickjs",
@@ -3907,6 +3914,7 @@ dependencies = [
  "lru",
  "once_cell",
  "parking_lot",
+ "rayon",
  "regex",
  "serde",
  "serde_json",
@@ -3940,6 +3948,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
  "walkdir",
 ]
 
@@ -3952,6 +3961,7 @@ dependencies = [
  "futures-util",
  "hyper",
  "hyper-util",
+ "parking_lot",
  "reqwest",
  "rustls 0.23.42",
  "rustls-pemfile 2.2.0",
@@ -3962,6 +3972,7 @@ dependencies = [
  "tokio-util",
  "tower 0.5.3",
  "tower-http",
+ "tracing",
 ]
 
 [[package]]
@@ -4073,18 +4084,22 @@ name = "klyron_pm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bincode",
  "chrono",
  "dirs 5.0.1",
+ "ed25519-dalek",
  "flate2",
  "glob",
  "hex",
  "once_cell",
+ "rand 0.8.7",
  "regex",
  "reqwest",
  "semver",
  "serde",
  "serde_json",
+ "sha1",
  "sha2 0.10.9",
  "tar",
  "thiserror 2.0.18",
@@ -4295,7 +4310,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "toml",
- "ureq 3.3.0",
+ "ureq",
 ]
 
 [[package]]
@@ -6364,6 +6379,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "relative-path"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bca40a312222d8ba74837cb474edef44b37f561da5f773981007a10bbaa992b0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6371,11 +6395,9 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "encoding_rs",
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.4.15",
  "http 1.4.2",
  "http-body",
  "http-body-util",
@@ -6385,7 +6407,6 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
- "mime",
  "native-tls",
  "percent-encoding",
  "pin-project-lite",
@@ -6408,7 +6429,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
- "webpki-roots 1.0.8",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -6458,6 +6479,35 @@ checksum = "93411e420bcd1a75ddd1dc3caf18c23155eda2c090631a85af21ba19e97093b5"
 dependencies = [
  "smallvec",
  "str_indices",
+]
+
+[[package]]
+name = "rquickjs"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ce6b626d30ecbedaaf8097a04982bc3b081f958f5bdf9b8796be4ac00ee48bb"
+dependencies = [
+ "rquickjs-core",
+]
+
+[[package]]
+name = "rquickjs-core"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9334dd11023d5ae6c751f64496510a576208802ed1d022ef94afa7639c2c55e"
+dependencies = [
+ "hashbrown 0.17.1",
+ "relative-path",
+ "rquickjs-sys",
+]
+
+[[package]]
+name = "rquickjs-sys"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eef73520804cf5aa4876097ac5733058d628c769eba9678e0f4dba5a4ef79703"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
@@ -8262,22 +8312,6 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "ureq"
-version = "2.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
-dependencies = [
- "base64 0.22.1",
- "flate2",
- "log",
- "once_cell",
- "rustls 0.23.42",
- "rustls-pki-types",
- "url",
- "webpki-roots 0.26.11",
-]
-
-[[package]]
-name = "ureq"
 version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dea7109cdcd5864d4eeb1b58a1648dc9bf520360d7af16ec26d0a9354bafcfc0"
@@ -8293,7 +8327,7 @@ dependencies = [
  "serde_json",
  "ureq-proto",
  "utf8-zero",
- "webpki-roots 1.0.8",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -8934,15 +8968,6 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "webpki-roots"
-version = "0.26.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
-dependencies = [
- "webpki-roots 1.0.8",
 ]
 
 [[package]]

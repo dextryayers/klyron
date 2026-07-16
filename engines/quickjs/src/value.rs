@@ -1,73 +1,47 @@
-use std::collections::HashMap;
+use serde_json::Value as JsonValue;
 
 #[derive(Debug, Clone)]
 pub enum QuickJSValue {
     Null,
-    Undefined,
-    Boolean(bool),
-    Integer(i64),
-    Number(f64),
+    Bool(bool),
+    Int(i64),
+    Float(f64),
     String(String),
     Array(Vec<QuickJSValue>),
-    Object(HashMap<String, QuickJSValue>),
+    Object(Vec<(String, QuickJSValue)>),
+    Buffer(Vec<u8>),
 }
 
 impl QuickJSValue {
-    pub fn from_json(json: &serde_json::Value) -> Self {
-        match json {
-            serde_json::Value::Null => Self::Null,
-            serde_json::Value::Bool(b) => Self::Boolean(*b),
-            serde_json::Value::Number(n) => n.as_i64()
-                .map(Self::Integer)
-                .unwrap_or_else(|| Self::Number(n.as_f64().unwrap_or(0.0))),
-            serde_json::Value::String(s) => Self::String(s.clone()),
-            serde_json::Value::Array(arr) => Self::Array(arr.iter().map(Self::from_json).collect()),
-            serde_json::Value::Object(obj) => Self::Object(
-                obj.iter().map(|(k,v)| (k.clone(), Self::from_json(v))).collect()
+    pub fn from_json(val: &JsonValue) -> Self {
+        match val {
+            JsonValue::Null => Self::Null,
+            JsonValue::Bool(b) => Self::Bool(*b),
+            JsonValue::Number(n) => {
+                if let Some(i) = n.as_i64() { Self::Int(i) }
+                else if let Some(f) = n.as_f64() { Self::Float(f) }
+                else { Self::Null }
+            }
+            JsonValue::String(s) => Self::String(s.clone()),
+            JsonValue::Array(arr) => Self::Array(arr.iter().map(Self::from_json).collect()),
+            JsonValue::Object(obj) => Self::Object(
+                obj.iter().map(|(k, v)| (k.clone(), Self::from_json(v))).collect()
             ),
         }
     }
 
-    pub fn to_json(&self) -> serde_json::Value {
+    pub fn to_json(&self) -> JsonValue {
         match self {
-            Self::Null => serde_json::Value::Null,
-            Self::Undefined => serde_json::Value::Null,
-            Self::Boolean(b) => serde_json::Value::Bool(*b),
-            Self::Integer(i) => serde_json::json!(i),
-            Self::Number(n) => serde_json::json!(n),
-            Self::String(s) => serde_json::Value::String(s.clone()),
-            Self::Array(arr) => serde_json::Value::Array(arr.iter().map(|v| v.to_json()).collect()),
-            Self::Object(map) => serde_json::Value::Object(
-                map.iter().map(|(k,v)| (k.clone(), v.to_json())).collect()
+            Self::Null => JsonValue::Null,
+            Self::Bool(b) => JsonValue::Bool(*b),
+            Self::Int(i) => JsonValue::Number((*i).into()),
+            Self::Float(f) => serde_json::json!(f),
+            Self::String(s) => JsonValue::String(s.clone()),
+            Self::Array(arr) => JsonValue::Array(arr.iter().map(|v| v.to_json()).collect()),
+            Self::Object(obj) => JsonValue::Object(
+                obj.iter().map(|(k, v)| (k.clone(), v.to_json())).collect()
             ),
+            Self::Buffer(b) => JsonValue::Array(b.iter().map(|n| JsonValue::Number((*n).into())).collect()),
         }
     }
-
-    pub fn is_truthy(&self) -> bool {
-        match self {
-            Self::Null | Self::Undefined => false,
-            Self::Boolean(b) => *b,
-            Self::Integer(i) => *i != 0,
-            Self::Number(n) => *n != 0.0 && !n.is_nan(),
-            Self::String(s) => !s.is_empty(),
-            Self::Array(a) => !a.is_empty(),
-            Self::Object(_) => true,
-        }
-    }
-}
-
-impl From<String> for QuickJSValue {
-    fn from(s: String) -> Self { Self::String(s) }
-}
-
-impl From<i64> for QuickJSValue {
-    fn from(i: i64) -> Self { Self::Integer(i) }
-}
-
-impl From<f64> for QuickJSValue {
-    fn from(n: f64) -> Self { Self::Number(n) }
-}
-
-impl From<bool> for QuickJSValue {
-    fn from(b: bool) -> Self { Self::Boolean(b) }
 }

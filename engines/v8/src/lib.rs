@@ -43,11 +43,11 @@ impl V8Engine {
         snapshot::V8Snapshot::create(&self.runtime)
     }
 
-    pub fn binding_eval(&self, code: &str) -> Result<String, V8Error> {
+    pub fn binding_eval(&mut self, code: &str) -> Result<String, V8Error> {
         self.binding.eval(code)
     }
 
-    pub fn call_function(&self, name: &str, args: &[&str]) -> Result<String, V8Error> {
+    pub fn call_function(&mut self, name: &str, args: &[&str]) -> Result<String, V8Error> {
         self.binding.call_function(name, args)
     }
 
@@ -63,7 +63,7 @@ impl V8Engine {
         self.binding.heap_statistics()
     }
 
-    pub fn eval_module(&self, filename: &str, source: &str) -> Result<String, V8Error> {
+    pub fn eval_module(&mut self, filename: &str, source: &str) -> Result<String, V8Error> {
         self.binding.eval_module(filename, source)
     }
 }
