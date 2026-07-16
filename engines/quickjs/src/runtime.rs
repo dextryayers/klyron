@@ -1,6 +1,7 @@
 use rquickjs::{Context, Runtime as QuickRuntime};
 
 pub struct QuickJSRuntime {
+    #[allow(dead_code)]
     runtime: QuickRuntime,
     context: Context,
 }
@@ -32,10 +33,11 @@ impl QuickJSRuntime {
             } else if value.is_null() || value.is_undefined() {
                 Ok("null".to_string())
             } else if value.is_object() || value.is_array() {
-                let json_str: String = rquickjs::function::stringify(ctx, value.clone())
-                    .map_err(|e| format!("JSON stringify error: {}", e))?
-                    .unwrap_or_default();
-                Ok(json_str)
+                let globals = ctx.globals();
+                let json: rquickjs::Object = globals.get("JSON").map_err(|e| format!("JSON get error: {}", e))?;
+                let stringify: rquickjs::Function = json.get("stringify").map_err(|e| format!("stringify get error: {}", e))?;
+                let result: String = stringify.call((value,)).map_err(|e| format!("stringify call error: {}", e))?;
+                Ok(result)
             } else {
                 Ok(value.get::<String>().unwrap_or_default())
             }

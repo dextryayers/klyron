@@ -12,6 +12,10 @@ pub mod integrity;
 pub mod rate_limit;
 pub mod scripts;
 pub mod dedupe;
+pub mod resolver;
+pub mod pack;
+pub mod install;
+pub mod publish;
 
 // ── Errors ───────────────────────────────────────────────────────────────────
 

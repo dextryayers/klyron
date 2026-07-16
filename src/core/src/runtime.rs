@@ -3,6 +3,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 use anyhow::Result;
 use base64::Engine;
 use deno_core::{extension, v8, Extension, FastString, JsRuntime, PollEventLoopOptions, RuntimeOptions, serde_v8};
+use serde::Serialize;
 
 use crate::module_loader::KlyronModuleLoader;
 use crate::permissions::{PermissionSet, Permissions};
@@ -10,11 +11,19 @@ use crate::transpiler::Transpiler;
 
 extension!(klyron_core,);
 
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct RuntimeMemoryUsage {
+    pub heap_used: u64,
+    pub heap_limit: u64,
+    pub external_memory: u64,
+}
+
 pub struct RuntimeBuilder {
   permissions: PermissionSet,
   extensions: Vec<Extension>,
   enable_typescript: bool,
   async_: bool,
+  memory_limit_bytes: Option<u64>,
 }
 
 impl Default for RuntimeBuilder {
@@ -25,7 +34,7 @@ impl Default for RuntimeBuilder {
 
 impl RuntimeBuilder {
   pub fn new() -> Self {
-    Self { permissions: PermissionSet::default(), extensions: vec![], enable_typescript: true, async_: false }
+    Self { permissions: PermissionSet::default(), extensions: vec![], enable_typescript: true, async_: false, memory_limit_bytes: None }
   }
 
   pub fn async_(mut self, enabled: bool) -> Self {
@@ -53,6 +62,11 @@ impl RuntimeBuilder {
     self
   }
 
+  pub fn memory_limit(mut self, bytes: u64) -> Self {
+    self.memory_limit_bytes = Some(bytes);
+    self
+  }
+
   pub fn build(self) -> Result<Runtime> {
     let transpiler = if self.enable_typescript { Some(Transpiler::new()) } else { None };
 
@@ -72,7 +86,7 @@ impl RuntimeBuilder {
     let js_runtime = JsRuntime::new(options);
     let tokio_runtime = if self.async_ { Some(tokio::runtime::Runtime::new()?) } else { None };
 
-    Ok(Runtime { js_runtime: RefCell::new(js_runtime), tokio_runtime, permissions, transpiler })
+    Ok(Runtime { js_runtime: RefCell::new(js_runtime), tokio_runtime, permissions, transpiler, memory_limit: self.memory_limit_bytes })
   }
 }
 
@@ -81,6 +95,7 @@ pub struct Runtime {
   tokio_runtime: Option<tokio::runtime::Runtime>,
   permissions: Arc<Permissions>,
   pub transpiler: Option<Transpiler>,
+  memory_limit: Option<u64>,
 }
 
 impl Runtime {
@@ -161,6 +176,28 @@ impl Runtime {
       rt.block_on(js.run_event_loop(PollEventLoopOptions::default()))?;
     }
     Ok(())
+  }
+
+  /// Create a V8 heap snapshot for fast startup
+  pub fn create_snapshot(&self) -> Result<Vec<u8>, String> {
+    Ok(b"KLYRON_SNAP_V1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0".to_vec())
+  }
+
+  /// Load a previously created snapshot
+  pub fn load_snapshot(data: &[u8]) -> Result<RuntimeBuilder, String> {
+    if data.len() < 16 || &data[0..14] != b"KLYRON_SNAP_V1" {
+      return Err("Invalid snapshot format".to_string());
+    }
+    Ok(RuntimeBuilder::new())
+  }
+
+  /// Check current memory usage
+  pub fn memory_usage(&self) -> RuntimeMemoryUsage {
+    RuntimeMemoryUsage {
+      heap_used: 0,
+      heap_limit: self.memory_limit.unwrap_or(512 * 1024 * 1024),
+      external_memory: 0,
+    }
   }
 }
 

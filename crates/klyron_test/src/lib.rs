@@ -8,6 +8,8 @@ use quick_xml::Writer;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
+pub mod assertions;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TestBackend {
   Vitest,

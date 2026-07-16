@@ -15,5 +15,4 @@ impl QuickJSBindingEngine {
     }
 }
 
-pub type QuickJSEngine = QuickJSBindingEngine;
 pub type QuickJSContext = QuickJSRuntime;

@@ -7,6 +7,8 @@ use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
+pub mod composer;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompatStatus {
   Compatible,
