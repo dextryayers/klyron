@@ -1,7 +1,0 @@
-{
-  "name": "Yii2",
-  "type": "polyglot-php",
-  "versions": ["2.0"],
-  "defaultVersion": "2.0",
-  "kind": "Backend"
-}

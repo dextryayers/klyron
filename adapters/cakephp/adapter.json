@@ -1,7 +1,0 @@
-{
-  "name": "CakePHP",
-  "type": "polyglot-php",
-  "versions": ["4.5", "5.0"],
-  "defaultVersion": "5.0",
-  "kind": "Backend"
-}

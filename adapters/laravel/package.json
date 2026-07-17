@@ -1,8 +1,0 @@
-{
-  "name": "@klyron/adapter-laravel",
-  "version": "1.0.0",
-  "private": true,
-  "description": "Laravel adapter for Klyron",
-  "main": "src/index.js",
-  "type": "module"
-}
