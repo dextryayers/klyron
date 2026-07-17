@@ -1,0 +1,1 @@
+{ "name": "midwayjs-app", "version": "1.0.0", "private": true, "scripts": { "dev": "midway-bin dev" }, "dependencies": { "@midwayjs/core": "^4.0.0", "@midwayjs/web": "^4.0.0" }, "devDependencies": { "typescript": "^5.7.0" } }

@@ -1,0 +1,1 @@
+{ "name": "elysia-app", "version": "1.0.0", "type": "module", "scripts": { "dev": "bun --watch src/index.ts" }, "dependencies": { "elysia": "^0.8.0" }, "devDependencies": { "typescript": "^5.1.0" } }

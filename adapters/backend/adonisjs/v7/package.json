@@ -1,0 +1,1 @@
+{ "name": "adonisjs-app", "version": "1.0.0", "private": true, "scripts": { "dev": "node ace serve --watch" }, "dependencies": { "@adonisjs/core": "^7.0.0" }, "devDependencies": { "typescript": "^5.7.0" } }

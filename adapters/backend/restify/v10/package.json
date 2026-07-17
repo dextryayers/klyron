@@ -1,0 +1,1 @@
+{ "name": "restify-app", "version": "1.0.0", "private": true, "scripts": { "start": "node server.js" }, "dependencies": { "restify": "^10.0.0" } }

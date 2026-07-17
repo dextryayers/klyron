@@ -1,0 +1,1 @@
+{ "name": "nestia-app", "version": "1.0.0", "private": true, "scripts": { "dev": "ts-node src/index.ts" }, "dependencies": { "nestia": "^1.0.0", "@nestjs/core": "^10.0.0", "@nestjs/common": "^10.0.0", "reflect-metadata": "^0.1.13" }, "devDependencies": { "typescript": "^4.7.0" } }

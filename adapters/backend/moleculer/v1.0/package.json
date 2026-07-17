@@ -1,0 +1,1 @@
+{ "name": "moleculer-app", "version": "1.0.0", "private": true, "scripts": { "dev": "moleculer-runner src/services" }, "dependencies": { "moleculer": "^1.0.0" }, "devDependencies": { "typescript": "^5.7.0" } }

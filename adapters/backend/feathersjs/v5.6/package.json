@@ -1,0 +1,1 @@
+{ "name": "feathersjs-app", "version": "1.0.0", "private": true, "scripts": { "dev": "npx tsx src/index.ts" }, "dependencies": { "@feathersjs/feathers": "^5.6.0", "@feathersjs/express": "^5.6.0" }, "devDependencies": { "typescript": "^5.4.0" } }

@@ -1,0 +1,1 @@
+{ "name": "loopback-app", "version": "1.0.0", "private": true, "scripts": { "start": "node ." }, "dependencies": { "@loopback/core": "^6.0.0", "@loopback/rest": "^6.0.0" }, "devDependencies": { "typescript": "^5.7.0" } }

@@ -1,0 +1,7 @@
+const express = require('express')
+const app = express()
+const server = require('http').createServer(app)
+const io = require('socket.io')(server)
+app.get('/', (req, res) => res.send('Hello Socket.IO'))
+io.on('connection', (socket) => { console.log('connected') })
+server.listen(3000)

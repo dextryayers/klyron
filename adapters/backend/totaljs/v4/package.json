@@ -1,0 +1,1 @@
+{ "name": "totaljs-app", "version": "1.0.0", "private": true, "scripts": { "start": "node index.js" }, "dependencies": { "total.js": "^4.0.0" } }

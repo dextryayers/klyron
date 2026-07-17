@@ -1,0 +1,1 @@
+{ "name": "hapi-app", "version": "1.0.0", "type": "module", "scripts": { "start": "node src/index.js" }, "dependencies": { "@hapi/hapi": "^21.0.0" } }

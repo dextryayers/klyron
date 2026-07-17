@@ -1,0 +1,1 @@
+{ "name": "nitro-app", "version": "1.0.0", "private": true, "type": "module", "scripts": { "dev": "nitro dev", "build": "nitro build" }, "dependencies": { "nitropack": "^2.0.0" }, "devDependencies": { "typescript": "^5.1.0" } }

@@ -1,0 +1,1 @@
+{ "name": "foalts-app", "version": "1.0.0", "private": true, "scripts": { "dev": "ts-node src/index.ts" }, "dependencies": { "@foal/core": "^2.0.0" }, "devDependencies": { "typescript": "^4.7.0" } }
