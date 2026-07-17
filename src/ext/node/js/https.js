@@ -1,4 +1,4 @@
-// https.js — TLS-terminated HTTP server/client.
+// https.js - TLS-terminated HTTP server/client.
 //
 // NOTE: klyron's net extension does not yet perform real TLS handshakes, so
 // https.createServer currently serves traffic over the same transport as

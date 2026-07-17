@@ -3674,6 +3674,8 @@ dependencies = [
  "anyhow",
  "deno_core",
  "deno_error",
+ "klyron-ext-crypto",
+ "klyron-ext-fs",
  "klyron-ext-net",
  "serde",
  "serde_json",
@@ -3712,6 +3714,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
