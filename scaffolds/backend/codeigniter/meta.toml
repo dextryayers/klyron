@@ -1,7 +1,0 @@
-[template]
-name = "CodeIgniter 4"
-description = "CodeIgniter 4 PHP framework with MySQL/PostgreSQL support"
-version = "1.0.0"
-author = "Klyron"
-kind = "backend"
-tags = ["php", "codeigniter", "mysql", "api"]

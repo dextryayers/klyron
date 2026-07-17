@@ -43,88 +43,13 @@ impl FrameworkAdapter for WintersmithAdapter {
     }
 
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        let project_dir = options.dir.join(name);
-        std::fs::create_dir_all(&project_dir)?;
-        std::fs::create_dir_all(project_dir.join("contents"))?;
-        std::fs::create_dir_all(project_dir.join("templates"))?;
-
-        let vars = &options.template_vars;
-
-        std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render_static(r#"{
-  "name": "{{ name }}",
-  "version": "1.0.0",
-  "private": true,
-  "scripts": {
-    "dev": "wintersmith preview",
-    "build": "wintersmith build"
-  },
-  "dependencies": { "wintersmith": "^2.5.0" }
-}"#, vars))?;
-
-        std::fs::write(project_dir.join("config.json"),
-            klyron_template::TemplateEngine::render_static(r#"{
-  "locals": { "url": "http://localhost:8080", "name": "{{ name }}", "owner": "Anonymous" },
-  "plugins": [],
-  "require": {}
-}"#, vars))?;
-
-        std::fs::write(project_dir.join("contents/index.md"),
-            klyron_template::TemplateEngine::render_static(r#"---
-title: Home
-template: index.jade
----
-
-# Welcome to {{ name }}
-
-This site was built with Wintersmith.
-"#, vars))?;
-
-        std::fs::write(project_dir.join("contents/about.md"),
-            r#"---
-title: About
-template: index.jade
----
-
-## About
-
-Static site generated with Wintersmith.
-"#)?;
-
-        std::fs::write(project_dir.join("templates/index.jade"),
-            klyron_template::TemplateEngine::render_static(r#"extends layout
-
-block content
-  article
-    != page.html
-"#, vars))?;
-
-        std::fs::write(project_dir.join("templates/layout.jade"),
-            klyron_template::TemplateEngine::render_static(r#"doctype html
-html(lang="en")
-  head
-    title= locals.name
-    meta(charset="utf-8")
-  body
-    header
-      h1= locals.name
-    main
-      block content
-    footer
-      p &copy; #{ locals.owner }
-"#, vars))?;
-
-        std::fs::write(project_dir.join(".gitignore"), "node_modules\nbuild\n.DS_Store\n")?;
-        std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
-
-Wintersmith static site
-
-## Getting Started
-
-npm run dev
-"#, vars))?;
-
-        Ok(())
+        if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+            let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+            if !status.success() { anyhow::bail!("External scaffolding failed"); }
+            Ok(())
+        } else {
+            std::fs::create_dir_all(options.dir.join(name))?;
+            Ok(())
+        }
     }
 }

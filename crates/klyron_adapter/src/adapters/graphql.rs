@@ -50,98 +50,13 @@ impl FrameworkAdapter for GraphqlAdapter {
     }
 
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        let project_dir = options.dir.join(name);
-        std::fs::create_dir_all(&project_dir)?;
-        std::fs::create_dir_all(project_dir.join("src"))?;
-
-        let vars = &options.template_vars;
-
-        std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render_static(r#"{
-  "name": "{{ name }}",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
-    "test": "jest",
-    "lint": "eslint .",
-    "format": "prettier --write ."
-  },
-  "dependencies": {
-    "graphql-yoga": "^3.0.0",
-    "graphql": "^16.9.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.6.0",
-    "tsx": "^4.19.0",
-    "jest": "^29.7.0",
-    "eslint": "^9.0.0",
-    "prettier": "^3.4.0"
-  }
-}"#, vars))?;
-
-        std::fs::write(project_dir.join("tsconfig.json"),
-            r#"{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "skipLibCheck": true,
-    "noEmit": true,
-    "isolatedModules": true
-  },
-  "include": ["src"]
-}"#)?;
-
-        std::fs::write(project_dir.join("src/index.ts"),
-            klyron_template::TemplateEngine::render_static(r#"import { createYoga } from 'graphql-yoga'
-import { createServer } from 'node:http'
-import { schema } from './schema'
-
-const yoga = createYoga({ schema })
-const server = createServer(yoga)
-
-server.listen(3000, () => {
-  console.log(`{{ name }} running on http://localhost:3000/graphql`)
-})
-"#, vars))?;
-
-        std::fs::write(project_dir.join("src/schema.ts"),
-            r#"import { buildSchema } from 'graphql'
-
-export const schema = buildSchema(`
-  type Query {
-    hello: String
-  }
-`)
-
-const root = {
-  hello: () => 'Hello World',
-}
-
-export { root }
-"#)?;
-
-        std::fs::write(project_dir.join(".gitignore"), "node_modules\n.DS_Store\n")?;
-        std::fs::write(project_dir.join(".prettierrc"),
-            r#"{"semi": true, "singleQuote": true, "tabWidth": 2, "trailingComma": "es5", "printWidth": 100}"#)?;
-        std::fs::write(project_dir.join("eslint.config.js"),
-            r#"import js from '@eslint/js'
-import tseslint from 'typescript-eslint'
-export default tseslint.config(js.configs.recommended, ...tseslint.configs.recommended, { ignores: ['node_modules'] })"#)?;
-        std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
-
-GraphQL Yoga API
-
-## Getting Started
-
-npm run dev
-"#, vars))?;
-
-        Ok(())
+        if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+            let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+            if !status.success() { anyhow::bail!("External scaffolding failed"); }
+            Ok(())
+        } else {
+            std::fs::create_dir_all(options.dir.join(name))?;
+            Ok(())
+        }
     }
 }

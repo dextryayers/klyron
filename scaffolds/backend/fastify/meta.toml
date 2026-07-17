@@ -1,7 +1,0 @@
-[template]
-name = "Fastify 5 API"
-description = "Fastify 5 REST API with TypeScript, plugins, and Zod validation"
-version = "1.0.0"
-author = "Klyron"
-kind = "backend"
-tags = ["fastify", "node", "typescript", "rest-api"]

@@ -1,7 +1,0 @@
-[template]
-name = "Go Gin API"
-description = "Go REST API with Gin framework and GORM"
-version = "1.0.0"
-author = "Klyron"
-kind = "polyglot"
-tags = ["go", "gin", "gorm", "rest-api"]

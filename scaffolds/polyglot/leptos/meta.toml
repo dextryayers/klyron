@@ -1,7 +1,0 @@
-[template]
-name = "Rust Leptos"
-description = "Rust fullstack application with Leptos CSR/SSR"
-version = "1.0.0"
-author = "Klyron"
-kind = "polyglot"
-tags = ["rust", "leptos", "wasm", "fullstack"]

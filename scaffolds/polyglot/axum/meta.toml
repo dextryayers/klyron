@@ -1,7 +1,0 @@
-[template]
-name = "Rust Axum API"
-description = "Rust REST API with Axum and SeaORM"
-version = "1.0.0"
-author = "Klyron"
-kind = "polyglot"
-tags = ["rust", "axum", "seaorm", "rest-api"]

@@ -1,7 +1,0 @@
-[template]
-name = "Go Echo API"
-description = "Go REST API with Echo framework and GORM"
-version = "1.0.0"
-author = "Klyron"
-kind = "polyglot"
-tags = ["go", "echo", "gorm", "rest-api"]

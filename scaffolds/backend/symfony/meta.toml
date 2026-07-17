@@ -1,7 +1,0 @@
-[template]
-name = "Symfony"
-description = "Symfony PHP framework with Doctrine, Twig, MakerBundle"
-version = "1.0.0"
-author = "Klyron"
-kind = "backend"
-tags = ["php", "symfony", "doctrine", "api"]

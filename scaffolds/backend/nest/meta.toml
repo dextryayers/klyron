@@ -1,7 +1,0 @@
-[template]
-name = "NestJS 11 API"
-description = "NestJS 11 REST API with TypeScript, Swagger, TypeORM, and testing"
-version = "1.0.0"
-author = "Klyron"
-kind = "backend"
-tags = ["nestjs", "node", "typescript", "rest-api"]

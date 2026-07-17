@@ -43,108 +43,13 @@ impl FrameworkAdapter for MetalsmithAdapter {
     }
 
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        let project_dir = options.dir.join(name);
-        std::fs::create_dir_all(&project_dir)?;
-        std::fs::create_dir_all(project_dir.join("src"))?;
-        std::fs::create_dir_all(project_dir.join("layouts"))?;
-        std::fs::create_dir_all(project_dir.join("partials"))?;
-
-        let vars = &options.template_vars;
-
-        std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render_static(r#"{
-  "name": "{{ name }}",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "metalsmith --watch",
-    "build": "node build.js"
-  },
-  "dependencies": {
-    "metalsmith": "^2.6.0",
-    "metalsmith-layouts": "^2.6.0",
-    "metalsmith-markdown": "^1.4.0",
-    "handlebars": "^4.7.0"
-  }
-}"#, vars))?;
-
-        std::fs::write(project_dir.join("build.js"),
-            klyron_template::TemplateEngine::render_static(r#"import Metalsmith from 'metalsmith'
-import markdown from 'metalsmith-markdown'
-import layouts from 'metalsmith-layouts'
-
-Metalsmith(__dirname)
-  .source('./src')
-  .destination('./build')
-  .use(markdown())
-  .use(layouts({ engine: 'handlebars', directory: './layouts' }))
-  .build(err => { if (err) throw err })
-"#, vars))?;
-
-        std::fs::write(project_dir.join("src/index.md"),
-            klyron_template::TemplateEngine::render_static(r#"---
-title: Home
-layout: layout.hbs
----
-
-# Welcome to {{ name }}
-
-This site was built with Metalsmith.
-"#, vars))?;
-
-        std::fs::write(project_dir.join("src/about.md"),
-            r#"---
-title: About
-layout: layout.hbs
----
-
-## About
-
-Static site generated with Metalsmith.
-"#)?;
-
-        std::fs::write(project_dir.join("layouts/layout.hbs"),
-            klyron_template::TemplateEngine::render_static(r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>{{ title }}</title>
-</head>
-<body>
-  {{> header}}
-  <main>{{{ contents }}}</main>
-  {{> footer}}
-</body>
-</html>
-"#, vars))?;
-
-        std::fs::write(project_dir.join("partials/header.hbs"),
-            klyron_template::TemplateEngine::render_static(r#"<header>
-  <h1>{{ name }}</h1>
-  <nav><a href="/">Home</a> | <a href="/about">About</a></nav>
-</header>
-"#, vars))?;
-
-        std::fs::write(project_dir.join("partials/footer.hbs"),
-            r#"<footer>
-  <p>Powered by Metalsmith</p>
-</footer>
-"#)?;
-
-        std::fs::write(project_dir.join(".gitignore"), "node_modules\nbuild\n.DS_Store\n")?;
-        std::fs::write(project_dir.join(".prettierrc"),
-            r#"{"semi": false, "singleQuote": true, "tabWidth": 2, "trailingComma": "es5", "printWidth": 100}"#)?;
-        std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
-
-Metalsmith static site
-
-## Getting Started
-
-npm run build
-"#, vars))?;
-
-        Ok(())
+        if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+            let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+            if !status.success() { anyhow::bail!("External scaffolding failed"); }
+            Ok(())
+        } else {
+            std::fs::create_dir_all(options.dir.join(name))?;
+            Ok(())
+        }
     }
 }

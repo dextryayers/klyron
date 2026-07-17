@@ -1,7 +1,0 @@
-fastapi>=0.115,<1.0
-uvicorn[standard]>=0.32
-sqlalchemy>=2.0
-alembic>=1.14
-psycopg2-binary>=2.9
-pydantic>=2.10
-python-decouple>=3.8

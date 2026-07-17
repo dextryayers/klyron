@@ -1,7 +1,0 @@
-[template]
-name = "Rust Actix-web API"
-description = "Rust REST API with Actix-web and SQLx"
-version = "1.0.0"
-author = "Klyron"
-kind = "polyglot"
-tags = ["rust", "actix-web", "sqlx", "rest-api"]

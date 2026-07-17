@@ -43,85 +43,13 @@ impl FrameworkAdapter for DocPadAdapter {
     }
 
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        let project_dir = options.dir.join(name);
-        std::fs::create_dir_all(&project_dir)?;
-        std::fs::create_dir_all(project_dir.join("src/documents"))?;
-        std::fs::create_dir_all(project_dir.join("src/layouts"))?;
-
-        let vars = &options.template_vars;
-
-        std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render_static(r#"{
-  "name": "{{ name }}",
-  "version": "1.0.0",
-  "private": true,
-  "scripts": {
-    "dev": "docpad run",
-    "build": "docpad generate"
-  },
-  "dependencies": { "docpad": "^6.82.0" }
-}"#, vars))?;
-
-        std::fs::write(project_dir.join("docpad.coffee"),
-            klyron_template::TemplateEngine::render_static(r#"# DocPad Configuration
-docpadConfig = {
-  templateData:
-    site:
-      title: "{{ name }}"
-      description: "A DocPad site"
-}
-module.exports = docpadConfig
-"#, vars))?;
-
-        std::fs::write(project_dir.join("src/documents/index.html.md"),
-            klyron_template::TemplateEngine::render_static(r#"---
-layout: default
-title: Home
----
-
-# Welcome to {{ name }}
-
-This site was built with DocPad.
-"#, vars))?;
-
-        std::fs::write(project_dir.join("src/documents/about.html.md"),
-            r#"---
-layout: default
-title: About
----
-
-## About
-
-Static site generated with DocPad.
-"#)?;
-
-        std::fs::write(project_dir.join("src/layouts/default.html.eco"),
-            klyron_template::TemplateEngine::render_static(r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title><%= @site.title %></title>
-</head>
-<body>
-  <header><h1><%= @site.title %></h1></header>
-  <main><%- @content %></main>
-</body>
-</html>
-"#, vars))?;
-
-        std::fs::write(project_dir.join(".gitignore"), "node_modules\nout\n.DS_Store\n")?;
-        std::fs::write(project_dir.join(".prettierrc"),
-            r#"{"semi": false, "singleQuote": true, "tabWidth": 2, "trailingComma": "es5", "printWidth": 100}"#)?;
-        std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
-
-DocPad static site
-
-## Getting Started
-
-npm run dev
-"#, vars))?;
-
-        Ok(())
+        if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+            let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+            if !status.success() { anyhow::bail!("External scaffolding failed"); }
+            Ok(())
+        } else {
+            std::fs::create_dir_all(options.dir.join(name))?;
+            Ok(())
+        }
     }
 }

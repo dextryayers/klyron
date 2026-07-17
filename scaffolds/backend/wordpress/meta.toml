@@ -1,7 +1,0 @@
-[template]
-name = "WordPress"
-description = "WordPress CMS with custom theme and plugin structure"
-version = "1.0.0"
-author = "Klyron"
-kind = "backend"
-tags = ["php", "wordpress", "cms", "blog"]

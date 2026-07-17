@@ -1,7 +1,0 @@
-[template]
-name = "Python FastAPI"
-description = "Python FastAPI with SQLAlchemy, Pydantic, Alembic, and testing"
-version = "1.0.0"
-author = "Klyron"
-kind = "polyglot"
-tags = ["python", "fastapi", "sqlalchemy", "rest-api"]

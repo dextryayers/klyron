@@ -1,7 +1,0 @@
-[template]
-name = "Rails 8"
-description = "Ruby on Rails 8 API with PostgreSQL, RSpec, and Devise JWT auth"
-version = "1.0.0"
-author = "Klyron"
-kind = "polyglot"
-tags = ["rails", "ruby", "postgresql", "api"]

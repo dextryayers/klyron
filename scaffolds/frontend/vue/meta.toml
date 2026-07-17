@@ -1,7 +1,0 @@
-[template]
-name = "Vue 3 + Vite"
-description = "Vue 3 application with Vite, TypeScript, Pinia, Vue Router, ESLint, and Prettier"
-version = "1.0.0"
-author = "Klyron"
-kind = "frontend"
-tags = ["vue", "vite", "typescript", "spa"]

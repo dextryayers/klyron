@@ -60,55 +60,13 @@ impl FrameworkAdapter for ExpressAdapter {
     }
 
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        if options.external {
-            if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
-                let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
-                if !status.success() { anyhow::bail!("External scaffolding failed"); }
-                return Ok(());
-            }
+        if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+            let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+            if !status.success() { anyhow::bail!("External scaffolding failed"); }
+            Ok(())
+        } else {
+            std::fs::create_dir_all(options.dir.join(name))?;
+            Ok(())
         }
-        let project_dir = options.dir.join(name);
-        std::fs::create_dir_all(&project_dir)?;
-        std::fs::create_dir_all(project_dir.join("src/routes"))?;
-        std::fs::create_dir_all(project_dir.join("src/middleware"))?;
-
-        let vars = &options.template_vars;
-
-        std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render_static(r#"{
-  "name": "{{ name }}", "version": "1.0.0", "private": true, "type": "module",
-  "scripts": { "dev": "node --watch src/index.js", "start": "node src/index.js", "test": "jest", "lint": "eslint .", "format": "prettier --write ." },
-  "dependencies": { "express": "^5.1.0", "cors": "^2.8.5", "morgan": "^1.10.0" },
-  "devDependencies": { "jest": "^30.0.0", "eslint": "^9.20.0", "prettier": "^3.5.0" }
-}"#, vars))?;
-
-        std::fs::write(project_dir.join("src/index.js"),
-            klyron_template::TemplateEngine::render_static(r#"import express from 'express'
-import cors from 'cors'
-import morgan from 'morgan'
-import routes from './routes/index.js'
-const app = express()
-const port = process.env.PORT || 3000
-app.use(cors()); app.use(morgan('dev')); app.use(express.json())
-app.use('/', routes)
-app.listen(port, () => console.log(`{{ name }} running on http://localhost:${port}`))
-"#, vars))?;
-
-        std::fs::write(project_dir.join("src/routes/index.js"),
-            r#"import { Router } from 'express'
-const router = Router()
-router.get('/', (req, res) => res.json({ message: 'Hello World' }))
-export default router"#)?;
-
-        std::fs::write(project_dir.join("src/middleware/error.js"),
-            r#"export function errorHandler(err, req, res, next) { console.error(err.stack); res.status(500).json({ error: err.message }) }"#)?;
-
-        std::fs::write(project_dir.join(".gitignore"), "node_modules\n.DS_Store\n")?;
-        std::fs::write(project_dir.join(".prettierrc"), r#"{"semi": true, "singleQuote": true, "tabWidth": 2, "trailingComma": "es5", "printWidth": 100}"#)?;
-        std::fs::write(project_dir.join("eslint.config.js"), r#"import js from '@eslint/js'\nexport default [js.configs.recommended, { ignores: ['node_modules'] }]"#)?;
-        std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render_static(r#"# {{ name }}\nExpress.js API\nnpm run dev"#, vars))?;
-
-        Ok(())
     }
 }

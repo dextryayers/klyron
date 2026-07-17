@@ -1,7 +1,0 @@
-[template]
-name = "AdonisJS 6 API"
-description = "AdonisJS 6 REST API with TypeScript, Lucid ORM, VineJS, and JWT auth"
-version = "1.0.0"
-author = "Klyron"
-kind = "backend"
-tags = ["adonisjs", "node", "typescript", "rest-api"]

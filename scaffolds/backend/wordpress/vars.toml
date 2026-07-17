@@ -1,5 +1,0 @@
-[variables]
-name = { type = "string", prompt = "Project name", default = "my-wordpress-site" }
-description = { type = "string", prompt = "Site description", default = "A WordPress site" }
-author = { type = "string", prompt = "Author name", default = "Klyron" }
-version = { type = "string", prompt = "WordPress version", default = "6.7" }

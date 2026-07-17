@@ -1,7 +1,0 @@
-[template]
-name = "React + Vite"
-description = "React 19 application with Vite, TypeScript, ESLint, Prettier, and Vitest"
-version = "1.0.0"
-author = "Klyron"
-kind = "frontend"
-tags = ["react", "vite", "typescript", "spa"]

@@ -1,7 +1,0 @@
-[template]
-name = "Express.js API"
-description = "Express.js REST API with TypeScript, middleware structure, and ESLint"
-version = "1.0.0"
-author = "Klyron"
-kind = "backend"
-tags = ["express", "node", "typescript", "rest-api"]

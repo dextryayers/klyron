@@ -1,7 +1,0 @@
-[template]
-name = "Laravel + Livewire 3"
-description = "Laravel with Livewire 3, Volt, Alpine.js, Tailwind CSS, and Vite"
-version = "1.0.0"
-author = "Klyron"
-kind = "laravel"
-tags = ["laravel", "livewire", "volt", "alpinejs", "tailwind"]

@@ -1,7 +1,0 @@
-[template]
-name = "Django 5"
-description = "Django 5 application with DRF, PostgreSQL, Celery, and testing"
-version = "1.0.0"
-author = "Klyron"
-kind = "polyglot"
-tags = ["django", "python", "rest-framework", "postgresql"]

@@ -1,7 +1,0 @@
-[template]
-name = "Lit 3 + Vite"
-description = "Lit 3 application with Vite, TypeScript, and ESLint"
-version = "1.0.0"
-author = "Klyron"
-kind = "frontend"
-tags = ["lit", "vite", "typescript", "web-components"]

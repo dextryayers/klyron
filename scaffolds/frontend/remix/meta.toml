@@ -1,7 +1,0 @@
-[template]
-name = "Remix + Vite"
-description = "Remix application with Vite, TypeScript, Tailwind CSS, and ESLint"
-version = "1.0.0"
-author = "Klyron"
-kind = "frontend"
-tags = ["remix", "react", "typescript", "ssr"]

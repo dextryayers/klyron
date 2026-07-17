@@ -50,80 +50,13 @@ impl FrameworkAdapter for HapiAdapter {
     }
 
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        let project_dir = options.dir.join(name);
-        std::fs::create_dir_all(&project_dir)?;
-        std::fs::create_dir_all(project_dir.join("src/routes"))?;
-        std::fs::create_dir_all(project_dir.join("src/plugins"))?;
-
-        let vars = &options.template_vars;
-
-        std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render_static(r#"{
-  "name": "{{ name }}",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "node --watch src/index.js",
-    "start": "node src/index.js",
-    "test": "jest",
-    "lint": "eslint .",
-    "format": "prettier --write ."
-  },
-  "dependencies": { "@hapi/hapi": "^21.0.0" },
-  "devDependencies": { "jest": "^29.7.0", "eslint": "^9.0.0", "prettier": "^3.4.0" }
-}"#, vars))?;
-
-        std::fs::write(project_dir.join("src/index.js"),
-            klyron_template::TemplateEngine::render_static(r#"import Hapi from '@hapi/hapi'
-import routes from './routes/index.js'
-
-const init = async () => {
-  const server = Hapi.server({ port: process.env.PORT || 3000, host: 'localhost' })
-  server.route(routes)
-  await server.start()
-  console.log(`{{ name }} running on ${server.info.uri}`)
-}
-
-init()
-"#, vars))?;
-
-        std::fs::write(project_dir.join("src/routes/index.js"),
-            r#"export default [
-  {
-    method: 'GET',
-    path: '/',
-    handler: (request, h) => ({ message: 'Hello World' }),
-  },
-]
-"#)?;
-
-        std::fs::write(project_dir.join("src/plugins/register.js"),
-            r#"export default {
-  name: 'my-plugin',
-  version: '1.0.0',
-  register: async function (server, options) {
-    server.expose('key', 'value')
-  },
-}
-"#)?;
-
-        std::fs::write(project_dir.join(".gitignore"), "node_modules\n.DS_Store\n")?;
-        std::fs::write(project_dir.join(".prettierrc"),
-            r#"{"semi": true, "singleQuote": true, "tabWidth": 2, "trailingComma": "es5", "printWidth": 100}"#)?;
-        std::fs::write(project_dir.join("eslint.config.js"),
-            r#"import js from '@eslint/js'
-export default [js.configs.recommended, { ignores: ['node_modules'] }]"#)?;
-        std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
-
-Hapi.js API
-
-## Getting Started
-
-npm run dev
-"#, vars))?;
-
-        Ok(())
+        if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+            let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+            if !status.success() { anyhow::bail!("External scaffolding failed"); }
+            Ok(())
+        } else {
+            std::fs::create_dir_all(options.dir.join(name))?;
+            Ok(())
+        }
     }
 }

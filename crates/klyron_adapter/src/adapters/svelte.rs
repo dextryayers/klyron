@@ -57,120 +57,13 @@ impl FrameworkAdapter for SvelteAdapter {
     }
 
     async fn scaffold(&self, name: &str, options: ScaffoldOptions) -> Result<()> {
-        let project_dir = options.dir.join(name);
-        std::fs::create_dir_all(&project_dir)?;
-        std::fs::create_dir_all(project_dir.join("src"))?;
-
-        let vars = &options.template_vars;
-
-        std::fs::write(project_dir.join("package.json"),
-            klyron_template::TemplateEngine::render_static(r#"{
-  "name": "{{ name }}",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "test": "vitest run",
-    "lint": "eslint .",
-    "format": "prettier --write ."
-  },
-  "dependencies": { "svelte": "^5.0.0" },
-  "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^5.0.0",
-    "vite": "^6.0.0",
-    "vitest": "^2.1.0",
-    "eslint": "^9.0.0",
-    "eslint-plugin-svelte": "^2.0.0",
-    "prettier": "^3.4.0",
-    "prettier-plugin-svelte": "^3.0.0"
-  }
-}"#, vars))?;
-
-        std::fs::write(project_dir.join("vite.config.ts"),
-            r#"import { defineConfig } from 'vite'
-import { svelte } from '@sveltejs/vite-plugin-svelte'
-
-export default defineConfig({
-  plugins: [svelte()],
-  server: { port: 5173, host: true },
-})"#)?;
-
-        std::fs::write(project_dir.join("tsconfig.json"),
-            r#"{
-  "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "strict": true,
-    "skipLibCheck": true
-  },
-  "include": ["src"]
-}"#)?;
-
-        std::fs::write(project_dir.join("index.html"),
-            klyron_template::TemplateEngine::render_static(r#"<!doctype html>
-<html lang="en">
-  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>{{ name }}</title></head>
-  <body><div id="app"></div><script type="module" src="/src/main.js"></script></body>
-</html>"#, vars))?;
-
-        std::fs::write(project_dir.join("src/main.js"),
-            r#"import App from './App.svelte'
-import { mount } from 'svelte'
-
-const app = mount(App, { target: document.getElementById('app')! })
-
-export default app
-"#)?;
-
-        std::fs::write(project_dir.join("src/App.svelte"),
-            klyron_template::TemplateEngine::render_static(r#"<script>
-  let name = '{{ name }}'
-</script>
-
-<h1>Welcome to {name}</h1>
-"#, vars))?;
-
-        std::fs::write(project_dir.join("src/app.css"),
-            r#"* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: system-ui, sans-serif; min-height: 100vh; }
-#app { max-width: 1280px; margin: 0 auto; padding: 2rem; }
-"#)?;
-
-        std::fs::write(project_dir.join("src/vite-env.d.ts"),
-            r#"/// <reference types="svelte" />
-/// <reference types="vite/client" />"#)?;
-
-        std::fs::write(project_dir.join(".gitignore"), "node_modules\ndist\n.DS_Store\n")?;
-        std::fs::write(project_dir.join(".prettierrc"),
-            r#"{"semi": false, "singleQuote": true, "tabWidth": 2, "trailingComma": "es5", "printWidth": 100, "plugins": ["prettier-plugin-svelte"]}"#)?;
-        std::fs::write(project_dir.join("eslint.config.js"),
-            r#"import js from '@eslint/js'
-import tseslint from 'typescript-eslint'
-import svelte from 'eslint-plugin-svelte'
-
-export default tseslint.config(
-  js.configs.recommended,
-  ...tseslint.configs.recommended,
-  ...svelte.configs.recommended,
-  { ignores: ['dist'] },
-)"#)?;
-        std::fs::write(project_dir.join("README.md"),
-            klyron_template::TemplateEngine::render_static(r#"# {{ name }}
-
-Svelte project
-
-## Getting Started
-
-npm run dev
-"#, vars))?;
-
-        Ok(())
+        if let Some((cmd, args)) = self.external_scaffold_command(name, options.version.as_deref()) {
+            let status = std::process::Command::new(&cmd).args(&args).current_dir(&options.dir).status()?;
+            if !status.success() { anyhow::bail!("External scaffolding failed"); }
+            Ok(())
+        } else {
+            std::fs::create_dir_all(options.dir.join(name))?;
+            Ok(())
+        }
     }
 }

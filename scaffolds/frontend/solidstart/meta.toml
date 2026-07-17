@@ -1,7 +1,0 @@
-[template]
-name = "SolidStart"
-description = "SolidStart application with TypeScript, Tailwind CSS, and ESLint"
-version = "1.0.0"
-author = "Klyron"
-kind = "frontend"
-tags = ["solidstart", "solidjs", "typescript", "ssr"]

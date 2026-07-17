@@ -1,9 +1,0 @@
-{
-  "env": { "browser": true, "es2020": true },
-  "extends": ["eslint:recommended", "plugin:solid/typescript"],
-  "parser": "@typescript-eslint/parser",
-  "plugins": ["solid"],
-  "rules": {
-    "solid/no-destructure": "off"
-  }
-}
