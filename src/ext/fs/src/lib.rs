@@ -6,7 +6,7 @@ use serde::Serialize;
 
 extension!(
   klyron_fs,
-  ops = [op_fs_read_file, op_fs_write_file, op_fs_mkdir, op_fs_read_dir, op_fs_stat, op_fs_exists, op_fs_remove, op_fs_copy, op_fs_rename],
+  ops = [op_fs_read_file, op_fs_write_file, op_fs_mkdir, op_fs_read_dir, op_fs_stat, op_fs_lstat, op_fs_exists, op_fs_remove, op_fs_copy, op_fs_rename, op_fs_realpath, op_fs_chmod, op_fs_readlink, op_fs_truncate, op_fs_mkdtemp],
   esm_entry_point = "ext:klyron_fs/fs.js",
   esm = [dir "js", "fs.js"],
 );
@@ -136,6 +136,108 @@ fn op_fs_rename_impl(src: String, dest: String) -> Result<(), JsErrorBox> {
 #[op2(fast)]
 fn op_fs_rename(#[string] src: String, #[string] dest: String) -> Result<(), JsErrorBox> {
   op_fs_rename_impl(src, dest)
+}
+
+fn op_fs_realpath_impl(path: String) -> Result<String, JsErrorBox> {
+  std::fs::canonicalize(&path)
+    .map(|p| p.to_string_lossy().to_string())
+    .map_err(|e| JsErrorBox::generic(format!("realpath {path}: {e}")))
+}
+
+#[op2]
+#[string]
+fn op_fs_realpath(#[string] path: String) -> Result<String, JsErrorBox> {
+  op_fs_realpath_impl(path)
+}
+
+fn op_fs_chmod_impl(path: String, mode: u32) -> Result<(), JsErrorBox> {
+  #[cfg(unix)]
+  {
+    use std::os::unix::fs::PermissionsExt;
+    let perms = std::fs::Permissions::from_mode(mode);
+    std::fs::set_permissions(&path, perms)
+      .map_err(|e| JsErrorBox::generic(format!("chmod {path}: {e}")))
+  }
+  #[cfg(not(unix))]
+  {
+    let _ = (path, mode);
+    Ok(())
+  }
+}
+
+#[op2(fast)]
+fn op_fs_chmod(#[string] path: String, mode: u32) -> Result<(), JsErrorBox> {
+  op_fs_chmod_impl(path, mode)
+}
+
+#[derive(Serialize)]
+struct SymlinkInfo {
+  is_file: bool,
+  is_dir: bool,
+  is_symlink: bool,
+  size: u64,
+}
+
+fn op_fs_lstat_impl(path: String) -> Result<SymlinkInfo, JsErrorBox> {
+  let meta = std::fs::symlink_metadata(&path)
+    .map_err(|e| JsErrorBox::generic(format!("lstat {path}: {e}")))?;
+  Ok(SymlinkInfo {
+    is_file: meta.is_file(),
+    is_dir: meta.is_dir(),
+    is_symlink: meta.is_symlink(),
+    size: meta.len(),
+  })
+}
+
+#[op2]
+#[serde]
+fn op_fs_lstat(#[string] path: String) -> Result<SymlinkInfo, JsErrorBox> {
+  op_fs_lstat_impl(path)
+}
+
+fn op_fs_readlink_impl(path: String) -> Result<String, JsErrorBox> {
+  std::fs::read_link(&path)
+    .map(|p| p.to_string_lossy().to_string())
+    .map_err(|e| JsErrorBox::generic(format!("readlink {path}: {e}")))
+}
+
+#[op2]
+#[string]
+fn op_fs_readlink(#[string] path: String) -> Result<String, JsErrorBox> {
+  op_fs_readlink_impl(path)
+}
+
+fn op_fs_truncate_impl(path: String, len: i64) -> Result<(), JsErrorBox> {
+  let f = std::fs::OpenOptions::new().write(true).open(&path)
+    .map_err(|e| JsErrorBox::generic(format!("truncate open {path}: {e}")))?;
+  if len >= 0 {
+    f.set_len(len as u64)
+      .map_err(|e| JsErrorBox::generic(format!("truncate {path}: {e}")))
+  } else {
+    Ok(())
+  }
+}
+
+#[op2(fast)]
+fn op_fs_truncate(#[string] path: String, len: i32) -> Result<(), JsErrorBox> {
+  op_fs_truncate_impl(path, len as i64)
+}
+
+fn op_fs_mkdtemp_impl(prefix: String) -> Result<String, JsErrorBox> {
+  let base = std::env::temp_dir();
+  for i in 0..1000 {
+    let dir = base.join(format!("{prefix}{i:04x}"));
+    if std::fs::create_dir(&dir).is_ok() {
+      return Ok(dir.to_string_lossy().to_string());
+    }
+  }
+  Err(JsErrorBox::generic(format!("mkdtemp {prefix}: failed after 1000 attempts")))
+}
+
+#[op2]
+#[string]
+fn op_fs_mkdtemp(#[string] prefix: String) -> Result<String, JsErrorBox> {
+  op_fs_mkdtemp_impl(prefix)
 }
 
 #[cfg(test)]

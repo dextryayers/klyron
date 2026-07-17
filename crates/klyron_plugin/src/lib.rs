@@ -358,7 +358,7 @@ impl PluginRegistry {
     }
 
     pub fn unload(&mut self, name: &str) -> Result<()> {
-        if let Some(plugin) = self.plugins.remove(name) {
+        if self.plugins.remove(name).is_some() {
             self.hook_registry.unregister(name);
 
             self.emit(PluginEvent::Removed {
@@ -539,7 +539,7 @@ impl PluginRegistry {
         info.enabled = !info.enabled;
         let enabled = info.enabled;
         let name_owned = name.to_string();
-        drop(info);
+        let _ = info;
 
         if !self.no_rollback {
             self.rollback_stack.push(RollbackEntry::Enable {

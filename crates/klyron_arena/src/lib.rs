@@ -1,6 +1,5 @@
 use std::alloc::{alloc, dealloc, Layout};
 use std::cell::UnsafeCell;
-use std::marker::PhantomData;
 use std::mem;
 use std::ptr::NonNull;
 
@@ -33,7 +32,7 @@ impl Chunk {
             panic!("Arena chunk out of memory");
         }
         self.pos = end - self.ptr.as_ptr() as usize;
-        NonNull::new_unchecked(start_aligned as *mut u8)
+        unsafe { NonNull::new_unchecked(start_aligned as *mut u8) }
     }
 }
 

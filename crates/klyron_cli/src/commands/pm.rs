@@ -1,6 +1,4 @@
 use clap::Args;
-use klyron_pm::KlyronLockfile;
-use klyron_pm::lockfile;
 use std::path::{Path, PathBuf};
 
 #[derive(Args)]
@@ -81,10 +79,7 @@ pub fn run_add(packages: &[String], dev: bool) -> anyhow::Result<()> {
 
     match project {
         "node" => {
-            let mut args = vec!["install".to_string()];
-            if dev { args.push("--save-dev".to_string()); }
-            args.extend(packages.iter().cloned());
-            crate::run_cmd(pm, &args.iter().map(|s| s.as_str()).collect::<Vec<_>>(), &dir)
+            add_packages_node(&dir, packages, dev)
         }
         "laravel" => {
             let mut args = vec!["require"];
@@ -113,6 +108,128 @@ pub fn run_add(packages: &[String], dev: bool) -> anyhow::Result<()> {
         }
         _ => anyhow::bail!("Package add not supported for {project}"),
     }
+}
+
+/// Resolve, download and record packages into package.json + klyron.lock
+/// using klyron's own registry client (no npm delegation).
+fn add_packages_node(dir: &Path, packages: &[String], dev: bool) -> anyhow::Result<()> {
+    use klyron_pm::resolver::fetch_package_metadata;
+    use klyron_pm::{download_and_extract_tarball, lockfile::LockfilePackage,
+                    KlyronLockfile};
+    use semver::{Version, VersionReq};
+
+    let pkg_path = dir.join("package.json");
+    let mut pkg: serde_json::Value = if pkg_path.exists() {
+        let content = std::fs::read_to_string(&pkg_path)?;
+        serde_json::from_str(&content)?
+    } else {
+        serde_json::json!({"name": "my-app", "version": "1.0.0"})
+    };
+    if !pkg.is_object() {
+        anyhow::bail!("package.json is not an object");
+    }
+
+    let dep_key = if dev { "devDependencies" } else { "dependencies" };
+    let mut deps_obj = pkg
+        .get_mut(dep_key)
+        .cloned()
+        .and_then(|v| if v.is_object() { Some(v) } else { None })
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let nm = dir.join("node_modules");
+    std::fs::create_dir_all(&nm)?;
+
+    let mut new_entries: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    for spec in packages {
+        let (name, range) = match spec.split_once('@') {
+            Some((n, r)) if !n.is_empty() => (n.to_string(), r.to_string()),
+            _ => (spec.clone(), "*".to_string()),
+        };
+        let meta = fetch_package_metadata(&name)
+            .map_err(|e| anyhow::anyhow!("Failed to fetch {}: {e}", name))?;
+
+        let chosen = if range == "*" || range.is_empty() {
+            meta.dist_tags
+                .get("latest")
+                .and_then(|v| Version::parse(v).ok())
+                .or_else(|| {
+                    meta.versions
+                        .keys()
+                        .filter_map(|v| Version::parse(v).ok())
+                        .max()
+                })
+        } else {
+            let req = VersionReq::parse(&range).map_err(|e| anyhow::anyhow!("{e}"))?;
+            meta.versions
+                .keys()
+                .filter_map(|v| Version::parse(v).ok())
+                .filter(|v| req.matches(v))
+                .max()
+        };
+        let ver = chosen.ok_or_else(|| anyhow::anyhow!("No version of {name} matches {range}"))?;
+        let ver_str = ver.to_string();
+
+        let url = meta
+            .versions
+            .get(&ver_str)
+            .map(|vm| vm.resolved.clone())
+            .filter(|u| !u.is_empty())
+            .unwrap_or_else(|| {
+                format!("https://registry.npmjs.org/{name}/-/{name}-{ver_str}.tgz")
+            });
+
+        let pkg_dir = nm.join(&name);
+        if !pkg_dir.join("package.json").exists() {
+            download_and_extract_tarball(&url, &pkg_dir)
+                .map_err(|e| anyhow::anyhow!("Failed to download {name}: {e}"))?;
+        }
+        new_entries.insert(name.clone(), ver_str.clone());
+
+        if let Some(obj) = deps_obj.as_object_mut() {
+            obj.insert(name.clone(), serde_json::Value::String(ver_str.clone()));
+            pkg.as_object_mut()
+                .unwrap()
+                .insert(dep_key.to_string(), deps_obj.clone());
+        }
+        println!("{} added {}@{}", if dev { "devDependency" } else { "dependency" }, name, ver_str);
+    }
+
+    std::fs::write(&pkg_path, serde_json::to_string_pretty(&pkg)?)?;
+
+    // Update klyron.lock (binary). Load existing, merge, write back.
+    let lock_path = dir.join("klyron.lock");
+    let mut lock = if lock_path.exists() {
+        let data = std::fs::read(&lock_path)?;
+        KlyronLockfile::from_bytes(&data).map_err(|e| anyhow::anyhow!("{e}"))?
+    } else {
+        KlyronLockfile::new()
+    };
+    for (name, ver_str) in &new_entries {
+        let url = format!("https://registry.npmjs.org/{name}/-/{name}-{ver_str}.tgz");
+        lock.packages.insert(
+            name.clone(),
+            LockfilePackage {
+                name: name.clone(),
+                version: ver_str.clone(),
+                resolved: url,
+                integrity: String::new(),
+                integrity_hashes: Vec::new(),
+                signature: None,
+                signer: None,
+                dependencies: std::collections::HashMap::new(),
+                optional_dependencies: std::collections::HashMap::new(),
+                peer_dependencies: std::collections::HashMap::new(),
+                bin: None,
+                has_node_modules: false,
+                install_time_ms: 0,
+            },
+        );
+    }
+    let bytes = lock.to_bytes().map_err(|e| anyhow::anyhow!("{e}"))?;
+    std::fs::write(&lock_path, &bytes)?;
+
+    Ok(())
 }
 
 fn ensure_gitignore_has_klyron_lock(dir: &std::path::Path) -> anyhow::Result<()> {
@@ -744,4 +861,45 @@ fn count_node_modules(dir: &std::path::Path) -> usize {
         }
     }
     count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires network access to npm registry"]
+    fn test_run_add_node_no_npm() {
+        let tmp = std::env::temp_dir().join(format!("klyron_add_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(
+            tmp.join("package.json"),
+            r#"{"name":"demo","version":"1.0.0"}"#,
+        )
+        .unwrap();
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&tmp).unwrap();
+        let result = run_add(&["left-pad".to_string()], false);
+        let _ = std::env::set_current_dir(prev);
+
+        assert!(result.is_ok(), "run_add should succeed: {:?}", result.err());
+        assert!(
+            tmp.join("node_modules").join("left-pad").join("package.json").exists(),
+            "package must be downloaded"
+        );
+        assert!(tmp.join("klyron.lock").exists(), "klyron.lock must be written");
+
+        let pkg: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(tmp.join("package.json")).unwrap())
+                .unwrap();
+        assert!(
+            pkg.get("dependencies")
+                .and_then(|d| d.get("left-pad"))
+                .is_some(),
+            "package.json dependencies must list left-pad"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

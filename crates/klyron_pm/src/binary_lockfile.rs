@@ -115,7 +115,7 @@ pub fn save_as_binary(lockfile: &LockfileV3, path: &Path) -> Result<(), PmError>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LockfilePackage, PmError};
+    use crate::LockfilePackage;
     use std::collections::BTreeMap;
 
     #[test]

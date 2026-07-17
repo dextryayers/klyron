@@ -10,4 +10,7 @@ export * as url from "./url.js";
 export * as querystring from "./querystring.js";
 export * as crypto from "./crypto.js";
 export * as child_process from "./child_process.js";
+export * as net from "./net.js";
+export * as http from "./http.js";
+export * as https from "./https.js";
 export * as assert from "./assert.js";

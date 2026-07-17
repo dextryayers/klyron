@@ -183,7 +183,7 @@ impl DedupeEngine {
         result
     }
 
-    fn satisfies(version_a: &str, version_b: &str) -> bool {
+    pub fn satisfies(version_a: &str, version_b: &str) -> bool {
         if let Ok(ver) = semver::Version::parse(version_a) {
             if let Ok(req) = semver::VersionReq::parse(version_b) {
                 return req.matches(&ver);

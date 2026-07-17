@@ -15,14 +15,12 @@ pub struct HookHandler {
 
 pub struct HookRegistry {
     hooks: HashMap<HookPhase, Vec<HookHandler>>,
-    execution_order: Vec<HookPhase>,
 }
 
 impl HookRegistry {
     pub fn new() -> Self {
         Self {
             hooks: HashMap::new(),
-            execution_order: HookPhase::all(),
         }
     }
 

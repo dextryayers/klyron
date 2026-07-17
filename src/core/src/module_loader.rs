@@ -263,14 +263,110 @@ impl KlyronModuleLoader {
     while let Some(current) = dir {
       let nm = current.join("node_modules").join(name);
       if nm.exists() {
-        return self.resolve_file_path(&nm);
+        return self.resolve_package_entry(&nm, name);
       }
       dir = current.parent();
     }
     Err(JsErrorBox::generic(format!("Cannot find module '{name}'")))
   }
 
-  fn resolve_npm(&self, specifier: &str) -> ModuleResolveResponse {
+  /// Determine the directory to start node_modules resolution from: the
+  /// referrer's parent when the referrer is a file:// URL, otherwise the
+  /// current working directory.
+  fn referrer_search_dir(&self, referrer: &str) -> PathBuf {
+    if referrer.starts_with("file://") {
+      if let Ok(spec) = ModuleSpecifier::parse(referrer) {
+        if let Ok(p) = spec.to_file_path() {
+          if p.is_file() {
+            return p.parent().unwrap_or(&p).to_path_buf();
+          }
+          return p;
+        }
+      }
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+  }
+
+  /// Resolve a package directory to its entry point using package.json
+  /// `exports`, then `main`, then `module`, then index files. Honors the
+  /// Node.js resolution algorithm (exports takes precedence over main).
+  fn resolve_package_entry(&self, pkg_dir: &Path, _name: &str) -> ModuleResolveResponse {
+    let pkg_json_path = pkg_dir.join("package.json");
+    if let Ok(content) = std::fs::read_to_string(&pkg_json_path) {
+      if let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&content) {
+        // 1. "exports" (string or conditional map)
+        if let Some(exports) = pkg.get("exports") {
+          if let Some(target) = self.resolve_exports_entry(exports, pkg_dir) {
+            return target;
+          }
+        }
+        // 2. "main" / "module" (module preferred for ESM)
+        for key in ["module", "main"] {
+          if let Some(rel) = pkg.get(key).and_then(|v| v.as_str()) {
+            let candidate = pkg_dir.join(rel);
+            if candidate.exists() {
+              return self.resolve_file_path(&candidate);
+            }
+          }
+        }
+      }
+    }
+    // 3. Fallback: index files inside the package dir
+    self.resolve_file_path(pkg_dir)
+  }
+
+  /// Given the `exports` field value, pick the right target for the
+  /// default import condition ("./"). Supports a plain string, a
+  /// condition map ({".": ...} or {import/require/default}), and a
+  /// nested map keyed by subpath.
+  fn resolve_exports_entry(
+    &self,
+    exports: &serde_json::Value,
+    pkg_dir: &Path,
+  ) -> Option<ModuleResolveResponse> {
+    // exports is a condition map keyed by subpath, e.g. {".": "./index.js"}
+    if let Some(obj) = exports.as_object() {
+      // Allow `exports` to be the package-level map directly.
+      if let Some(root) = obj.get(".") {
+        return self.pick_export_condition(root, pkg_dir);
+      }
+      // Otherwise pick the first subpath entry as the default entry.
+      if let Some((_, first)) = obj.iter().next() {
+        return self.pick_export_condition(first, pkg_dir);
+      }
+      return None;
+    }
+    // exports is a plain string
+    if let Some(s) = exports.as_str() {
+      let rel = s.trim_start_matches("./");
+      return Some(self.resolve_file_path(&pkg_dir.join(rel)));
+    }
+    None
+  }
+
+  /// Pick the appropriate target from a conditional exports entry, preferring
+  /// "import" (ESM), then "default", then "require".
+  fn pick_export_condition(
+    &self,
+    entry: &serde_json::Value,
+    pkg_dir: &Path,
+  ) -> Option<ModuleResolveResponse> {
+    if let Some(s) = entry.as_str() {
+      let rel = s.trim_start_matches("./");
+      return Some(self.resolve_file_path(&pkg_dir.join(rel)));
+    }
+    if let Some(obj) = entry.as_object() {
+      for cond in ["import", "default", "require"] {
+        if let Some(target) = obj.get(cond).and_then(|v| v.as_str()) {
+          let rel = target.trim_start_matches("./");
+          return Some(self.resolve_file_path(&pkg_dir.join(rel)));
+        }
+      }
+    }
+    None
+  }
+
+  fn resolve_npm(&self, specifier: &str, referrer: &str) -> ModuleResolveResponse {
     let package = specifier.strip_prefix("npm:").unwrap_or(specifier);
     // npm:package, npm:package@version, npm:@scope/package, npm:package/subpath
     let (package_name, subpath) = if let Some(slash_idx) = package.find('/') {
@@ -324,7 +420,7 @@ impl KlyronModuleLoader {
       }
     };
 
-    let base_resolved = self.resolve_node_modules(package_name, &std::env::current_dir().unwrap())?;
+    let base_resolved = self.resolve_node_modules(package_name, &self.referrer_search_dir(referrer))?;
     if let Some(sub) = subpath {
       if let Ok(base_path) = base_resolved.to_file_path() {
         if let Some(parent) = base_path.parent() {
@@ -357,9 +453,9 @@ impl ModuleLoader for KlyronModuleLoader {
       if mapped.starts_with("https://") || mapped.starts_with("http://") {
         return Ok(ModuleSpecifier::parse(&mapped).unwrap());
       }
-      if mapped.starts_with("npm:") {
-        return self.resolve_npm(&mapped);
-      }
+       if mapped.starts_with("npm:") {
+         return self.resolve_npm(&mapped, referrer);
+       }
       if mapped.starts_with("node:") {
         let builtin = mapped.strip_prefix("node:").unwrap_or(&mapped);
         for (name, url) in NODE_BUILTINS.iter() {
@@ -388,7 +484,7 @@ impl ModuleLoader for KlyronModuleLoader {
 
     // 2. npm: specifiers
     if specifier.starts_with("npm:") {
-      return self.resolve_npm(specifier);
+      return self.resolve_npm(specifier, referrer);
     }
 
     // 3. ext: / klyron: -> deno_core extension modules
@@ -436,7 +532,7 @@ impl ModuleLoader for KlyronModuleLoader {
     }
 
     // 8. Bare specifier -> node_modules
-    self.resolve_node_modules(specifier, &std::env::current_dir().unwrap())
+    self.resolve_node_modules(specifier, &self.referrer_search_dir(referrer))
   }
 
   fn load(
@@ -576,5 +672,100 @@ impl ModuleLoader for KlyronModuleLoader {
     ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
       "Module not found: {url}"
     ))))
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::permissions::PermissionSet;
+  use deno_core::ResolutionKind;
+
+  fn loader() -> KlyronModuleLoader {
+    KlyronModuleLoader::new(
+      Arc::new(Permissions::new(PermissionSet::default())),
+      None,
+    )
+  }
+
+  fn write(path: &Path, content: &str) {
+    if let Some(parent) = path.parent() {
+      std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(path, content).unwrap();
+  }
+
+  fn resolved_path(l: &KlyronModuleLoader, spec: &str, referrer: &str) -> String {
+    l.resolve(spec, referrer, ResolutionKind::DynamicImport)
+      .unwrap()
+      .to_string()
+  }
+
+  #[test]
+  fn test_resolve_package_main() {
+    let tmp = std::env::temp_dir().join(format!("klyron_ml_main_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let referrer = format!("file://{}/app.js", tmp.display());
+    let nm = tmp.join("node_modules").join("demo");
+    write(&nm.join("package.json"), r#"{"name":"demo","main":"lib/entry.js"}"#);
+    write(&nm.join("lib/entry.js"), "export const x = 1;");
+
+    let l = loader();
+    let got = resolved_path(&l, "demo", &referrer);
+    assert!(got.ends_with("/node_modules/demo/lib/entry.js"), "got: {got}");
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  #[test]
+  fn test_resolve_package_exports_string() {
+    let tmp = std::env::temp_dir().join(format!("klyron_ml_exp_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let referrer = format!("file://{}/app.js", tmp.display());
+    let nm = tmp.join("node_modules").join("demo");
+    write(&nm.join("package.json"), r#"{"name":"demo","exports":"./dist/index.mjs"}"#);
+    write(&nm.join("dist/index.mjs"), "export const x = 1;");
+
+    let l = loader();
+    let got = resolved_path(&l, "demo", &referrer);
+    assert!(got.ends_with("/node_modules/demo/dist/index.mjs"), "got: {got}");
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  #[test]
+  fn test_resolve_package_exports_condition_map() {
+    let tmp = std::env::temp_dir().join(format!("klyron_ml_expc_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let referrer = format!("file://{}/app.js", tmp.display());
+    let nm = tmp.join("node_modules").join("demo");
+    write(
+      &nm.join("package.json"),
+      r#"{"name":"demo","exports":{".":{"import":"./esm.mjs","require":"./cjs.js"}}}"#,
+    );
+    write(&nm.join("esm.mjs"), "export const x = 1;");
+    write(&nm.join("cjs.js"), "module.exports = 1;");
+
+    let l = loader();
+    let got = resolved_path(&l, "demo", &referrer);
+    assert!(got.ends_with("/node_modules/demo/esm.mjs"), "got: {got}");
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  #[test]
+  fn test_resolve_package_fallback_index() {
+    let tmp = std::env::temp_dir().join(format!("klyron_ml_idx_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let referrer = format!("file://{}/app.js", tmp.display());
+    let nm = tmp.join("node_modules").join("demo");
+    write(&nm.join("package.json"), r#"{"name":"demo"}"#);
+    write(&nm.join("index.js"), "export const x = 1;");
+
+    let l = loader();
+    let got = resolved_path(&l, "demo", &referrer);
+    assert!(got.ends_with("/node_modules/demo/index.js"), "got: {got}");
+    let _ = std::fs::remove_dir_all(&tmp);
   }
 }
