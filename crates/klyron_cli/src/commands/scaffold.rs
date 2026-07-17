@@ -41,17 +41,21 @@ pub fn install_deps(project_dir: &std::path::Path, pm: Option<&str>) -> anyhow::
         "pnpm" => ("pnpm", &["install"]),
         "yarn" => ("yarn", &[]),
         "klyron" => ("klyron", &["install"]),
+        "bun" => ("bun", &["install"]),
         _ => ("npm", &["install"]),
     };
-    println!("Installing dependencies with {cmd}...");
+
+    let spinner = crate::color::Spinner::new(&format!("Installing dependencies with {}...", cmd));
     let status = Command::new(cmd)
         .args(args)
         .current_dir(project_dir)
         .status()
         .map_err(|e| anyhow::anyhow!("Failed to run {cmd} install: {e}"))?;
     if !status.success() {
+        spinner.fail(&format!("{cmd} install exited with code {}", status));
         anyhow::bail!("{cmd} install exited with code {}", status);
     }
+    spinner.done();
     Ok(())
 }
 
@@ -226,15 +230,24 @@ pub fn scaffold_via_adapter(args: &ScaffoldArgs, framework: &str) -> anyhow::Res
         package_manager: args.pm.clone().unwrap_or_default(),
     };
 
+    let spinner = crate::color::Spinner::new(&format!("Creating {} project '{}' ...", framework, args.name));
+
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(adapter.scaffold(&args.name, options))?;
 
-    println!("{} app created: {}", framework, project_dir.display());
+    spinner.done();
 
     // Auto-install dependencies if it's an npm project
     if project_dir.join("package.json").exists() {
         let _ = install_deps(&project_dir, args.pm.as_deref());
     }
+
+    println!("  {} {} {} {}",
+        crate::color::Color::GREEN.paint("\u{2713}"),
+        crate::color::Color::BRIGHT_CYAN.bold(framework),
+        crate::color::Color::WHITE.paint("app created at"),
+        crate::color::Color::BRIGHT_GREEN.paint(project_dir.display().to_string())
+    );
 
     Ok(())
 }

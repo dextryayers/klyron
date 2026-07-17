@@ -23,6 +23,7 @@ pub mod engines;
 pub mod commands;
 pub mod scaffold_inline;
 pub mod color;
+pub mod splash;
 
 pub(crate) use commands::helpers::*;
 pub(crate) use scaffold_inline::*;
@@ -165,13 +166,16 @@ const STYLES: clap::builder::Styles = clap::builder::Styles::styled()
     .invalid(clap::builder::styling::AnsiColor::Yellow.on_default().bold());
 
 #[derive(Parser)]
-#[command(name = "klyron", version, about = "Klyron - Universal Polyglot Runtime", long_about = None, styles = STYLES)]
+#[command(name = "klyron", version = "", disable_version_flag = true, about = "Klyron - Universal Polyglot Runtime", long_about = None, styles = STYLES, subcommand_required = false)]
 pub struct Cli {
     #[arg(short = 'v', long = "verbose", global = true, action = clap::ArgAction::Count, help = "Increase verbosity (use -q for quiet)")]
     pub verbose: u8,
 
     #[arg(short = 'q', long = "quiet", global = true, default_value_t = false, conflicts_with = "verbose")]
     pub quiet: bool,
+
+    #[arg(short = 'V', long = "version", help = "Print version information")]
+    pub show_version: bool,
 
     #[arg(long = "engine", global = true, help = "JavaScript engine to use (v8, boa, quickjs, jsc, auto)")]
     pub engine: Option<String>,
@@ -185,8 +189,12 @@ pub struct Cli {
     #[arg(long = "json", global = true, help = "Output in JSON format")]
     pub json: bool,
 
+    /// Package manager to use (npm, pnpm, yarn, bun, klyron). Defaults to klyron native.
+    #[arg(long = "pm", global = true, help = "Package mode: npm, pnpm, yarn, bun, klyron")]
+    pub pm: Option<String>,
+
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Args)]
@@ -612,6 +620,18 @@ pub fn run_cli() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
+    // Custom --version
+    if cli.show_version {
+        crate::splash::show_version();
+        return Ok(());
+    }
+
+    // No subcommand → show splash screen
+    if cli.command.is_none() {
+        crate::splash::show_splash();
+        return Ok(());
+    }
+
     if cli.quiet {
         set_verbosity(2);
     } else {
@@ -629,7 +649,7 @@ pub fn run_cli() -> anyhow::Result<()> {
         log_info(format!("Pre-warming {} engines (pool size: {})", kind, cli.engine_pool_size));
     }
 
-    let result = dispatch_command(cli.command, engine, cli.json);
+    let result = dispatch_command(cli.command.unwrap(), engine, cli.json);
 
     if cli.json {
         match &result {
