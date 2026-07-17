@@ -23,6 +23,8 @@ pub struct ScaffoldOptions {
     pub version: Option<String>,
     pub template_vars: HashMap<String, String>,
     pub external: bool,
+    /// Package manager to use (npm, pnpm, yarn, klyron). Empty string = default.
+    pub package_manager: String,
 }
 
 impl Default for ScaffoldOptions {
@@ -32,6 +34,7 @@ impl Default for ScaffoldOptions {
             version: None,
             template_vars: HashMap::new(),
             external: false,
+            package_manager: String::new(),
         }
     }
 }

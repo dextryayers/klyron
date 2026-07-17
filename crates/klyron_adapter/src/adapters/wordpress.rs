@@ -130,6 +130,7 @@ impl FrameworkAdapter for WordPressAdapter {
         ] {
             std::fs::create_dir_all(project_dir.join(d))?;
         }
+        std::fs::create_dir_all(project_dir.join("wp-content/plugins/klyron-settings"))?;
 
         std::fs::write(project_dir.join("wp-config.php"),
             klyron_template::TemplateEngine::render_static(r#"<?php

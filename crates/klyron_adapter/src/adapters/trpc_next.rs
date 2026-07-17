@@ -116,7 +116,8 @@ impl FrameworkAdapter for TrpcNextAdapter {
         std::fs::write(project_dir.join("next.config.js"),
             r#"/** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: { serverActions: true },
+  reactStrictMode: true,
+  images: { remotePatterns: [] },
 }
 module.exports = nextConfig"#)?;
 

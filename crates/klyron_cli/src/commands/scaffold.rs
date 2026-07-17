@@ -16,6 +16,43 @@ pub struct ScaffoldArgs {
     pub external: bool,
     #[arg(long)]
     pub stack: Option<String>,
+    /// Package manager to use (npm, pnpm, yarn, klyron). Defaults to npx/npm.
+    #[arg(long)]
+    pub pm: Option<String>,
+}
+
+/// Resolve the package-manager binary and create-command prefix.
+/// Returns (runner_binary, create_prefix).
+/// e.g. ("npx", "create-next-app@latest") or ("pnpm", "dlx create-next-app@latest")
+fn resolve_pm(pm: Option<&str>) -> (&'static str, Vec<String>) {
+    let pm = pm.unwrap_or("npm");
+    match pm {
+        "pnpm" => ("pnpm", vec!["dlx".into()]),
+        "yarn" => ("yarn", vec!["create".into()]),
+        "klyron" => ("npx", vec![]),
+        _ => ("npx", vec![]), // npm / default
+    }
+}
+
+/// Run `npm install` (or pnpm/yarn/klyron install) in the project directory.
+pub fn install_deps(project_dir: &std::path::Path, pm: Option<&str>) -> anyhow::Result<()> {
+    let pm = pm.unwrap_or("npm");
+    let (cmd, args): (&str, &[&str]) = match pm {
+        "pnpm" => ("pnpm", &["install"]),
+        "yarn" => ("yarn", &[]),
+        "klyron" => ("klyron", &["install"]),
+        _ => ("npm", &["install"]),
+    };
+    println!("Installing dependencies with {cmd}...");
+    let status = Command::new(cmd)
+        .args(args)
+        .current_dir(project_dir)
+        .status()
+        .map_err(|e| anyhow::anyhow!("Failed to run {cmd} install: {e}"))?;
+    if !status.success() {
+        anyhow::bail!("{cmd} install exited with code {}", status);
+    }
+    Ok(())
 }
 
 pub fn scaffold_via_external_cli(framework: &str, args: &ScaffoldArgs) -> anyhow::Result<()> {
@@ -25,21 +62,22 @@ pub fn scaffold_via_external_cli(framework: &str, args: &ScaffoldArgs) -> anyhow
     }
     let name = &args.name;
     let dir = &args.dir;
-    let _version_flag = args.version.as_deref().map(|v| format!("--version {v}")).unwrap_or_default();
 
-    let (cmd, base_args): (&str, Vec<String>) = match framework {
-        "react" => ("npx", vec!["create-vite@latest".into(), name.into(), "--template".into(), "react-ts".into()]),
-        "vue" => ("npm", vec!["create".into(), "vue@latest".into(), name.into()]),
-        "next" => {
-            let mut a = vec!["create-next-app@latest".into(), name.into()];
-            if let Some(v) = &args.version { a.push("--version".into()); a.push(v.into()); }
-            ("npx", a)
+    // Frameworks that use their own dedicated CLI tool (pm choice doesn't apply)
+    let own_cli = match framework {
+        "laravel" => Some(("composer", vec!["create-project".into(), "laravel/laravel".into(), name.to_string()])),
+        "symfony" => Some(("composer", vec!["create-project".into(), "symfony/skeleton".into(), name.to_string()])),
+        "codeigniter" => Some(("composer", vec!["create-project".into(), "codeigniter4/appstarter".into(), name.to_string()])),
+        "django" => Some(("django-admin", vec!["startproject".into(), name.to_string()])),
+        "rails" => Some(("rails", vec!["new".into(), name.to_string()])),
+        "angular" => Some(("ng", vec!["new".into(), name.to_string()])),
+        "nest" => Some(("nest", vec!["new".into(), name.to_string()])),
+        "wordpress" => {
+            println!("WordPress external scaffold: download WordPress from wordpress.org");
+            println!("  wp core download --path={}", project_dir.display());
+            println!("Or use `klyron create wordpress {}` (without --external)", name);
+            return Ok(());
         }
-        "astro" => ("npm", vec!["create".into(), "astro@latest".into(), name.into()]),
-        "nuxt" => ("npx", vec!["nuxi@latest".into(), "init".into(), name.into()]),
-        "sveltekit" => ("npm", vec!["create".into(), "svelte@latest".into(), name.into()]),
-        "remix" => ("npx", vec!["create-remix@latest".into(), name.into()]),
-        "angular" => ("ng", vec!["new".into(), name.into()]),
         "express" => {
             std::fs::create_dir_all(&project_dir)?;
             std::fs::write(project_dir.join("package.json"), format!(r#"{{"name":"{name}","private":true,"scripts":{{"start":"node index.js"}},"dependencies":{{"express":"^4.21"}}}}"#))?;
@@ -47,36 +85,111 @@ pub fn scaffold_via_external_cli(framework: &str, args: &ScaffoldArgs) -> anyhow
             println!("Express app created: {}", project_dir.display());
             return Ok(());
         }
-        "fastify" => ("npm", vec!["create".into(), "fastify@latest".into(), name.into()]),
-        "nest" => ("nest", vec!["new".into(), name.into()]),
-        "hono" => ("npm", vec!["create".into(), "hono@latest".into(), name.into()]),
-        "solid" => ("npm", vec!["create".into(), "solid@latest".into(), name.into()]),
-        "qwik" => ("npm", vec!["create".into(), "qwik@latest".into(), name.into()]),
-        "preact" => ("npx", vec!["create-vite@latest".into(), name.into(), "--template".into(), "preact-ts".into()]),
-        "svelte" => ("npx", vec!["create-vite@latest".into(), name.into(), "--template".into(), "svelte-ts".into()]),
-        "lit" => ("npx", vec!["create-vite@latest".into(), name.into(), "--template".into(), "lit-ts".into()]),
-        "laravel" => ("composer", vec!["create-project".into(), "laravel/laravel".into(), name.into()]),
-        "django" => ("django-admin", vec!["startproject".into(), name.into()]),
-        "rails" => ("rails", vec!["new".into(), name.into()]),
-        "symfony" => ("composer", vec!["create-project".into(), "symfony/skeleton".into(), name.into()]),
-        "codeigniter" => ("composer", vec!["create-project".into(), "codeigniter4/appstarter".into(), name.into()]),
-        "wordpress" => {
-            println!("WordPress external scaffold: download WordPress from wordpress.org");
-            println!("  wp core download --path={}", project_dir.display());
-            println!("Or use `klyron create wordpress {}` (without --external)", name);
-            return Ok(());
+        _ => None,
+    };
+
+    if let Some((cmd, base_args)) = own_cli {
+        let status = Command::new(cmd)
+            .args(&base_args)
+            .current_dir(dir)
+            .status()
+            .map_err(|e| anyhow::anyhow!("Failed to run {cmd}: {e}"))?;
+        if !status.success() {
+            anyhow::bail!("{cmd} exited with code {}", status);
+        }
+        println!("{} app created via external CLI: {}", framework, project_dir.display());
+        return Ok(());
+    }
+
+    // For npm-ecosystem frameworks, respect the --pm flag
+    let (runner, prefix) = resolve_pm(args.pm.as_deref());
+    let base_args: Vec<String> = match framework {
+        "react" => {
+            let mut a = prefix.clone();
+            a.push("create-vite@latest".into()); a.push(name.to_string());
+            a.push("--template".into()); a.push("react-ts".into());
+            a
+        }
+        "vue" => {
+            let mut a = prefix.clone();
+            a.push("create-vue@latest".into()); a.push(name.to_string());
+            a
+        }
+        "next" => {
+            let mut a = prefix.clone();
+            a.push("create-next-app@latest".into()); a.push(name.to_string());
+            if let Some(v) = &args.version { a.push("--version".into()); a.push(v.into()); }
+            a
+        }
+        "astro" => {
+            let mut a = prefix.clone();
+            a.push("create-astro@latest".into()); a.push(name.to_string());
+            a
+        }
+        "nuxt" => {
+            let mut a = prefix.clone();
+            a.push("nuxi@latest".into()); a.push("init".into()); a.push(name.to_string());
+            a
+        }
+        "sveltekit" => {
+            let mut a = prefix.clone();
+            a.push("create-svelte@latest".into()); a.push(name.to_string());
+            a
+        }
+        "remix" => {
+            let mut a = prefix.clone();
+            a.push("create-remix@latest".into()); a.push(name.to_string());
+            a
+        }
+        "fastify" => {
+            let mut a = prefix.clone();
+            a.push("create-fastify@latest".into()); a.push(name.to_string());
+            a
+        }
+        "hono" => {
+            let mut a = prefix.clone();
+            a.push("create-hono@latest".into()); a.push(name.to_string());
+            a
+        }
+        "solid" => {
+            let mut a = prefix.clone();
+            a.push("create-solid@latest".into()); a.push(name.to_string());
+            a
+        }
+        "qwik" => {
+            let mut a = prefix.clone();
+            a.push("create-qwik@latest".into()); a.push(name.to_string());
+            a
+        }
+        "preact" => {
+            let mut a = prefix.clone();
+            a.push("create-vite@latest".into()); a.push(name.to_string());
+            a.push("--template".into()); a.push("preact-ts".into());
+            a
+        }
+        "svelte" => {
+            let mut a = prefix.clone();
+            a.push("create-vite@latest".into()); a.push(name.to_string());
+            a.push("--template".into()); a.push("svelte-ts".into());
+            a
+        }
+        "lit" => {
+            let mut a = prefix.clone();
+            a.push("create-vite@latest".into()); a.push(name.to_string());
+            a.push("--template".into()); a.push("lit-ts".into());
+            a
         }
         _ => anyhow::bail!("Unknown framework for external CLI: {framework}"),
     };
 
-    let status = Command::new(cmd)
+    let status = Command::new(runner)
         .args(&base_args)
         .current_dir(dir)
         .status()
-        .map_err(|e| anyhow::anyhow!("Failed to run {cmd}: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to run {runner}: {e}"))?;
 
     if !status.success() {
-        anyhow::bail!("{cmd} exited with code {}", status);
+        anyhow::bail!("{runner} exited with code {}", status);
     }
 
     println!("{} app created via external CLI: {}", framework, project_dir.display());
@@ -110,12 +223,19 @@ pub fn scaffold_via_adapter(args: &ScaffoldArgs, framework: &str) -> anyhow::Res
         version: args.version.clone(),
         template_vars,
         external: args.external,
+        package_manager: args.pm.clone().unwrap_or_default(),
     };
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(adapter.scaffold(&args.name, options))?;
 
     println!("{} app created: {}", framework, project_dir.display());
+
+    // Auto-install dependencies if it's an npm project
+    if project_dir.join("package.json").exists() {
+        let _ = install_deps(&project_dir, args.pm.as_deref());
+    }
+
     Ok(())
 }
 

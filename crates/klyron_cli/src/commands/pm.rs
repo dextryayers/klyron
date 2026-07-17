@@ -75,7 +75,7 @@ fn detect_package_manager(dir: &Path) -> &str {
 pub fn run_add(packages: &[String], dev: bool) -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     let project = crate::detect_project_type(&dir);
-    let pm = detect_package_manager(&dir);
+    let _pm = detect_package_manager(&dir);
 
     match project {
         "node" => {
@@ -353,7 +353,7 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
                 return Ok(());
             }
-            let pm = detect_package_manager(&dir);
+    let pm = detect_package_manager(&dir);
             let mut args = vec!["install"];
             if frozen {
                 match pm {

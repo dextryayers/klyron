@@ -83,7 +83,10 @@ impl FrameworkAdapter for NextAdapter {
 
         std::fs::write(project_dir.join("next.config.ts"),
             r#"import type { NextConfig } from 'next'
-const nextConfig: NextConfig = { experimental: { serverActions: true } }
+const nextConfig: NextConfig = {
+  reactStrictMode: true,
+  images: { remotePatterns: [] },
+}
 export default nextConfig"#)?;
 
         std::fs::write(project_dir.join("tailwind.config.ts"),
@@ -118,7 +121,7 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
 }"##)?;
 
         std::fs::write(project_dir.join("app/loading.tsx"), r#"export default function Loading() { return <div>Loading...</div> }"#)?;
-        std::fs::write(project_dir.join("next-env.d.ts"), r#"/// <reference types="next" />\n/// <reference types="next/image-types/global" />"#)?;
+        std::fs::write(project_dir.join("next-env.d.ts"), "/// <reference types=\"next\" />\n/// <reference types=\"next/image-types/global\" />\n")?;
         std::fs::write(project_dir.join(".gitignore"), "node_modules\n.next\n*.tsbuildinfo\n.DS_Store\n")?;
         std::fs::write(project_dir.join(".prettierrc"), r#"{"semi": false, "singleQuote": true, "tabWidth": 2, "trailingComma": "es5", "printWidth": 100}"#)?;
 

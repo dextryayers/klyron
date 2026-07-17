@@ -78,7 +78,7 @@ impl FrameworkAdapter for VueAdapter {
             klyron_template::TemplateEngine::render_static(r#"{
   "name": "{{ name }}", "private": true, "version": "1.0.0", "type": "module",
   "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview", "test": "vitest run", "lint": "eslint .", "format": "prettier --write ." },
-  "dependencies": { "vue": "^3.6.0", "vue-router": "^4.5.0", "pinia": "^3.0.0" },
+  "dependencies": { "vue": "^3.5.0", "vue-router": "^4.0.0", "pinia": "^4.0.0" },
   "devDependencies": { "@vitejs/plugin-vue": "^5.2.0", "vite": "^6.1.0", "typescript": "^5.7.0", "vitest": "^3.0.0", "@vue/test-utils": "^2.4.6", "jsdom": "^26.0.0", "eslint": "^9.20.0", "@eslint/js": "^9.20.0", "typescript-eslint": "^8.24.0", "eslint-plugin-vue": "^9.32.0", "prettier": "^3.5.0" }
 }"#, vars))?;
 

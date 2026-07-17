@@ -205,6 +205,9 @@ pub struct CreateArgs {
     pub external: bool,
     #[arg(long)]
     pub stack: Option<String>,
+    /// Package manager to use (npm, pnpm, yarn, klyron). Defaults to klyron native.
+    #[arg(long)]
+    pub pm: Option<String>,
 }
 
 #[derive(Args)]
@@ -215,134 +218,260 @@ pub struct InfoArgs {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    #[command(about = "Evaluate JavaScript/TypeScript code inline from the command line")]
     Eval { #[command(flatten)] args: commands::runtime::EvalArgs },
+    #[command(about = "Execute a JavaScript, TypeScript, or any supported language file")]
     Run { #[command(flatten)] args: commands::runtime::RunArgs },
+    #[command(about = "Start an interactive REPL session with live code evaluation")]
     Repl,
+    #[command(about = "Start an interactive shell with support for all supported languages")]
     Shell,
+    #[command(about = "Bundle JavaScript/TypeScript and dependencies into a single output file")]
     Bundle { entry: PathBuf, #[arg(long, default_value = "bundle.js")] output: PathBuf, #[arg(long)] minify: bool },
+    #[command(about = "Compile and execute C source code natively")]
     Cc { source: String, #[arg(long)] args: Option<String>, #[arg(long)] watch: bool },
+    #[command(about = "Compile and execute C++ source code natively")]
     Cxx { source: String, #[arg(long)] args: Option<String>, #[arg(long)] watch: bool },
+    #[command(about = "Execute TypeScript files directly without prior compilation")]
     Ts { source: String, #[arg(long)] watch: bool },
+    #[command(about = "Execute PHP scripts using the embedded PHP engine")]
     Php { source: String, #[arg(long)] watch: bool },
+    #[command(about = "Execute Python scripts using the embedded Python engine")]
     Py { source: String, #[arg(long)] watch: bool },
+    #[command(about = "Execute Ruby scripts using the embedded Ruby engine")]
     Rb { source: String, #[arg(long)] watch: bool },
+    #[command(about = "Compile and run Go source code")]
     Go { source: String, #[arg(long)] watch: bool },
+    #[command(about = "Compile and run Zig source code")]
     Zig { source: String, #[arg(long)] watch: bool },
+    #[command(about = "Compile and run Rust source code with Cargo")]
     Rs { source: String, #[arg(long)] watch: bool },
+    #[command(about = "Execute JavaScript files with the selected JS engine")]
     Js { source: String, #[arg(long)] watch: bool },
+    #[command(about = "Run Laravel Artisan commands (migrate, make:model, route:list, etc.)")]
     Artisan { #[command(flatten)] args: commands::artisan::ArtisanArgs },
+    #[command(about = "Run PHP Composer commands (install, require, update, etc.)")]
     Composer { #[command(flatten)] args: commands::artisan::ComposerArgs },
+    #[command(about = "Render and preview Laravel Blade templates")]
     Blade { #[command(flatten)] args: commands::artisan::BladeArgs },
+    #[command(about = "Run Laravel Tinker - an interactive PHP shell for Laravel")]
     Tinker { #[command(flatten)] args: commands::artisan::TinkerArgs },
+    #[command(about = "Create a new project from a scaffold template with guided setup")]
     Create { #[command(flatten)] args: CreateArgs },
+    #[command(about = "Scaffold a new Next.js application with App Router or Pages Router")]
     CreateNextApp { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new React application with Vite and TypeScript")]
     CreateReactApp { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Angular application with CLI")]
     CreateAngular { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Vue 3 application with Vite and TypeScript")]
     CreateVue { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Svelte application with Vite")]
     CreateSvelte { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Express.js backend application with TypeScript")]
     CreateExpress { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Fastify backend application with TypeScript")]
     CreateFastify { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new NestJS backend application with TypeScript")]
     CreateNest { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Nuxt 3 application with SSR support")]
     CreateNuxt { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Remix application with React Router")]
     CreateRemix { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Gatsby static site with React")]
     CreateGatsby { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Astro static site generator project")]
     CreateAstro { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new AdonisJS backend application")]
     CreateAdonis { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Laravel PHP application with Sail support")]
     CreateLaravel { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold Laravel with React frontend scaffolding (Inertia)")]
     CreateLaravelReact { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold Laravel with Vue frontend scaffolding (Inertia)")]
     CreateLaravelVue { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold Laravel with Inertia.js + React stack")]
     CreateLaravelInertiaReact { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold Laravel with Inertia.js + Vue stack")]
     CreateLaravelInertiaVue { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold Laravel with Livewire full-stack components")]
     CreateLaravelLivewire { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold Laravel with Next.js frontend (Breeze/Inertia)")]
     CreateLaravelNext { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold Laravel with Astro frontend")]
     CreateLaravelAstro { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold Laravel API-only application (no frontend)")]
     CreateLaravelApi { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Django Python web application")]
     CreateDjango { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Ruby on Rails application")]
     CreateRails { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Actix-web Rust backend application")]
     CreateActix { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Axum Rust backend application")]
     CreateAxum { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Rocket Rust web application")]
     CreateRocket { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new SolidJS application with Vite")]
     CreateSolid { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Qwik application with Vite")]
     CreateQwik { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Preact application with Vite")]
     CreatePreact { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Lit web components project")]
     CreateLit { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new FastAPI Python backend application")]
     CreateFastApi { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Flask Python web application")]
     CreateFlask { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Gin Go web framework application")]
     CreateGoGin { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Fiber Go web framework application")]
     CreateGoFiber { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Echo Go web framework application")]
     CreateGoEcho { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Tauri desktop application (Rust + frontend)")]
     CreateTauri { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Leptos Rust full-stack web application")]
     CreateLeptos { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Symfony PHP web application")]
     CreateSymfony { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new CodeIgniter PHP web application")]
     CreateCodeIgniter { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new WordPress project with custom theme")]
     CreateWordPress { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new SvelteKit full-stack application")]
     CreateSvelteKit { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Hono web framework application (JS/TS)")]
     CreateHono { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Koa.js backend application")]
     CreateKoa { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Scaffold a new Hapi.js backend application")]
     CreateHapi { #[command(flatten)] args: commands::scaffold::ScaffoldArgs },
+    #[command(about = "Start the development server with hot module replacement and file watching")]
     Dev { #[command(flatten)] args: commands::dev::DevArgs },
+    #[command(about = "Build the project for production deployment")]
     Build { #[command(flatten)] args: commands::build::BuildArgs },
+    #[command(about = "Run project tests with the configured test runner")]
     Test { #[command(flatten)] args: commands::test::TestArgs },
+    #[command(about = "Lint project source code with ESLint or configured linter")]
     Lint { #[command(flatten)] args: commands::lint::LintArgs },
+    #[command(about = "Format project source code with Prettier or configured formatter")]
     Format { #[command(flatten)] args: commands::format::FormatArgs },
+    #[command(about = "Type-check the project with TypeScript or configured type checker")]
     Check { #[command(flatten)] args: commands::check::CheckArgs },
+    #[command(about = "Run performance benchmarks for the project")]
     Bench { #[command(flatten)] args: commands::bench::BenchArgs },
+    #[command(about = "Start the production server")]
     Start,
+    #[command(about = "Run an npm script defined in package.json")]
     RunScript { #[command(flatten)] args: commands::scripts::RunScriptArgs },
+    #[command(about = "Database management commands (migrate, seed, rollback, etc.)")]
     Db { #[command(flatten)] args: commands::db::DbArgs },
+    #[command(about = "Run Prisma ORM commands (generate, migrate, push, studio, etc.)")]
     Prisma { #[command(subcommand)] action: commands::orm::PrismaAction },
+    #[command(about = "Run Drizzle ORM commands (generate, migrate, push, etc.)")]
     Drizzle { #[command(subcommand)] action: commands::orm::DrizzleAction },
+    #[command(about = "Run TypeORM commands (migration:run, schema:sync, etc.)")]
     Typeorm { #[command(subcommand)] action: commands::orm::TypeOrmAction },
+    #[command(about = "Run MikroORM commands (schema:update, migration:create, etc.)")]
     MikroOrm { #[command(subcommand)] action: commands::orm::MikroOrmAction },
+    #[command(about = "Run Sequelize ORM commands (db:migrate, db:seed, etc.)")]
     Sequelize { #[command(subcommand)] action: commands::orm::SequelizeAction },
+    #[command(about = "Run Mongoose ODM commands (generate model, seed, etc.)")]
     Mongoose { #[command(subcommand)] action: commands::orm::MongooseAction },
+    #[command(about = "Run Kysely query builder commands (migrate, seed, etc.)")]
     Kysely { #[command(subcommand)] action: commands::orm::KyselyAction },
+    #[command(about = "Run Knex.js SQL query builder commands (migrate, seed, etc.)")]
     KnexCmd { #[command(subcommand)] action: commands::orm::KnexAction },
+    #[command(about = "Unified ORM command namespace for all supported database tools")]
     Orm { #[command(subcommand)] action: commands::orm::OrmCommand },
+    #[command(about = "Install project dependencies from package.json (supports npm/pnpm/klyron)")]
     Install {
         #[arg(long = "frozen-lockfile")]
         frozen_lockfile: bool,
     },
+    #[command(about = "Add a new package dependency to the project")]
     Add { #[command(flatten)] args: commands::pm::AddArgs },
+    #[command(about = "Remove a package dependency from the project")]
     Remove { #[command(flatten)] args: commands::pm::RemoveArgs },
+    #[command(about = "Uninstall a package dependency (alias for remove)")]
     Uninstall { #[command(flatten)] args: commands::pm::RemoveArgs },
+    #[command(about = "List outdated packages with available versions")]
     Outdated,
+    #[command(about = "Update project dependencies to latest compatible versions")]
     Update,
+    #[command(about = "Audit project dependencies for security vulnerabilities")]
     Audit,
+    #[command(about = "Deduplicate duplicate dependencies in the lockfile")]
     Dedupe,
+    #[command(about = "Manage the lockfile (generate, check, verify)")]
     Lock { #[command(flatten)] args: commands::pm::LockArgs },
+    #[command(about = "Publish a package to the registry")]
     Publish { #[command(flatten)] args: commands::registry::PublishArgs },
+    #[command(about = "Remove a published package from the registry")]
     Unpublish { #[command(flatten)] args: commands::registry::UnpublishArgs },
+    #[command(about = "Log in to the package registry")]
     Login { #[command(flatten)] args: commands::registry::LoginArgs },
+    #[command(about = "Log out from the package registry")]
     Logout { #[command(flatten)] args: commands::registry::LogoutArgs },
+    #[command(about = "Display the currently logged-in user")]
     Whoami,
+    #[command(about = "Search for packages in the registry")]
     Search { #[command(flatten)] args: commands::registry::SearchArgs },
+    #[command(about = "Display detailed information about a package")]
     InfoCmd { #[command(flatten)] args: commands::registry::InfoArgs },
+    #[command(about = "Create a tarball package from the current project")]
     Pack { #[arg(long)] output: Option<PathBuf> },
+    #[command(about = "Link a local package for development")]
     Link { #[command(flatten)] args: commands::pm::LinkArgs },
+    #[command(about = "Unlink a previously linked local package")]
     Unlink { package: String },
+    #[command(about = "Manage distribution tags for packages")]
     DistTag { #[command(subcommand)] action: commands::pm::DistTagAction },
+    #[command(about = "Show why a package is installed (dependency tree)")]
     Why { package: String },
+    #[command(about = "Manage monorepo workspaces (add, remove, list, exec)")]
     Workspace { #[command(subcommand)] action: commands::workspace::WorkspaceAction },
+    #[command(about = "Manage Klyron plugins (install, remove, list, create)")]
     Plugin { #[command(subcommand)] action: commands::plugin::PluginAction },
+    #[command(about = "Manage the Klyron cache (clean, ls, info, verify)")]
     Cache { #[command(subcommand)] action: commands::cache::CacheAction },
+    #[command(about = "Docker container management for project services")]
     Docker { #[command(subcommand)] action: commands::docker::DockerAction },
+    #[command(about = "Build and manage N-API native addons for Node.js compatibility")]
     Napi { #[command(subcommand)] action: commands::napi::NapiAction },
+    #[command(about = "Deploy the project to a configured deployment target")]
     Deploy { #[command(flatten)] args: commands::deploy::DeployArgs },
+    #[command(about = "Check and manage Node.js compatibility of packages")]
     Compat { #[command(flatten)] args: commands::compat::CompatArgs },
+    #[command(about = "AI-assisted development commands (generate, explain, refactor)")]
     Ai { #[command(flatten)] args: commands::ai::AiArgs },
+    #[command(about = "Watch files and auto-restart the dev server on changes")]
     Watch { #[command(flatten)] args: commands::watch::WatchArgs },
+    #[command(about = "Initialize a new klyron.json configuration in the current directory")]
     Init,
+    #[command(about = "Upgrade Klyron to the latest version")]
     Upgrade,
+    #[command(about = "Run system diagnostics to verify the Klyron setup")]
     Doctor,
+    #[command(about = "Display detailed system, project, and environment information")]
     Info { #[command(flatten)] args: InfoArgs },
+    #[command(about = "Display Klyron version information")]
     Version,
+    #[command(about = "Clean build artifacts, cache, and temporary directories")]
     Clean { #[arg(long)] yes: bool },
+    #[command(about = "Generate code coverage reports from test runs")]
     Coverage { #[command(flatten)] args: commands::coverage::CoverageArgs },
+    #[command(about = "Manage telemetry settings (enable, disable, status)")]
     Telemetry { #[command(subcommand)] action: Option<commands::utils::TelemetryAction> },
+    #[command(about = "Manage Klyron configuration (get, set, list, edit)")]
     Config { #[command(subcommand)] action: commands::config::ConfigAction },
+    #[command(about = "Laravel framework utility commands (serve, tinker, model, etc.)")]
     Laravel { #[command(subcommand)] action: commands::laravel::LaravelCommand },
+    #[command(about = "Start a static file or development HTTP server")]
     Serve { #[arg(long, default_value = "localhost")] host: String, #[arg(long, default_value_t = 3000)] port: u16, #[arg(long)] dir: Option<PathBuf>, #[arg(long)] watch: bool },
+    #[command(about = "Generate shell completion scripts for bash, zsh, fish, and powershell")]
     Completions { shell: clap_complete::Shell },
 }
 
@@ -463,6 +592,7 @@ fn handle_create(args: CreateArgs) -> anyhow::Result<()> {
         version: args.version,
         external: args.external,
         stack: args.stack,
+        pm: args.pm,
     };
 
     if args.external {

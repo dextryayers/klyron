@@ -64,6 +64,7 @@ impl FrameworkAdapter for SvelteKitAdapter {
         std::fs::create_dir_all(project_dir.join("src/lib"))?;
         std::fs::create_dir_all(project_dir.join("src/params"))?;
         std::fs::create_dir_all(project_dir.join("static"))?;
+        std::fs::create_dir_all(project_dir.join("src/routes/about"))?;
 
         let vars = &options.template_vars;
 

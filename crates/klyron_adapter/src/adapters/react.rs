@@ -69,6 +69,7 @@ impl FrameworkAdapter for ReactAdapter {
         std::fs::create_dir_all(project_dir.join("src/pages"))?;
         std::fs::create_dir_all(project_dir.join("src/assets"))?;
         std::fs::create_dir_all(project_dir.join("public"))?;
+        std::fs::create_dir_all(project_dir.join("src/test"))?;
 
         let vars = &options.template_vars;
 

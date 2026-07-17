@@ -66,6 +66,7 @@ impl FrameworkAdapter for NuxtAdapter {
         std::fs::create_dir_all(project_dir.join("composables"))?;
         std::fs::create_dir_all(project_dir.join("server"))?;
         std::fs::create_dir_all(project_dir.join("public"))?;
+        std::fs::create_dir_all(project_dir.join("assets/css"))?;
 
         let vars = &options.template_vars;
 

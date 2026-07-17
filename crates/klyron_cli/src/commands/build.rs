@@ -217,11 +217,10 @@ exec "$SCRIPT_DIR/klyron_app" run "$SCRIPT_DIR/""#.to_string() + script_name + "
     };
     std::fs::write(&runner_path, &runner)?;
 
-    if cfg!(unix) {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&runner_path, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
-        std::fs::set_permissions(&target_bin, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
-    }
+        if cfg!(unix) {
+            std::fs::set_permissions(&runner_path, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
+            std::fs::set_permissions(&target_bin, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
+        }
 
     eprintln!("  {} Copied klyron binary to {}", crate::Color::GREEN.paint("\u{2713}"), target_bin.display());
     eprintln!("  {} Script: {}", crate::Color::GREEN.paint("\u{2713}"), script_dest.display());

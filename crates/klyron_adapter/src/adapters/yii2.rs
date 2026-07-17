@@ -100,6 +100,7 @@ impl FrameworkAdapter for Yii2Adapter {
         ] {
             std::fs::create_dir_all(project_dir.join(d))?;
         }
+        std::fs::create_dir_all(project_dir.join("mail/layouts"))?;
 
         std::fs::write(project_dir.join("composer.json"),
             klyron_template::TemplateEngine::render_static(

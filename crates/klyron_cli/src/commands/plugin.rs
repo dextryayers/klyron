@@ -1,5 +1,5 @@
 use clap::Subcommand;
-use klyron_plugin::manifest::{PluginInfo, KLYRON_API_VERSION};
+use klyron_plugin::manifest::KLYRON_API_VERSION;
 use klyron_plugin::PluginRegistry;
 use std::path::{Path, PathBuf};
 

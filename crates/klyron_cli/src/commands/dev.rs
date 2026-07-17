@@ -74,8 +74,8 @@ pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
 
     match project_type {
         "node" => {
-            let has_vite = dir.join("vite.config.ts").exists() || dir.join("vite.config.js").exists();
-            let has_next = dir.join("next.config.mjs").exists() || dir.join("next.config.js").exists();
+            let has_vite = dir.join("vite.config.ts").exists() || dir.join("vite.config.js").exists() || dir.join("vite.config.mjs").exists();
+            let has_next = dir.join("next.config.ts").exists() || dir.join("next.config.mjs").exists() || dir.join("next.config.js").exists();
             if has_next {
                 if hmr_enabled {
                     watch_dev("npx", &["next", "dev", "-p", &port.to_string()], &dir)
@@ -90,6 +90,17 @@ pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
                     watch_dev("npx", &args_vite, &dir)
                 } else {
                     crate::run_cmd("npx", &args_vite, &dir)
+                }
+            } else if dir.join("package.json").exists() {
+                // Fallback: try npm run dev if package.json has a dev script
+                let pkg = std::fs::read_to_string(dir.join("package.json")).unwrap_or_default();
+                if pkg.contains("\"dev\"") || pkg.contains("'dev'") {
+                    crate::log_info("Detected npm dev script, running npm run dev ...");
+                    crate::run_cmd("npm", &["run", "dev"], &dir)
+                } else if hmr_enabled {
+                    run_klyron_hmr_server(&dir, port, host)
+                } else {
+                    run_klyron_static_server(&dir, port, host)
                 }
             } else if hmr_enabled {
                 run_klyron_hmr_server(&dir, port, host)
