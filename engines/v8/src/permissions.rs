@@ -2,13 +2,7 @@ use klyron_engine_common::permissions::{CommonPermission, CommonPermissions};
 
 #[derive(Debug, Clone)]
 pub enum Permission {
-    Read,
-    Write,
-    Net,
-    Env,
-    Run,
-    Ffi,
-    All,
+    Read, Write, Net, Env, Run, Ffi, All,
 }
 
 impl From<Permission> for CommonPermission {
@@ -40,68 +34,20 @@ impl From<CommonPermission> for Permission {
 }
 
 #[derive(Debug, Default)]
-pub struct V8Permissions {
-    pub allow_read: Vec<String>,
-    pub allow_write: Vec<String>,
-    pub allow_net: Vec<String>,
-    pub allow_env: bool,
-    pub allow_run: bool,
-    pub allow_ffi: bool,
-}
+pub struct V8Permissions(CommonPermissions);
 
 impl V8Permissions {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn check(&self, permission: &Permission, resource: Option<&str>) -> bool {
+    pub fn new() -> Self { Self::default() }
+    pub fn check(&self, permission: &Permission) -> bool {
         let common: CommonPermission = permission.clone().into();
-        let common_perms = self.to_common();
-        common_perms.check(&common, resource)
+        self.0.check(&common, None)
     }
-
-    pub fn deny_all() -> Self {
-        Self {
-            allow_read: vec![],
-            allow_write: vec![],
-            allow_net: vec![],
-            allow_env: false,
-            allow_run: false,
-            allow_ffi: false,
-        }
+    pub fn check_path(&self, permission: &Permission, path: &str) -> bool {
+        let common: CommonPermission = permission.clone().into();
+        self.0.check(&common, Some(path))
     }
-
-    pub fn allow_all() -> Self {
-        Self {
-            allow_read: vec!["/".to_string()],
-            allow_write: vec!["/".to_string()],
-            allow_net: vec!["*".to_string()],
-            allow_env: true,
-            allow_run: true,
-            allow_ffi: true,
-        }
-    }
-
-    pub fn to_common(&self) -> CommonPermissions {
-        CommonPermissions {
-            allow_read: self.allow_read.clone(),
-            allow_write: self.allow_write.clone(),
-            allow_net: self.allow_net.clone(),
-            allow_env: self.allow_env,
-            allow_run: self.allow_run,
-            allow_ffi: self.allow_ffi,
-        }
-    }
-
-    pub fn from_common(common: CommonPermissions) -> Self {
-        Self {
-            allow_read: common.allow_read,
-            allow_write: common.allow_write,
-            allow_net: common.allow_net,
-            allow_env: common.allow_env,
-            allow_run: common.allow_run,
-            allow_ffi: common.allow_ffi,
-        }
-    }
-
+    pub fn deny_all() -> Self { Self(CommonPermissions::deny_all()) }
+    pub fn allow_all() -> Self { Self(CommonPermissions::allow_all()) }
+    pub fn to_common(&self) -> &CommonPermissions { &self.0 }
+    pub fn from_common(common: CommonPermissions) -> Self { Self(common) }
 }

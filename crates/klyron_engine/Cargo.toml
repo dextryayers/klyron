@@ -27,11 +27,17 @@ wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
 
 [features]
+v8 = ["dep:klyron-core"]
 boa = ["dep:klyron-engine-boa"]
 quickjs = ["dep:klyron-engine-quickjs"]
-all-engines = ["boa", "quickjs"]
+jsc = ["dep:klyron-engine-jsc"]
+all-engines = ["v8", "boa", "quickjs", "jsc"]
 inferno = ["dep:inferno"]
 default = []
+
+[dependencies.klyron-core]
+optional = true
+path = "../../src/core"
 
 [dependencies.klyron-engine-boa]
 optional = true
@@ -40,6 +46,10 @@ path = "../../engines/boa"
 [dependencies.klyron-engine-quickjs]
 optional = true
 path = "../../engines/quickjs"
+
+[dependencies.klyron-engine-jsc]
+optional = true
+path = "../../engines/jsc"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

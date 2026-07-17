@@ -89,6 +89,8 @@ members = [
     "engines/common",
     "engines/boa",
     "engines/quickjs",
+    "engines/v8",
+    "engines/jsc",
 ]
 
 [workspace.package]

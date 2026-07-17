@@ -1,77 +1,49 @@
 use std::fmt;
-
 use klyron_engine_common::error::{CommonError, CommonErrorKind};
 
 #[derive(Debug)]
 pub enum V8Error {
     NotInitialized,
     InitFailed(String),
-    ExecutionFailed(String),
-    CompileError(String),
-    SyntaxError(String),
-    TypeError(String),
-    RangeError(String),
-    ReferenceError(String),
-    Timeout,
-    OutOfMemory,
-}
-
-impl V8Error {
-    pub fn catch_error() -> Option<Self> {
-        None
-    }
-
-    pub fn format_stack_trace() -> String {
-        "No stack trace available (V8 native not linked)".to_string()
-    }
-
-    pub fn to_common_kind(&self) -> CommonErrorKind {
-        match self {
-            Self::NotInitialized => CommonErrorKind::NotInitialized,
-            Self::InitFailed(msg) => CommonErrorKind::InitFailed(msg.clone()),
-            Self::ExecutionFailed(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
-            Self::CompileError(msg) => CommonErrorKind::CompileError(msg.clone()),
-            Self::SyntaxError(msg) => CommonErrorKind::SyntaxError(msg.clone()),
-            Self::TypeError(msg) => CommonErrorKind::TypeError(msg.clone()),
-            Self::RangeError(msg) => CommonErrorKind::RangeError(msg.clone()),
-            Self::ReferenceError(msg) => CommonErrorKind::ReferenceError(msg.clone()),
-            Self::Timeout => CommonErrorKind::Timeout,
-            Self::OutOfMemory => CommonErrorKind::OutOfMemory,
-        }
-    }
+    EvalFailed(String),
+    ModuleFailed(String),
+    GlobalFailed(String),
+    CallFailed(String),
+    SnapshotFailed(String),
+    Internal(String),
 }
 
 impl fmt::Display for V8Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotInitialized => write!(f, "V8 not initialized"),
-            Self::InitFailed(msg) => write!(f, "V8 initialization failed: {msg}"),
-            Self::ExecutionFailed(msg) => write!(f, "Execution failed: {msg}"),
-            Self::CompileError(msg) => write!(f, "Compile error: {msg}"),
-            Self::SyntaxError(msg) => write!(f, "Syntax error: {msg}"),
-            Self::TypeError(msg) => write!(f, "Type error: {msg}"),
-            Self::RangeError(msg) => write!(f, "Range error: {msg}"),
-            Self::ReferenceError(msg) => write!(f, "Reference error: {msg}"),
-            Self::Timeout => write!(f, "Script timeout"),
-            Self::OutOfMemory => write!(f, "Out of memory"),
+            Self::InitFailed(msg) => write!(f, "V8 init failed: {msg}"),
+            Self::EvalFailed(msg) => write!(f, "V8 eval error: {msg}"),
+            Self::ModuleFailed(msg) => write!(f, "V8 module error: {msg}"),
+            Self::GlobalFailed(msg) => write!(f, "V8 global error: {msg}"),
+            Self::CallFailed(msg) => write!(f, "V8 call error: {msg}"),
+            Self::SnapshotFailed(msg) => write!(f, "V8 snapshot error: {msg}"),
+            Self::Internal(msg) => write!(f, "V8 internal error: {msg}"),
         }
     }
 }
 
 impl std::error::Error for V8Error {}
 
-impl CommonError for V8Error {
-    fn kind(&self) -> CommonErrorKind {
-        self.to_common_kind()
-    }
-
-    fn format_stack_trace(&self) -> Option<String> {
-        Some(Self::format_stack_trace())
+impl V8Error {
+    pub fn to_common_kind(&self) -> CommonErrorKind {
+        match self {
+            Self::NotInitialized => CommonErrorKind::NotInitialized,
+            Self::InitFailed(msg) => CommonErrorKind::InitFailed(msg.clone()),
+            Self::EvalFailed(msg) | Self::ModuleFailed(msg) | Self::GlobalFailed(msg)
+                | Self::CallFailed(msg) | Self::Internal(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
+            Self::SnapshotFailed(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
+        }
     }
 }
 
-impl From<anyhow::Error> for V8Error {
-    fn from(e: anyhow::Error) -> Self {
-        Self::ExecutionFailed(e.to_string())
+impl CommonError for V8Error {
+    fn kind(&self) -> CommonErrorKind {
+        self.to_common_kind()
     }
 }

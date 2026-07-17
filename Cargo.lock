@@ -3563,12 +3563,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "klyron-engine-jsc"
+version = "1.1.0"
+dependencies = [
+ "anyhow",
+ "cc",
+ "klyron-engine-common",
+ "pkg-config",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "klyron-engine-quickjs"
 version = "1.1.0"
 dependencies = [
  "anyhow",
  "cc",
  "klyron-engine-common",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "klyron-engine-v8"
+version = "1.1.0"
+dependencies = [
+ "anyhow",
+ "cc",
+ "klyron-engine-common",
+ "libc",
  "serde",
  "serde_json",
 ]
@@ -3992,7 +4016,9 @@ dependencies = [
  "criterion",
  "dirs 5.0.1",
  "inferno",
+ "klyron-core",
  "klyron-engine-boa",
+ "klyron-engine-jsc",
  "klyron-engine-quickjs",
  "lru",
  "once_cell",

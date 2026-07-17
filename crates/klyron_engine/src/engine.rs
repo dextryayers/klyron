@@ -20,7 +20,12 @@ impl JsEngineKind {
     }
 
     pub fn all() -> Vec<JsEngineKind> {
-        vec![Self::Boa, Self::QuickJS]
+        let mut engines = vec![Self::Boa, Self::QuickJS];
+        #[cfg(feature = "v8")]
+        { engines.push(Self::V8); }
+        #[cfg(feature = "jsc")]
+        { engines.push(Self::JSC); }
+        engines
     }
 }
 
