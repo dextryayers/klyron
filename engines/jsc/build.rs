@@ -1,6 +1,9 @@
+use std::path::Path;
+
 fn main() {
-    println!("cargo:rerun-if-changed=cpp/jsc_wrapper.cc");
-    println!("cargo:rerun-if-changed=cpp/jsc_wrapper.h");
+    println!("cargo:rerun-if-changed=cpp/source/");
+    println!("cargo:rerun-if-changed=cpp/impl/");
+    println!("cargo:rerun-if-changed=include/klyron_jsc.h");
 
     if std::env::var("CARGO_FEATURE_NATIVE").is_err() {
         return;
@@ -24,7 +27,20 @@ fn main() {
     }
 
     builder
-        .include("cpp")
-        .file("cpp/jsc_wrapper.cc")
-        .compile("libjsc_wrapper.a");
+        .include("include")
+        .include("cpp");
+
+    let source_dir = Path::new("cpp/source");
+    if source_dir.exists() {
+        for entry in std::fs::read_dir(source_dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.extension().map_or(false, |e| e == "cpp") {
+                builder.file(&path);
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
+
+    builder.compile("libklyron_jsc_wrapper.a");
 }
