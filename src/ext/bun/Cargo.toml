@@ -1,0 +1,20 @@
+[package]
+name = "klyron-ext-bun"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+deno_core.workspace = true
+deno_error.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+
+[dev-dependencies]
+klyron-ext-node = { path = "../node" }
+klyron-ext-net = { path = "../net" }
+klyron-ext-fs = { path = "../fs" }
+klyron-ext-web = { path = "../web" }
+klyron-ext-crypto = { path = "../crypto" }
+tokio = { version = "1", features = ["full"] }

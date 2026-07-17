@@ -3521,14 +3521,14 @@ dependencies = [
 
 [[package]]
 name = "klyron"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "klyron_cli",
 ]
 
 [[package]]
 name = "klyron-core"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3546,7 +3546,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-engine-boa"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "boa_engine",
@@ -3557,7 +3557,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-engine-common"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -3566,7 +3566,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-engine-quickjs"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "klyron-engine-common",
@@ -3577,8 +3577,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "klyron-ext-bun"
+version = "1.1.0"
+dependencies = [
+ "anyhow",
+ "deno_core",
+ "deno_error",
+ "klyron-ext-crypto",
+ "klyron-ext-fs",
+ "klyron-ext-net",
+ "klyron-ext-node",
+ "klyron-ext-web",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "klyron-ext-console"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "deno_core",
  "klyron-core",
@@ -3586,7 +3603,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-ext-crypto"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "aes",
  "anyhow",
@@ -3603,7 +3620,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-ext-ffi"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "deno_core",
@@ -3614,7 +3631,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-ext-fs"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "deno_core",
  "deno_error",
@@ -3624,7 +3641,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-ext-html"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "deno_core",
@@ -3634,7 +3651,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-ext-http"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "deno_core",
  "deno_error",
@@ -3645,7 +3662,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-ext-klyron"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "deno_core",
@@ -3657,7 +3674,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-ext-net"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "deno_core",
@@ -3669,7 +3686,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-ext-node"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "deno_core",
@@ -3684,7 +3701,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-ext-process"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "deno_core",
@@ -3696,7 +3713,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-ext-timers"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "deno_core",
  "klyron-core",
@@ -3705,7 +3722,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-ext-web"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3719,7 +3736,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-ext-ws"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "base64 0.22.1",
  "deno_core",
@@ -3733,7 +3750,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_adapter"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3745,7 +3762,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_ai"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -3760,11 +3777,11 @@ dependencies = [
 
 [[package]]
 name = "klyron_arena"
-version = "0.1.0"
+version = "1.1.0"
 
 [[package]]
 name = "klyron_bench"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3779,7 +3796,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_bundler"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "glob",
@@ -3795,7 +3812,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_cache"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "dashmap 6.2.1",
@@ -3807,7 +3824,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_cli"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -3819,6 +3836,7 @@ dependencies = [
  "glob",
  "hex",
  "klyron-core",
+ "klyron-ext-bun",
  "klyron-ext-console",
  "klyron-ext-crypto",
  "klyron-ext-ffi",
@@ -3874,7 +3892,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_compat"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "semver",
@@ -3886,7 +3904,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_config"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "once_cell",
@@ -3899,7 +3917,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_crypto"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3924,7 +3942,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_debugger"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -3935,7 +3953,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_deploy"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -3945,7 +3963,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_dns"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "hickory-proto",
@@ -3958,7 +3976,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_docker"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -3967,7 +3985,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_engine"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3997,7 +4015,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_formatter"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "ignore",
@@ -4010,7 +4028,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_fs"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "memmap2",
@@ -4025,7 +4043,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_http"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -4048,7 +4066,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_intern"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "dashmap 6.2.1",
  "parking_lot",
@@ -4056,7 +4074,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_linter"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "rayon",
@@ -4068,7 +4086,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_loader"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "once_cell",
@@ -4080,7 +4098,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_logger"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4093,7 +4111,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_lsp"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -4105,7 +4123,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_mysql"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "serde_json",
  "sqlx",
@@ -4115,7 +4133,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_napi"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "libloading",
@@ -4127,7 +4145,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_node"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4143,7 +4161,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_plugin"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4164,7 +4182,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_pm"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4196,7 +4214,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_postgres"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "bytes",
  "deadpool-postgres",
@@ -4209,7 +4227,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_process"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "nix 0.29.0",
@@ -4220,7 +4238,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_registry"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4237,7 +4255,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_runtime"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "deno_core",
@@ -4252,7 +4270,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_serde"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4261,7 +4279,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_shell"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "rustyline",
@@ -4272,7 +4290,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_sqlite"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "rusqlite",
  "thiserror 2.0.18",
@@ -4281,7 +4299,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_telemetry"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "opentelemetry",
@@ -4294,7 +4312,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_template"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "regex",
@@ -4306,7 +4324,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_test"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4321,7 +4339,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_transpiler"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -4330,7 +4348,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_updater"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -4345,7 +4363,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_utils"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4362,7 +4380,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_watcher"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -4373,7 +4391,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_web"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4389,7 +4407,7 @@ dependencies = [
 
 [[package]]
 name = "klyron_workspace"
-version = "0.1.0"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "chrono",

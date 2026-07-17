@@ -294,11 +294,12 @@ mod tests {
 
             // Get the actual address
             let rt = tokio::runtime::Handle::current();
-            let lstore = state.borrow::<ListenerStore>();
-            let lguard = lstore.lock().unwrap();
-            let listener = lguard.get(lrid as usize).unwrap().as_ref().unwrap();
-            let addr = listener.local_addr().unwrap();
-            let _ = lguard; let _ = lstore;
+            let addr = {
+                let lstore = state.borrow::<ListenerStore>();
+                let lguard = lstore.lock().unwrap();
+                let listener = lguard.get(lrid as usize).unwrap().as_ref().unwrap();
+                listener.local_addr().unwrap()
+            };
 
             // Connect to the listener
             let conn_result = op_net_connect_impl(&mut state, addr.to_string()).unwrap();

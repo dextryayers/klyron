@@ -104,6 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write  # for npm provenance
     steps:
       - uses: actions/checkout@v4
       - name: Download all artifacts
@@ -124,7 +125,15 @@ jobs:
 
             ### Installation
             ```bash
+            npm install -g klyron
+            ```
+
+            ```bash
             curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
+            ```
+
+            ```powershell
+            iwr -useb https://raw.githubusercontent.com/${{ github.repository }}/main/install.ps1 | iex
             ```
 
             ### What's Changed
@@ -139,3 +148,29 @@ jobs:
           draft: true
           prerelease: false
           generate_release_notes: true
+
+  publish-npm:
+    name: Publish to npm
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # for npm provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+      - name: Extract version from tag
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Update npm package version
+        run: |
+          cd npm
+          npm version "${{ steps.version.outputs.tag }}" --no-git-tag-version
+      - name: Publish to npm
+        working-directory: npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

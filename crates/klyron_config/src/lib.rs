@@ -426,12 +426,22 @@ mod tests {
 
     #[test]
     fn test_env_override() {
+        struct Guard(String, Option<String>);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                match &self.1 {
+                    Some(v) => unsafe { std::env::set_var(&self.0, v); },
+                    None => unsafe { std::env::remove_var(&self.0); },
+                }
+            }
+        }
+        let prev = std::env::var("KLYRON_TELEMETRY").ok();
+        let _guard = Guard("KLYRON_TELEMETRY".into(), prev);
         unsafe { std::env::set_var("KLYRON_TELEMETRY", "false"); }
         let mut config = KlyronConfig::default();
         config.telemetry = Some(true);
         apply_env_overrides(&mut config);
         assert_eq!(config.telemetry, Some(false));
-        unsafe { std::env::remove_var("KLYRON_TELEMETRY"); }
     }
 
     #[test]

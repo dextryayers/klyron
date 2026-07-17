@@ -1,0 +1,8 @@
+{
+  "linux-x86_64":   "klyron-linux-x86_64.tar.gz",
+  "linux-aarch64":  "klyron-linux-aarch64.tar.gz",
+  "darwin-x86_64":  "klyron-macos-x86_64.tar.gz",
+  "darwin-aarch64": "klyron-macos-aarch64.tar.gz",
+  "win32-x86_64":   "klyron-windows-x86_64.zip",
+  "win32-aarch64":  "klyron-windows-aarch64.zip"
+}

@@ -35,6 +35,7 @@ klyron-ext-crypto = { path = "../../src/ext/crypto" }
 klyron-ext-web = { path = "../../src/ext/web" }
 klyron-ext-html = { path = "../../src/ext/html" }
 klyron-ext-node = { path = "../../src/ext/node" }
+klyron-ext-bun = { path = "../../src/ext/bun" }
 klyron-ext-klyron = { path = "../../src/ext/klyron" }
 klyron-ext-ffi = { path = "../../src/ext/ffi" }
 klyron-ext-ws = { path = "../../src/ext/ws" }

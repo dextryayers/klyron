@@ -23,8 +23,14 @@
 ## Quick Start
 
 ```bash
-# Install Klyron (macOS / Linux / WSL)
+# Install globally via npm (macOS / Linux / Windows)
+npm install -g klyron
+
+# Or via curl (macOS / Linux / WSL)
 curl -fsSL https://klyron.dev/install.sh | bash
+
+# Or via PowerShell (Windows)
+iwr -useb https://klyron.dev/install.ps1 | iex
 
 # Or via Cargo
 cargo install klyron-cli

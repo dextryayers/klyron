@@ -137,6 +137,7 @@ pub fn all_extensions() -> Vec<deno_core::Extension> {
         klyron_ext_crypto::init(),
         klyron_ext_web::init(),
         klyron_ext_node::init(),
+        klyron_ext_bun::init(),
         klyron_ext_klyron::init(),
         klyron_ext_html::init(),
         klyron_ext_ffi::init(),

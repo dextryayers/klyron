@@ -12,6 +12,7 @@ default-members = [
     "src/ext/http",
     "src/ext/node",
     "src/ext/klyron",
+    "src/ext/bun",
     "crates/klyron_compat",
     "crates/klyron_config",
     "crates/klyron_engine",
@@ -40,6 +41,7 @@ members = [
     "src/ext/ws",
     "src/ext/html",
     "src/ext/process",
+    "src/ext/bun",
     "crates/klyron_adapter",
     "crates/klyron_ai",
     "crates/klyron_bench",
@@ -90,7 +92,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.1.0"
 edition = "2024"
 license = "MIT"
 authors = ["Klyron Contributors"]
