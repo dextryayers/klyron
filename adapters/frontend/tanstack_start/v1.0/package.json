@@ -1,0 +1,8 @@
+{
+  "name": "tanstack-app",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vinxi dev", "build": "vinxi build" },
+  "dependencies": { "@tanstack/react-router": "^1.0.0", "@tanstack/start": "^1.0.0", "react": "^19.0.0", "react-dom": "^19.0.0", "vinxi": "^0.5.0" },
+  "devDependencies": { "typescript": "^5.7.0" }
+}

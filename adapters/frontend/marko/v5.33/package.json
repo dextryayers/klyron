@@ -1,0 +1,1 @@
+{ "name": "marko-app", "private": true, "version": "1.0.0", "scripts": { "dev": "marko", "build": "marko build" }, "dependencies": { "marko": "^5.33.0" } }

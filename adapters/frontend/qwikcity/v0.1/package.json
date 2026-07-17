@@ -1,0 +1,18 @@
+{
+  "name": "qwikcity-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@builder.io/qwik": "^0.1.0",
+    "@builder.io/qwik-city": "^0.1.0"
+  },
+  "devDependencies": {
+    "vite": "^6.2.0",
+    "typescript": "^5.1.0"
+  }
+}

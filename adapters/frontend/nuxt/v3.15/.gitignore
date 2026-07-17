@@ -1,0 +1,14 @@
+# Nuxt
+.nuxt
+.output
+dist
+
+# Node
+node_modules
+
+# Logs
+*.log
+
+# Env
+.env
+.env.*

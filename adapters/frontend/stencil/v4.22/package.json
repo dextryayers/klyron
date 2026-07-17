@@ -1,0 +1,1 @@
+{ "name": "stencil-app", "version": "1.0.0", "private": true, "scripts": { "dev": "stencil dev", "build": "stencil build" }, "dependencies": { "@stencil/core": "^4.22.0" } }

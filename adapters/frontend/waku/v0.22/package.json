@@ -1,0 +1,1 @@
+{ "name": "waku-app", "private": true, "type": "module", "scripts": { "dev": "waku dev", "build": "waku build" }, "dependencies": { "waku": "^0.22.0", "react": "^19.0.0", "react-dom": "^19.0.0" }, "devDependencies": { "typescript": "^5.7.0" } }

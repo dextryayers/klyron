@@ -1,0 +1,8 @@
+{
+  "name": "solidstart-app",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vinxi dev", "build": "vinxi build" },
+  "dependencies": { "solid-js": "^1.8.0", "@solidjs/start": "^0.6.0", "vinxi": "^0.2.0" },
+  "devDependencies": { "vite": "^6.2.0", "typescript": "^5.7.0" }
+}

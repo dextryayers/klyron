@@ -1,0 +1,1 @@
+{ "name": "qwik-app", "private": true, "type": "module", "scripts": { "dev": "vite", "build": "vite build" }, "dependencies": { "@builder.io/qwik": "^1.11.0", "@builder.io/qwik-city": "^1.11.0" }, "devDependencies": { "vite": "^6.2.0", "typescript": "^5.7.0" } }
