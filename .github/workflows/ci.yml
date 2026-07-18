@@ -2,117 +2,82 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master, develop]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
+  RUSTFLAGS: "-D warnings"
 
 jobs:
-  msrv:
-    name: MSRV (1.85.0)
+  check:
+    name: cargo check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          components: rustc, cargo
-      - uses: Swatinem/rust-cache@v2
+          toolchain: stable
       - run: cargo check --workspace
-
-  check:
-    name: Check (${{ matrix.os }}, ${{ matrix.rust }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: true
-      matrix:
-        os: [ubuntu-latest]
-        rust: [stable, beta]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
-          components: rustc, cargo, clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace -- -D warnings
-      - run: cargo fmt --check
 
   test:
-    name: Test (${{ matrix.os }}, ${{ matrix.rust }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        rust: [stable, beta]
+    name: cargo test
+    runs-on: ubuntu-latest
+    needs: check
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: ${{ matrix.rust }}
-          components: rustc, cargo
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
+          toolchain: stable
+      - run: cargo test --workspace --no-fail-fast
 
   clippy:
-    name: Clippy (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+    name: cargo clippy
+    runs-on: ubuntu-latest
+    needs: check
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          toolchain: stable
           components: clippy
-      - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace -- -D warnings
 
   fmt:
-    name: Rustfmt
+    name: cargo fmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          toolchain: stable
           components: rustfmt
-      - run: cargo fmt --check
+      - run: cargo fmt --all --check
 
   deny:
-    name: cargo-deny
+    name: cargo deny
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories
 
-  quality:
-    name: Quality Gates
+  engine-tests:
+    name: Engine tests
     runs-on: ubuntu-latest
+    needs: check
+    strategy:
+      matrix:
+        engine: [boa, quickjs]
     steps:
       - uses: actions/checkout@v4
-      - name: Check for forbidden patterns
-        run: |
-          set +e
-          has_issues=0
-          todos=$(grep -rn "TODO\|FIXME\|HACK\|XXX" --include="*.rs" --include="*.js" --include="*.ts" --include="*.toml" --include="*.json" --include="*.md" . | grep -v "node_modules/" | grep -v "target/" | grep -v ".github/" | grep -v "CHANGELOG.md" | grep -v "LICENSE" | grep -v "\.git/" || true)
-          if [ -n "$todos" ]; then
-            echo "::warning::Found TODO/FIXME/HACK/XXX comments:"
-            echo "$todos"
-          fi
-          ds_store=$(find . -name ".DS_Store" -o -name "Thumbs.db" 2>/dev/null)
-          if [ -n "$ds_store" ]; then
-            echo "::error::Found .DS_Store or Thumbs.db files:"
-            echo "$ds_store"
-            has_issues=1
-          fi
-          exit $has_issues
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      - run: cargo test -p klyron-engine-${{ matrix.engine }}

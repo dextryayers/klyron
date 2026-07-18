@@ -525,8 +525,9 @@ fn handle_info(json: bool) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(&info)?);
     } else {
         println!("Klyron v{}", info["version"]);
-        let engines = info["engines"].as_array().unwrap().iter()
-            .map(|v| v.as_str().unwrap()).collect::<Vec<_>>().join(", ");
+        let engines = info["engines"].as_array().map(|arr| {
+            arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", ")
+        }).unwrap_or_default();
         println!("Engines: {engines}");
         println!("Best JS engine: {}", info["best_engine"].as_str().unwrap_or("unknown"));
         if let Some(js_arr) = info["js_engines"].as_array() {
@@ -557,7 +558,7 @@ fn list_frameworks() {
     let count = names.len();
     println!("Available frameworks ({count}):");
     for name in &names {
-        let adapter = registry.get(name).unwrap();
+        let Some(adapter) = registry.get(name) else { continue };
         let versions = adapter.supported_versions();
         let default = adapter.default_version();
         println!("  {name:<12} versions: {versions:?} (default: {default})");
@@ -654,7 +655,15 @@ pub fn run_cli() -> anyhow::Result<()> {
         log_info(format!("Pre-warming {} engines (pool size: {})", kind, cli.engine_pool_size));
     }
 
-    let result = dispatch_command(cli.command.unwrap(), engine, cli.json);
+    let cmd = match cli.command {
+        Some(c) => c,
+        None => {
+            handle_info(false)?;
+            return Ok(());
+        }
+    };
+
+    let result = dispatch_command(cmd, engine, cli.json);
 
     if cli.json {
         match &result {

@@ -43,7 +43,17 @@ pub struct FileWatcher {
     pub recursive: bool,
 }
 impl FileWatcher {
-    pub fn receiver(&self) { unimplemented!("receiver") }
+    pub fn receiver(&self) -> std::sync::mpsc::Receiver<()> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let paths = self.paths.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                if tx.send(()).is_err() { break; }
+            }
+        });
+        rx
+    }
     pub fn start(&self) -> anyhow::Result<()> { Ok(()) }
     pub fn stop(&self) {}
 }
