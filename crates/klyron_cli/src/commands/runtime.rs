@@ -93,6 +93,8 @@ pub fn run_file(args: RunArgs, extensions: Vec<deno_core::Extension>) -> anyhow:
     let watch = args.watch;
     let path = args.path.clone();
 
+    crate::anim::cmd_header("run", &format!("Running {}", path.display()));
+
     let dir = std::env::current_dir()?;
     crate::load_dotenv(&dir);
 

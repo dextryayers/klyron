@@ -27,6 +27,7 @@ pub struct DevArgs {
 }
 
 pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
+    crate::anim::cmd_header("dev", "Starting development server");
     let dir = args.dir;
     let port = args.port.unwrap_or(3000);
     let host = args.host.unwrap_or_else(|| "127.0.0.1".to_string());
@@ -151,11 +152,12 @@ pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
 }
 
 fn run_klyron_static_server(dir: &Path, port: u16, host: String) -> anyhow::Result<()> {
+    let addr = format!("{host}:{port}");
+    crate::anim::success_banner(&format!("Dev server ready at http://{addr}"));
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let service = tower_http::services::ServeDir::new(dir)
             .append_index_html_on_directories(true);
-        let addr = format!("{host}:{port}");
         let listener = tokio::net::TcpListener::bind(&addr).await
             .map_err(|e| anyhow::anyhow!("Cannot bind {addr}: {e}"))?;
         crate::log_info(format!("Listening on http://{addr}"));
@@ -167,6 +169,8 @@ fn run_klyron_static_server(dir: &Path, port: u16, host: String) -> anyhow::Resu
 }
 
 fn run_klyron_hmr_server(dir: &Path, port: u16, host: String) -> anyhow::Result<()> {
+    let addr = format!("{host}:{port}");
+    crate::anim::success_banner(&format!("Dev server ready at http://{addr}"));
     let rt = tokio::runtime::Runtime::new()?;
     let dir = dir.to_path_buf();
     let shutdown = Arc::new(AtomicBool::new(false));

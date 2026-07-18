@@ -45,7 +45,7 @@ pub fn install_deps(project_dir: &std::path::Path, pm: Option<&str>) -> anyhow::
         _ => ("npm", &["install"]),
     };
 
-    let spinner = crate::color::Spinner::new(&format!("Installing dependencies with {}...", cmd));
+    let mut spinner = crate::anim::PulseSpinner::new(&format!("Installing dependencies with {}...", cmd));
     let status = Command::new(cmd)
         .args(args)
         .current_dir(project_dir)
@@ -55,7 +55,7 @@ pub fn install_deps(project_dir: &std::path::Path, pm: Option<&str>) -> anyhow::
         spinner.fail(&format!("{cmd} install exited with code {}", status));
         anyhow::bail!("{cmd} install exited with code {}", status);
     }
-    spinner.done();
+    spinner.done("Dependencies installed");
     Ok(())
 }
 

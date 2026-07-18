@@ -1,5 +1,6 @@
 use clap::Args;
 use std::path::{Path, PathBuf};
+use crate::anim::{GradientBar, PulseSpinner, cmd_header, success_banner};
 
 #[derive(Args)]
 pub struct AddArgs {
@@ -250,6 +251,10 @@ fn ensure_gitignore_has_klyron_lock(dir: &std::path::Path) -> anyhow::Result<()>
 }
 
 pub fn run_install(frozen: bool) -> anyhow::Result<()> {
+    cmd_header("install", "Installing project dependencies");
+    let mut spinner = PulseSpinner::new("Analyzing project...");
+    spinner.tick();
+
     let dir = std::env::current_dir()?;
     let project = crate::detect_project_type(&dir);
 
@@ -348,9 +353,12 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
     match project {
         "node" => {
             if dir.join("klyron.lock").exists() {
-                let pm_dir = dir.clone();
-                klyron_pm::install_with_lockfile(&pm_dir, frozen)
+                spinner.done("Project analyzed");
+                let mut bar = GradientBar::new(100, "Installing dependencies...");
+                klyron_pm::install_with_lockfile(&dir, frozen)
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
+                bar.finish_with("Dependencies installed");
+                success_banner("Install complete");
                 return Ok(());
             }
     let pm = detect_package_manager(&dir);
@@ -395,16 +403,38 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
 
             Ok(())
         }
-        "laravel" => crate::run_cmd("composer", &["install"], &dir),
+        "laravel" => {
+            let mut bar = crate::anim::GradientBar::new(50, "Installing Composer packages...");
+            let r = crate::run_cmd("composer", &["install"], &dir);
+            bar.finish_with("Composer packages installed");
+            success_banner("Install complete");
+            r
+        }
         "python" => {
-            if dir.join("Pipfile").exists() { crate::run_cmd("pipenv", &["install"], &dir) }
+            let mut bar = crate::anim::GradientBar::new(30, "Installing Python packages...");
+            let r = if dir.join("Pipfile").exists() { crate::run_cmd("pipenv", &["install"], &dir) }
             else if dir.join("poetry.lock").exists() { crate::run_cmd("poetry", &["install"], &dir) }
             else if dir.join("requirements.txt").exists() { crate::run_cmd("pip", &["install", "-r", "requirements.txt"], &dir) }
-            else { anyhow::bail!("No requirements file found") }
+            else { anyhow::bail!("No requirements file found") };
+            bar.finish_with("Python packages installed");
+            success_banner("Install complete");
+            r
         }
-        "ruby" => crate::run_cmd("bundle", &["install"], &dir),
+        "ruby" => {
+            let mut bar = crate::anim::GradientBar::new(20, "Installing Ruby gems...");
+            let r = crate::run_cmd("bundle", &["install"], &dir);
+            bar.finish_with("Ruby gems installed");
+            success_banner("Install complete");
+            r
+        }
         "rust" => Ok(()),
-        "go" => crate::run_cmd("go", &["mod", "download"], &dir),
+        "go" => {
+            let mut bar = crate::anim::GradientBar::new(15, "Downloading Go modules...");
+            let r = crate::run_cmd("go", &["mod", "download"], &dir);
+            bar.finish_with("Go modules downloaded");
+            success_banner("Install complete");
+            r
+        }
         _ => anyhow::bail!("Install not supported for {project}"),
     }
 }

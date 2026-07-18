@@ -21,30 +21,24 @@ pub fn run_build(args: BuildArgs) -> anyhow::Result<()> {
     let out_dir = &args.out_dir;
     std::fs::create_dir_all(out_dir)?;
 
-    eprintln!(
-        "{} Building for target: {}",
-        crate::Color::BOLD.paint("\u{1F528}"),
-        crate::Color::CYAN.paint(&args.target)
-    );
-    eprintln!(
-        "{} {}",
-        crate::Color::DIM.paint("\u{2502}"),
-        crate::Color::DIM.paint(format!(
-            "out: {} | format: {} | minify: {} | sourcemap: {}",
-            out_dir.display(),
-            args.format,
-            args.minify,
-            args.sourcemap,
-        ))
-    );
+    let target_str = args.target.as_str();
+    crate::anim::cmd_header("build", &format!("Building for target: {}", target_str));
 
-    match args.target.as_str() {
+    let mut bar = crate::anim::GradientBar::new(100, &format!("Building {}...", target_str));
+
+    let result = match target_str {
         "web" => build_web(&args),
         "wasm" => build_wasm(&args),
         "napi" => build_napi(&args),
         "binary" => build_binary(&args),
         _ => anyhow::bail!("Unknown target: {}", args.target),
+    };
+
+    if result.is_ok() {
+        bar.finish_with(&format!("Build complete → {}", out_dir.display()));
+        crate::anim::success_banner("Build successful");
     }
+    result
 }
 
 fn build_web(args: &BuildArgs) -> anyhow::Result<()> {

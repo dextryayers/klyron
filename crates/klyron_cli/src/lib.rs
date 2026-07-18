@@ -24,6 +24,7 @@ pub mod commands;
 pub mod scaffold_inline;
 pub mod color;
 pub mod splash;
+pub mod anim;
 
 pub(crate) use commands::helpers::*;
 pub(crate) use scaffold_inline::*;
