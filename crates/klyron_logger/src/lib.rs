@@ -4,7 +4,6 @@ pub mod sink;
 pub use format::*;
 pub use sink::*;
 
-use std::fs::OpenOptions;
 use std::path::Path;
 use std::sync::Arc;
 

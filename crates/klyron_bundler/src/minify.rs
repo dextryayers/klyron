@@ -207,6 +207,7 @@ impl Default for Minifier {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
 
     fn temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join("klyron_test_minifier");

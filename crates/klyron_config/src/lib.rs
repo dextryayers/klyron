@@ -71,7 +71,7 @@ pub struct RegistryConfig {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub host: Option<String>,
-    pub port: Option<u16>,
+    pub port: Option<u32>,
     pub dir: Option<PathBuf>,
 }
 
@@ -146,7 +146,6 @@ impl ConfigBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
 
     #[test]
     fn test_config_builder() {

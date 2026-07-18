@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 pub mod compose;
 pub mod container;
 pub mod image;

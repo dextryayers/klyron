@@ -68,7 +68,7 @@ impl DependencyGraph {
         if !visited.insert(path.to_path_buf()) {
             return;
         }
-        if let Some(_node) = self.modules.get(path) {
+        if self.modules.contains_key(path) {
             if let Ok(content) = std::fs::read_to_string(path) {
                 let import_re = Regex::new(r#"import\s+\{?\s*([^}]+)\s*\}?\s*from\s+["']([^"']+)["']"#).unwrap();
                 for line in content.lines() {

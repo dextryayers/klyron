@@ -169,6 +169,7 @@ pub fn set_config_value_from(config: &mut KlyronConfig, key: &str, value: &str) 
 mod tests {
     use super::*;
     use std::fs;
+    use crate::ServerConfig;
 
     #[test]
     fn test_find_config() {

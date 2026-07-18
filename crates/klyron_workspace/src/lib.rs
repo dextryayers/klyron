@@ -685,7 +685,7 @@ version = "0.1.0"
       r#"{"name":"ws","workspaces":["packages/*"]}"#,
     ).unwrap();
 
-    let graph = Workspace::build_dependency_graph(&dir).unwrap();
+    let _graph = Workspace::build_dependency_graph(&dir).unwrap();
     let dot = Workspace::render_dependency_graph(&dir).unwrap();
     assert!(dot.contains("pkg-a"));
     assert!(dot.contains("pkg-b"));

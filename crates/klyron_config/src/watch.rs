@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{unbounded, Receiver};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tracing::{info, warn};
 
@@ -17,8 +17,6 @@ pub enum ConfigEvent {
 
 pub struct ConfigWatcher {
     config_path: Option<PathBuf>,
-    #[allow(dead_code)]
-    watcher_tx: Option<Sender<ConfigEvent>>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -26,7 +24,6 @@ impl ConfigWatcher {
     pub fn new() -> Self {
         Self {
             config_path: None,
-            watcher_tx: None,
             handle: None,
         }
     }
@@ -79,7 +76,6 @@ impl ConfigWatcher {
 
             let config_watcher = ConfigWatcher {
                 config_path,
-                watcher_tx: Some(tx),
                 handle: Some(watcher_handle),
             };
 

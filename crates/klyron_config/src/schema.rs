@@ -73,8 +73,8 @@ pub fn validate_schema(config: &KlyronConfig) -> ConfigValidation {
             if port == 0 {
                 result.errors.push("server.port must not be 0".into());
             }
-            if port == 0 {
-                result.errors.push("server.port must be >= 1".into());
+            if port > 65535 {
+                result.errors.push("server.port must not exceed 65535".into());
             }
         }
         if let Some(ref host) = server.host {
@@ -116,6 +116,7 @@ fn is_valid_semver(version: &str) -> bool {
 mod tests {
     use super::*;
     use crate::{CompilerConfig, ProjectConfig, RegistryConfig, ServerConfig};
+    use std::collections::HashMap;
 
     #[test]
     fn test_validation_valid_config() {
@@ -262,5 +263,5 @@ mod tests {
         assert!(v.warnings.iter().any(|w| w.contains("compiler.target")));
     }
 
-    use std::collections::HashMap;
+
 }

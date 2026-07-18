@@ -1,6 +1,5 @@
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
-use std::path::Path;
 use std::sync::Arc;
 
 use flate2::write::GzEncoder;
@@ -145,6 +144,7 @@ impl LogSink for FileSink {
 }
 
 #[cfg(unix)]
+#[allow(dead_code)]
 pub struct SyslogSink {
     facility: i32,
     options: i32,

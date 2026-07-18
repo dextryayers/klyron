@@ -20,6 +20,7 @@ pub struct FixResult {
 }
 
 pub struct AutoFix {
+    #[allow(dead_code)]
     backend: LintBackend,
 }
 
@@ -49,7 +50,7 @@ impl AutoFix {
     }
 
     fn apply_single_fix(&self, suggestion: &FixSuggestion) -> Result<bool> {
-        use std::io::{BufRead, Write};
+        use std::io::Write;
 
         let path = std::path::Path::new(&suggestion.file);
         if !path.exists() {

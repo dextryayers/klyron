@@ -8,7 +8,9 @@ pub use resolve::*;
 mod tests {
     use super::*;
     use serde_json::Value;
+    use std::collections::HashMap;
     use std::path::Path;
+    use url::Url;
 
     #[test]
     fn test_module_kind_from_extension() {

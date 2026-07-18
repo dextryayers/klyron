@@ -9,6 +9,7 @@ pub struct KlyronLsp {
     pub completions: CompletionEngine,
     pub symbols: SymbolIndex,
     initialized: bool,
+    #[allow(dead_code)]
     client_capabilities: Option<ClientCapabilities>,
 }
 

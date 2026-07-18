@@ -111,15 +111,6 @@ impl StrategyEngine {
         let mut phases = Vec::new();
         info!("Starting blue-green deployment");
 
-        let _green_phase = DeployPhase {
-            name: "green-deploy".into(),
-            instance_count: 1,
-            duration: Duration::default(),
-            healthy: false,
-            checks_passed: 0,
-            checks_failed: 0,
-        };
-
         Self::deploy_to_platform(config, service, dir, "green")?;
         let warmup_start = Instant::now();
         std::thread::sleep(Duration::from_secs(strategy.warmup_secs));
@@ -419,6 +410,9 @@ impl Default for StrategyEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use crate::DeployPlatform;
 
     fn test_config() -> (StrategyConfig, DeployConfig, ServiceConfig, PathBuf) {
         let strategy = StrategyConfig::default();

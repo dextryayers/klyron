@@ -212,7 +212,6 @@ impl Default for CssBundleOptions {
 mod tests {
     use super::*;
     use std::fs;
-    use std::path::Path;
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("klyron_test_bundler_{}", name));

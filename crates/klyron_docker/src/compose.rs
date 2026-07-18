@@ -767,6 +767,7 @@ impl Default for DockerManager {
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);

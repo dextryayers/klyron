@@ -122,12 +122,6 @@ impl HealthChecker {
     }
 
     pub fn check_endpoint(url: &str, timeout_secs: u64) -> Result<HealthCheckResult> {
-        let _checker = Self {
-            endpoint: "/".into(),
-            timeout_secs,
-            expected_status: 200,
-        };
-
         let start = Instant::now();
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(timeout_secs))

@@ -237,7 +237,7 @@ impl DockerClient {
 
     pub async fn pause_container(&self, container_id: &str) -> anyhow::Result<()> {
         let endpoint = format!("/containers/{container_id}/pause");
-        let resp = self.post(&endpoint, &[]).await?;
+        let _resp = self.post(&endpoint, &[]).await?;
         let status = self.last_status();
         if status != 204 {
             anyhow::bail!(
@@ -249,7 +249,7 @@ impl DockerClient {
 
     pub async fn unpause_container(&self, container_id: &str) -> anyhow::Result<()> {
         let endpoint = format!("/containers/{container_id}/unpause");
-        let resp = self.post(&endpoint, &[]).await?;
+        let _resp = self.post(&endpoint, &[]).await?;
         let status = self.last_status();
         if status != 204 {
             anyhow::bail!(
@@ -261,7 +261,7 @@ impl DockerClient {
 
     pub async fn kill_container(&self, container_id: &str, signal: &str) -> anyhow::Result<()> {
         let endpoint = format!("/containers/{container_id}/kill?signal={signal}");
-        let resp = self.post(&endpoint, &[]).await?;
+        let _resp = self.post(&endpoint, &[]).await?;
         let status = self.last_status();
         if status != 204 {
             anyhow::bail!(

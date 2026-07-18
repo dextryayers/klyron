@@ -1,9 +1,8 @@
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use crossbeam_channel::{unbounded, Receiver};
+use crossbeam_channel::Receiver;
 use glob::Pattern;
 
 use crate::{HmrUpdate, WatchEvent};
@@ -110,6 +109,7 @@ impl Debouncer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn test_debouncer_new() {

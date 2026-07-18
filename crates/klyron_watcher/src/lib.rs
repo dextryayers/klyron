@@ -1,7 +1,7 @@
 pub mod debounce;
 pub mod fs;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 
 use crossbeam_channel::unbounded;
 use glob::Pattern;
-use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher as NotifyWatcher};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher as NotifyWatcher};
 use thiserror::Error;
 
 use debounce::Debouncer;
@@ -159,6 +159,7 @@ pub struct FileWatcher {
     pub recursive: bool,
     pub debounce: Duration,
     pub ignore_patterns: Vec<Pattern>,
+    #[allow(dead_code)]
     follow_symlinks: bool,
     poll_interval: Duration,
     running: Arc<AtomicBool>,
@@ -459,7 +460,7 @@ mod tests {
     fn test_watch_event_debug() {
         let e1 = WatchEvent::Create(PathBuf::from("f.js"));
         let e2 = WatchEvent::Modify(PathBuf::from("f.js"));
-        let e3 = WatchEvent::Remove(PathBuf::from("f.js"));
+        let _e3 = WatchEvent::Remove(PathBuf::from("f.js"));
         let e4 = WatchEvent::Rename(PathBuf::from("a.js"), PathBuf::from("b.js"));
         let e5 = WatchEvent::Any(PathBuf::from("f.js"));
         assert!(format!("{:?}", e1).contains("f.js"));
