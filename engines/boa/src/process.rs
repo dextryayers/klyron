@@ -1,4 +1,5 @@
 use boa_engine::{Context, JsValue, NativeFunction, js_string, JsString};
+use boa_engine::object::builtins::JsArray;
 use boa_engine::property::Attribute;
 
 pub struct Process;
@@ -9,7 +10,6 @@ impl Process {
     pub fn pid() -> u32 { std::process::id() }
     pub fn cwd() -> String { std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default() }
     pub fn chdir(dir: &str) -> Result<(), String> { std::env::set_current_dir(dir).map_err(|e| format!("chdir failed: {}", e)) }
-    pub fn exit_code(code: i32) -> ! { std::process::exit(code) }
     pub fn memory_usage() -> u64 {
         #[cfg(target_os = "linux")]
         if let Ok(content) = std::fs::read_to_string("/proc/self/status") {
@@ -36,10 +36,12 @@ impl Process {
             unsafe { std::env::set_var(&key, &val); }
             Ok(JsValue::undefined())
         }), js_string!("setenv"), 2usize)
-        .function(NativeFunction::from_fn_ptr(|_this, _args, ctx| {
-            let args = Self::args();
-            let args_json = serde_json::to_string(&args).unwrap_or_else(|_| "[]".to_string());
-            ctx.eval(boa_engine::Source::from_bytes(&args_json))
+        .function(NativeFunction::from_fn_ptr(|_this, _args, context| {
+            let arr = JsArray::new(context);
+            for arg in Self::args() {
+                let _ = arr.push(JsValue::from(JsString::from(arg)), context);
+            }
+            Ok(JsValue::from(arr))
         }), js_string!("argv"), 0usize)
         .function(NativeFunction::from_fn_ptr(|_this, _args, _ctx| {
             Ok(JsValue::from(Self::pid() as f64))
@@ -56,7 +58,9 @@ impl Process {
         }), js_string!("chdir"), 1usize)
         .function(NativeFunction::from_fn_ptr(|_this, args, _ctx| {
             let code = args.first().and_then(|v| v.as_number()).unwrap_or(0.0) as i32;
-            Self::exit_code(code);
+            Err(boa_engine::JsError::from_native(
+                boa_engine::JsNativeError::error().with_message(format!("process.exit({}): use throw instead", code))
+            ))
         }), js_string!("exit"), 1usize)
         .function(NativeFunction::from_fn_ptr(|_this, _args, _ctx| {
             Ok(JsValue::from(Self::memory_usage() as f64))

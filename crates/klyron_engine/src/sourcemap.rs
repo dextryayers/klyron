@@ -170,6 +170,7 @@ impl Default for SourceMap {
     }
 }
 
+#[allow(dead_code)]
 struct ParsedStackLine {
     file: String,
     line: u32,

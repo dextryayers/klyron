@@ -1,5 +1,7 @@
 
 #[cfg(feature = "native")]
+use crate::error::V8Error;
+#[cfg(feature = "native")]
 use crate::ffi;
 
 pub struct V8Crypto {

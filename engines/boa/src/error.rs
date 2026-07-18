@@ -2,7 +2,7 @@ use std::fmt;
 use boa_engine::JsNativeErrorKind;
 use klyron_engine_common::error::{CommonError, CommonErrorKind};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BoaError {
     NotInitialized,
     InitFailed(String),
@@ -14,6 +14,12 @@ pub enum BoaError {
     ReferenceError(String),
     Timeout,
     OutOfMemory,
+    PermissionDenied(String),
+    ModuleNotFound(String),
+    EngineBusy,
+    EnginePoolExhausted,
+    SnapshotError(String),
+    CacheError(String),
     JsError(String),
     StackTrace(String),
 }
@@ -47,6 +53,12 @@ impl BoaError {
             Self::ReferenceError(msg) => CommonErrorKind::ReferenceError(msg.clone()),
             Self::Timeout => CommonErrorKind::Timeout,
             Self::OutOfMemory => CommonErrorKind::OutOfMemory,
+            Self::PermissionDenied(msg) => CommonErrorKind::PermissionDenied(msg.clone()),
+            Self::ModuleNotFound(msg) => CommonErrorKind::ModuleNotFound(msg.clone()),
+            Self::EngineBusy => CommonErrorKind::ExecutionFailed("engine is busy".into()),
+            Self::EnginePoolExhausted => CommonErrorKind::ExecutionFailed("engine pool exhausted".into()),
+            Self::SnapshotError(msg) => CommonErrorKind::ExecutionFailed(format!("snapshot error: {}", msg)),
+            Self::CacheError(msg) => CommonErrorKind::ExecutionFailed(format!("cache error: {}", msg)),
             Self::StackTrace(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
         }
     }
@@ -65,6 +77,12 @@ impl fmt::Display for BoaError {
             Self::ReferenceError(msg) => write!(f, "Reference error: {msg}"),
             Self::Timeout => write!(f, "Script timeout"),
             Self::OutOfMemory => write!(f, "Out of memory"),
+            Self::PermissionDenied(msg) => write!(f, "Permission denied: {msg}"),
+            Self::ModuleNotFound(msg) => write!(f, "Module not found: {msg}"),
+            Self::EngineBusy => write!(f, "Engine is busy"),
+            Self::EnginePoolExhausted => write!(f, "Engine pool exhausted"),
+            Self::SnapshotError(msg) => write!(f, "Snapshot error: {msg}"),
+            Self::CacheError(msg) => write!(f, "Cache error: {msg}"),
             Self::JsError(msg) => write!(f, "{msg}"),
             Self::StackTrace(msg) => write!(f, "{msg}"),
         }

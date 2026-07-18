@@ -1,9 +1,5 @@
 use crate::error::V8Error;
 
-#[cfg(feature = "native")]
-use crate::ffi;
-#[cfg(feature = "native")]
-use std::ffi::CString;
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::io::{Read, Write};
 use std::sync::Mutex;

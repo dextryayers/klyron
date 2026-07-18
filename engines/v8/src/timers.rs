@@ -1,18 +1,6 @@
 #[cfg(feature = "native")]
 use crate::ffi;
 
-#[allow(dead_code)]
-static mut NEXT_TIMER_ID: i32 = 1;
-
-#[allow(dead_code)]
-fn next_id() -> i32 {
-    unsafe {
-        let id = NEXT_TIMER_ID;
-        NEXT_TIMER_ID += 1;
-        id
-    }
-}
-
 pub struct V8Timer(i32);
 
 impl V8Timer {
@@ -20,8 +8,7 @@ impl V8Timer {
 }
 
 #[cfg(feature = "native")]
-fn schedule(ctx: *mut ffi::V8ContextHandle, cb: Box<dyn FnOnce()>, ms: u64, repeat: bool) -> i32 {
-    let id = next_id();
+fn schedule_timeout(ctx: *mut ffi::V8ContextHandle, cb: Box<dyn FnOnce()>, ms: u64) -> i32 {
     let boxed: Box<Box<dyn FnOnce()>> = Box::new(cb);
     let ptr = Box::into_raw(boxed) as *mut std::ffi::c_void;
 
@@ -30,28 +17,36 @@ fn schedule(ctx: *mut ffi::V8ContextHandle, cb: Box<dyn FnOnce()>, ms: u64, repe
         cb();
     }
 
-    if repeat {
-        unsafe { ffi::klyron_v8_timer_set_interval(ctx, Some(trampoline), ptr, ms); }
-    } else {
-        unsafe { ffi::klyron_v8_timer_set_timeout(ctx, Some(trampoline), ptr, ms); }
+    unsafe { ffi::klyron_v8_timer_set_timeout(ctx, Some(trampoline), ptr, ms) }
+}
+
+#[cfg(feature = "native")]
+fn schedule_interval(ctx: *mut ffi::V8ContextHandle, cb: Box<dyn Fn()>, ms: u64) -> i32 {
+    let boxed: Box<Box<dyn Fn()>> = Box::new(cb);
+    let ptr = Box::into_raw(boxed) as *mut std::ffi::c_void;
+
+    extern "C" fn trampoline(data: *mut std::ffi::c_void) {
+        let cb: &Box<dyn Fn()> = unsafe { &*(data as *const Box<dyn Fn()>) };
+        cb();
     }
-    id
+
+    unsafe { ffi::klyron_v8_timer_set_interval(ctx, Some(trampoline), ptr, ms) }
 }
 
 pub fn set_timeout<F>(ctx: *mut std::ffi::c_void, cb: F, ms: u64) -> V8Timer
 where F: FnOnce() + 'static
 {
     #[cfg(feature = "native")]
-    { let id = schedule(ctx as *mut ffi::V8ContextHandle, Box::new(cb), ms, false); return V8Timer(id); }
+    { let id = schedule_timeout(ctx as *mut ffi::V8ContextHandle, Box::new(cb), ms); return V8Timer(id); }
     #[cfg(not(feature = "native"))]
     { let _ = (ctx, cb, ms); V8Timer(0) }
 }
 
 pub fn set_interval<F>(ctx: *mut std::ffi::c_void, cb: F, ms: u64) -> V8Timer
-where F: FnOnce() + 'static
+where F: Fn() + 'static
 {
     #[cfg(feature = "native")]
-    { let id = schedule(ctx as *mut ffi::V8ContextHandle, Box::new(cb), ms, true); return V8Timer(id); }
+    { let id = schedule_interval(ctx as *mut ffi::V8ContextHandle, Box::new(cb), ms); return V8Timer(id); }
     #[cfg(not(feature = "native"))]
     { let _ = (ctx, cb, ms); V8Timer(0) }
 }

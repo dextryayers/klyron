@@ -54,10 +54,44 @@ impl BoaPermissions {
         Self::default()
     }
 
+    fn check_path(allowed: &[String], resource: Option<&str>) -> bool {
+        if allowed.is_empty() {
+            return false;
+        }
+        if allowed.iter().any(|p| p == "/") {
+            return true;
+        }
+        if let Some(r) = resource {
+            allowed.iter().any(|p| r.starts_with(p))
+        } else {
+            false
+        }
+    }
+
+    fn check_net(allowed: &[String], resource: Option<&str>) -> bool {
+        if allowed.is_empty() {
+            return false;
+        }
+        if allowed.iter().any(|p| p == "*") {
+            return true;
+        }
+        if let Some(r) = resource {
+            allowed.iter().any(|p| p == r)
+        } else {
+            false
+        }
+    }
+
     pub fn check(&self, permission: &Permission, resource: Option<&str>) -> bool {
-        let common: CommonPermission = permission.clone().into();
-        let common_perms = self.to_common();
-        common_perms.check(&common, resource)
+        match permission {
+            Permission::Read => Self::check_path(&self.allow_read, resource),
+            Permission::Write => Self::check_path(&self.allow_write, resource),
+            Permission::Net => Self::check_net(&self.allow_net, resource),
+            Permission::Env => self.allow_env,
+            Permission::Run => self.allow_run,
+            Permission::Ffi => self.allow_ffi,
+            Permission::All => true,
+        }
     }
 
     pub fn deny_all() -> Self {

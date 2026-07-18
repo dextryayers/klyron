@@ -127,12 +127,12 @@ impl BoaEngine {
         Ok(val)
     }
 
-    pub fn stack_trace(&self) -> String {
+    pub fn stack_trace(&mut self) -> String {
         self.runtime.stack_trace()
     }
 
     pub fn version() -> &'static str {
-        "0.19"
+        VERSION
     }
 
     pub fn runtime(&self) -> &BoaRuntime { &self.runtime }
@@ -144,7 +144,7 @@ impl Default for BoaEngine {
     fn default() -> Self { Self::new() }
 }
 
-pub(crate) static VERSION: &str = "0.19";
+pub(crate) static VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[unsafe(no_mangle)]
 pub extern "C" fn klyron_boa_version() -> *const u8 { VERSION.as_ptr() }

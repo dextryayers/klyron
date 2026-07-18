@@ -66,6 +66,7 @@ klyron_jsc_string_result_t klyron_jsc_module_evaluate(klyron_jsc_engine_t* engin
 
     if (exc) {
         jsc_capture_exception(engine, exc);
+        JSStringRelease(module_str);
         return result;
     }
 

@@ -158,6 +158,7 @@ pub struct AutoSwitcher {
     jsc_latency: ExponentialMovingAverage,
     script_classifier: ScriptClassifier,
     min_samples: usize,
+    #[allow(dead_code)]
     switch_threshold: f64,
     hot_path_threshold: u64,
     hot_path_cache: HashMap<String, u64>,

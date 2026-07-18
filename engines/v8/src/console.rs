@@ -63,3 +63,14 @@ impl V8Console {
         self.handle
     }
 }
+
+#[cfg(feature = "native")]
+impl Drop for V8Console {
+    fn drop(&mut self) {
+        if let Some(h) = self.handle {
+            if !h.is_null() {
+                unsafe { ffi::klyron_v8_value_dispose(h) }
+            }
+        }
+    }
+}

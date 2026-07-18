@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -89,7 +88,7 @@ impl JitProfiler {
         tracing::info!("JIT profiling stopped. {} scripts profiled", self.profiles.lock().unwrap().len());
     }
 
-    pub fn record_compile(&self, script_name: &str, compile_time: Duration) {
+    pub fn record_compile(&self, _script_name: &str, compile_time: Duration) {
         if !self.enabled { return; }
         let mut stats = self.stats.lock().unwrap();
         stats.compile_time += compile_time;
@@ -97,7 +96,7 @@ impl JitProfiler {
         stats.avg_compile_time_ns = stats.compile_time.as_nanos() as f64 / stats.total_scripts as f64;
     }
 
-    pub fn record_execution(&self, script_name: &str, execution_time: Duration, memory_delta: u64) {
+    pub fn record_execution(&self, _script_name: &str, execution_time: Duration, memory_delta: u64) {
         if !self.enabled { return; }
         let mut stats = self.stats.lock().unwrap();
         stats.execution_time += execution_time;

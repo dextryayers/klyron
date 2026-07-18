@@ -15,7 +15,15 @@ struct FunctionBinding {
     KlyronV8FunctionCallback cb;
     void* user_data;
     klyron_v8_isolate_t* isolate;
+    v8::Persistent<v8::Value>* self_handle;
 };
+
+static void free_binding(const v8::WeakCallbackInfo<FunctionBinding>& info) {
+    auto binding = info.GetParameter();
+    binding->self_handle->Reset();
+    delete binding->self_handle;
+    delete binding;
+}
 
 void function_trampoline(const v8::FunctionCallbackInfo<v8::Value>& info) {
     auto binding = static_cast<FunctionBinding*>(
@@ -23,7 +31,7 @@ void function_trampoline(const v8::FunctionCallbackInfo<v8::Value>& info) {
     if (!binding || !binding->cb) return;
 
     auto iso = binding->isolate;
-    auto ctx_obj = new klyron_v8_context(info.GetIsolate(), iso);
+    auto ctx_obj = new klyron_v8_context(info.GetIsolate(), iso, info.GetIsolate()->GetCurrentContext());
     klyron_v8_value_t** argv = nullptr;
 
     /* Convert V8 arguments to our klyron_v8_value_t array */
@@ -55,46 +63,6 @@ void function_trampoline(const v8::FunctionCallbackInfo<v8::Value>& info) {
     delete ctx_obj;
 }
 
-void constructor_trampoline(const v8::FunctionCallbackInfo<v8::Value>& info) {
-    auto binding = static_cast<FunctionBinding*>(
-        info.Data().As<v8::External>()->Value());
-    if (!binding || !binding->cb) return;
-
-    if (!info.IsConstructCall()) {
-        info.GetIsolate()->ThrowError("constructor requires 'new'");
-        return;
-    }
-
-    auto iso = binding->isolate;
-    auto ctx_obj = new klyron_v8_context(info.GetIsolate(), iso);
-
-    int argc = info.Length();
-    klyron_v8_value_t** argv = nullptr;
-    if (argc > 0) {
-        argv = static_cast<klyron_v8_value_t**>(
-            std::malloc(sizeof(klyron_v8_value_t*) * argc));
-        for (int i = 0; i < argc; i++) {
-            argv[i] = new klyron_v8_value(info.GetIsolate(),
-                                           info[i], iso);
-        }
-    }
-
-    klyron_v8_value_t* result = nullptr;
-    binding->cb(ctx_obj, argc, argv, binding->user_data, &result);
-
-    if (result && result->value) {
-        info.GetReturnValue().Set(result->value->Get(info.GetIsolate()));
-    }
-
-    if (argv) {
-        for (int i = 0; i < argc; i++) {
-            if (argv[i]) delete argv[i];
-        }
-        std::free(argv);
-    }
-    delete ctx_obj;
-}
-
 } /* anonymous namespace */
 
 klyron_v8_value_t* klyron_v8_function_new(klyron_v8_context_t* ctx,
@@ -109,8 +77,10 @@ klyron_v8_value_t* klyron_v8_function_new(klyron_v8_context_t* ctx,
     v8::Isolate::Scope iso_scope(iso);
     v8::HandleScope scope(iso);
 
-    auto binding = new FunctionBinding{callback, user_data, ctx->parent};
+    auto binding = new FunctionBinding{callback, user_data, ctx->parent, nullptr};
     auto ext = v8::External::New(iso, binding);
+    binding->self_handle = new v8::Persistent<v8::Value>(iso, ext.As<v8::Value>());
+    binding->self_handle->SetWeak<FunctionBinding>(binding, free_binding, v8::WeakCallbackType::kParameter);
     auto fn_name = name
         ? v8::String::NewFromUtf8(iso, name, v8::NewStringType::kNormal).ToLocalChecked()
         : v8::String::NewFromUtf8(iso, "", v8::NewStringType::kNormal).ToLocalChecked();

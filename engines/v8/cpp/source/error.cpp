@@ -20,7 +20,7 @@ const char* klyron_v8_get_exception_message(klyron_v8_context_t* ctx) {
     auto exc = v8::String::NewFromUtf8(iso, ctx->parent->error_buf,
                                        v8::NewStringType::kNormal)
                    .ToLocalChecked();
-    static std::string msg;
+    thread_local static std::string msg;
     v8::String::Utf8Value utf8(iso, exc);
     msg = *utf8 ? *utf8 : "";
     return msg.c_str();

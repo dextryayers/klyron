@@ -18,7 +18,7 @@ pub struct JSCStringResult {
 
 #[repr(C)]
 pub struct JSCTypeResult {
-    pub v8_type: c_ulong,
+    pub value_type: c_ulong,
     pub success: bool,
     pub error: [c_char; 4096],
 }

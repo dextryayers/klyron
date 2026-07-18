@@ -12,13 +12,15 @@ fn net_fetch(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResu
     match result {
         Ok(response) => {
             let status = response.status;
-            let body = serde_json::to_string(&response.body).unwrap_or_else(|_| "\"\"".to_string());
-            let code = format!("({{ status: {}, ok: {}, body: {} }})",
-                status,
-                if status >= 200 && status < 300 { "true" } else { "false" },
-                body,
-            );
-            context.eval(boa_engine::Source::from_bytes(&code))
+            let ok = status >= 200 && status < 300;
+            let body_str = JsString::from(response.body.as_str());
+
+            let obj = boa_engine::object::ObjectInitializer::new(context)
+                .property(js_string!("status"), status as f64, boa_engine::property::Attribute::all())
+                .property(js_string!("ok"), ok, boa_engine::property::Attribute::all())
+                .property(js_string!("body"), body_str, boa_engine::property::Attribute::all())
+                .build();
+            Ok(JsValue::from(obj))
         }
         Err(e) => Err(boa_engine::JsError::from_native(
             boa_engine::JsNativeError::error().with_message(format!("fetch failed: {}", e))
@@ -31,32 +33,22 @@ struct FetchResponse {
     body: String,
 }
 
-fn fetch_url(url: &str, _timeout: Duration) -> Result<FetchResponse, String> {
+fn fetch_url(url: &str, timeout: Duration) -> Result<FetchResponse, String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err(format!("unsupported protocol in URL: {}", url));
     }
-    let output = std::process::Command::new("curl")
-        .arg("-s")
-        .arg("-w")
-        .arg("%{http_code}")
-        .arg("-o")
-        .arg("-")
-        .arg(url)
-        .output()
-        .map_err(|e| format!("curl execution failed: {}", e))?;
-
-    if output.status.success() || output.status.code().map_or(false, |c| c > 0) {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.len() >= 3 {
-            let body_end = stdout.len() - 3;
-            let body = stdout[..body_end].to_string();
-            let status_str = &stdout[body_end..];
-            let status: u16 = status_str.parse().unwrap_or(0);
-            return Ok(FetchResponse { status, body });
-        }
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(format!("curl error ({}): {}", output.status, stderr))
+    let config = ureq::config::Config::builder()
+        .timeout_connect(Some(timeout))
+        .timeout_per_call(Some(timeout))
+        .build();
+    let agent = ureq::Agent::new_with_config(config);
+    let response = agent.get(url)
+        .call()
+        .map_err(|e| format!("HTTP request failed: {}", e))?;
+    let status = response.status().as_u16();
+    let body = response.into_body().read_to_string()
+        .map_err(|e| format!("failed to read response body: {}", e))?;
+    Ok(FetchResponse { status, body })
 }
 
 fn net_request(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
@@ -73,35 +65,39 @@ fn net_request(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsRe
         .map(|s| s.to_std_string_escaped())
         .unwrap_or_default();
 
-    let output = std::process::Command::new("curl")
-        .arg("-s")
-        .arg("-X")
-        .arg(&method)
-        .arg("-d")
-        .arg(&body)
-        .arg("-w")
-        .arg("%{http_code}")
-        .arg("-o")
-        .arg("-")
-        .arg(&url)
-        .output();
+    let result = (|| -> Result<FetchResponse, String> {
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err(format!("unsupported protocol in URL: {}", url));
+        }
+        let config = ureq::config::Config::builder()
+            .timeout_connect(Some(Duration::from_secs(30)))
+            .timeout_per_call(Some(Duration::from_secs(30)))
+            .build();
+        let agent = ureq::Agent::new_with_config(config);
+        let response = match method.as_str() {
+            "GET" => agent.get(&url).call(),
+            "POST" => agent.post(&url).send(body.as_str()),
+            "PUT" => agent.put(&url).send(body.as_str()),
+            "DELETE" => agent.delete(&url).call(),
+            "PATCH" => agent.patch(&url).send(body.as_str()),
+            "HEAD" => agent.head(&url).call(),
+            _ => agent.get(&url).call(),
+        };
+        let response = response.map_err(|e| format!("HTTP request failed: {}", e))?;
+        let status = response.status().as_u16();
+        let resp_body = response.into_body().read_to_string()
+            .map_err(|e| format!("failed to read response body: {}", e))?;
+        Ok(FetchResponse { status, body: resp_body })
+    })();
 
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            if stdout.len() >= 3 {
-                let body_end = stdout.len() - 3;
-                let resp_body = &stdout[..body_end];
-                let status_str = &stdout[body_end..];
-                let status: u16 = status_str.parse().unwrap_or(0);
-                let code = format!(
-                    "({{ status: {}, body: {} }})",
-                    status,
-                    serde_json::to_string(resp_body).unwrap_or_else(|_| "\"\"".to_string()),
-                );
-                return context.eval(boa_engine::Source::from_bytes(&code));
-            }
-            Ok(JsValue::from(JsString::from(stdout.as_ref())))
+    match result {
+        Ok(response) => {
+            let body_str = JsString::from(response.body.as_str());
+            let obj = boa_engine::object::ObjectInitializer::new(context)
+                .property(js_string!("status"), response.status as f64, boa_engine::property::Attribute::all())
+                .property(js_string!("body"), body_str, boa_engine::property::Attribute::all())
+                .build();
+            Ok(JsValue::from(obj))
         }
         Err(e) => Err(boa_engine::JsError::from_native(
             boa_engine::JsNativeError::error().with_message(format!("request failed: {}", e))

@@ -65,9 +65,9 @@ pub enum JSCValueType {
     Object = 5,
     Array = 6,
     Function = 7,
-    Error = 9,
-    Symbol = 10,
-    TypedArray = 13,
+    Error = 8,
+    Symbol = 9,
+    TypedArray = 10,
 }
 
 pub struct JSCEngine {
@@ -190,6 +190,11 @@ impl JSCEngine {
         { self.inner.get_stack_trace().map_err(|e| JSCError::Internal(e)) }
         #[cfg(not(feature = "native"))]
         { Err(JSCError::NotInitialized) }
+    }
+
+    #[cfg(feature = "native")]
+    pub fn raw_handle(&self) -> *mut ffi::JSCEngineHandle {
+        self.inner.engine_handle()
     }
 
     pub fn is_native_available(&self) -> bool {
@@ -322,6 +327,20 @@ impl JSCEngine {
     pub fn typed_array_new(&self, _type_name: &str, _length: usize) -> Result<*const std::ffi::c_void, JSCError> {
         #[cfg(feature = "native")]
         { self.inner.typed_array_new(_type_name, _length).map(|p| p as *const std::ffi::c_void).map_err(|e| JSCError::Internal(e)) }
+        #[cfg(not(feature = "native"))]
+        { Err(JSCError::NotInitialized) }
+    }
+
+    pub fn wasm_compile(&self, _bytes: &[u8]) -> Result<*const std::ffi::c_void, JSCError> {
+        #[cfg(feature = "native")]
+        { self.inner.wasm_compile(_bytes).map(|p| p as *const std::ffi::c_void).map_err(|e| JSCError::Internal(e)) }
+        #[cfg(not(feature = "native"))]
+        { Err(JSCError::NotInitialized) }
+    }
+
+    pub fn wasm_instantiate(&self, _bytes: &[u8], _imports: *const std::ffi::c_void) -> Result<*const std::ffi::c_void, JSCError> {
+        #[cfg(feature = "native")]
+        { self.inner.wasm_instantiate(_bytes, _imports as *mut ffi::JSCValueHandle).map(|p| p as *const std::ffi::c_void).map_err(|e| JSCError::Internal(e)) }
         #[cfg(not(feature = "native"))]
         { Err(JSCError::NotInitialized) }
     }
@@ -522,8 +541,8 @@ mod tests {
     #[test] fn test_jsc_value_type_enum() { assert_eq!(JSCValueType::Undefined as u32,0); assert_eq!(JSCValueType::Null as u32,1); assert_eq!(JSCValueType::Boolean as u32,2); }
     #[test] fn test_jsc_value_type_number() { assert_eq!(JSCValueType::Number as u32,3); assert_eq!(JSCValueType::String as u32,4); assert_eq!(JSCValueType::Object as u32,5); }
     #[test] fn test_jsc_value_type_array() { assert_eq!(JSCValueType::Array as u32,6); assert_eq!(JSCValueType::Function as u32,7); }
-    #[test] fn test_jsc_value_type_error() { assert_eq!(JSCValueType::Error as u32,9); assert_eq!(JSCValueType::Symbol as u32,10); }
-    #[test] fn test_jsc_value_type_typed_array() { assert_eq!(JSCValueType::TypedArray as u32,13); }
+    #[test] fn test_jsc_value_type_error() { assert_eq!(JSCValueType::Error as u32,8); assert_eq!(JSCValueType::Symbol as u32,9); }
+    #[test] fn test_jsc_value_type_typed_array() { assert_eq!(JSCValueType::TypedArray as u32,10); }
     #[test] fn test_jsc_heap_stats_struct() { let h=HeapStats{total_heap_size:0,total_heap_size_executable:0,total_physical_size:0,total_available_size:0,used_heap_size:0,heap_size_limit:0,malloced_memory:0,peak_malloced_memory:0,number_of_native_contexts:0,number_of_detached_contexts:0,total_global_handles_size:0,used_global_handles_size:0,external_memory:0}; assert_eq!(h.heap_size_limit,0); }
     #[test] fn test_jsc_error_not_initialized() { let e=JSCError::NotInitialized; assert_eq!(e.to_string(),"JSC not initialized"); }
     #[test] fn test_jsc_error_init_failed() { let e=JSCError::InitFailed("oom".into()); assert_eq!(e.to_string(),"JSC init failed: oom"); }

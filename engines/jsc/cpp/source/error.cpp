@@ -26,8 +26,10 @@ klyron_jsc_string_result_t klyron_jsc_get_stack_trace(klyron_jsc_engine_t* engin
 
     /* Create a fresh context for stack trace to avoid affecting the main context */
     JSValueRef exc = nullptr;
+    JSStringRef stack_str = jsc_string_from_cstr("<stack>");
     JSValueRef val = JSEvaluateScript(engine->ctx, src, nullptr,
-                                       jsc_string_from_cstr("<stack>"), 1, &exc);
+                                       stack_str, 1, &exc);
+    JSStringRelease(stack_str);
     JSStringRelease(src);
 
     if (exc) {

@@ -202,6 +202,19 @@ unsafe extern "C" {
     /* Clear exception */
     fn klyron_jsc_clear_exception(engine: *mut JSCEngineHandle);
 
+    /* Console */
+    fn klyron_jsc_console_log(engine: *mut JSCEngineHandle, argc: c_int, argv: *mut *mut JSCValueHandle) -> *mut JSCValueHandle;
+    fn klyron_jsc_console_warn(engine: *mut JSCEngineHandle, argc: c_int, argv: *mut *mut JSCValueHandle) -> *mut JSCValueHandle;
+    fn klyron_jsc_console_error(engine: *mut JSCEngineHandle, argc: c_int, argv: *mut *mut JSCValueHandle) -> *mut JSCValueHandle;
+    fn klyron_jsc_console_info(engine: *mut JSCEngineHandle, argc: c_int, argv: *mut *mut JSCValueHandle) -> *mut JSCValueHandle;
+    fn klyron_jsc_console_debug(engine: *mut JSCEngineHandle, argc: c_int, argv: *mut *mut JSCValueHandle) -> *mut JSCValueHandle;
+    fn klyron_jsc_console_table(engine: *mut JSCEngineHandle, value: *mut JSCValueHandle) -> *mut JSCValueHandle;
+    fn klyron_jsc_console_assert(engine: *mut JSCEngineHandle, condition: *mut JSCValueHandle, argc: c_int, argv: *mut *mut JSCValueHandle) -> *mut JSCValueHandle;
+
+    /* WASM */
+    fn klyron_jsc_wasm_compile(engine: *mut JSCEngineHandle, wasm_bytes: *const c_uchar, wasm_length: usize) -> *mut JSCValueHandle;
+    fn klyron_jsc_wasm_instantiate(engine: *mut JSCEngineHandle, wasm_bytes: *const c_uchar, wasm_length: usize, imports: *mut JSCValueHandle) -> *mut JSCValueHandle;
+
     /* Utility */
     fn klyron_jsc_version() -> *const c_char;
     fn klyron_jsc_free_string(s: *mut c_char);
@@ -247,7 +260,12 @@ impl JSCEnginePtr {
 
     fn check_void(result: JSCResult) -> Result<(), String> {
         if result.success { Ok(()) }
-        else { Err(unsafe { CStr::from_ptr(result.error.as_ptr()).to_string_lossy().into() }) }
+        else {
+            let bytes = unsafe { &*std::ptr::slice_from_raw_parts(result.error.as_ptr(), result.error.len()) };
+            let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+            let s = std::str::from_utf8(&bytes[..len]).unwrap_or("invalid error");
+            Err(s.into())
+        }
     }
 
     #[inline]
@@ -295,10 +313,12 @@ impl JSCEnginePtr {
         let c_src = Self::to_cstring(source)?;
         let mod_ptr = unsafe { klyron_jsc_module_compile(self.ptr, c_src.as_ptr(), c_file.as_ptr()) };
         if mod_ptr.is_null() { return Err("module compile failed".into()) }
-        let r = unsafe { klyron_jsc_module_instantiate(self.ptr, mod_ptr) };
-        Self::check_void(r)?;
-        let r = unsafe { klyron_jsc_module_evaluate(self.ptr, mod_ptr) };
-        let result = Self::check(r);
+
+        let result = (|| -> Result<String, String> {
+            Self::check_void(unsafe { klyron_jsc_module_instantiate(self.ptr, mod_ptr) })?;
+            Self::check(unsafe { klyron_jsc_module_evaluate(self.ptr, mod_ptr) })
+        })();
+
         unsafe { klyron_jsc_module_dispose(mod_ptr) };
         result
     }
@@ -634,6 +654,60 @@ impl JSCEnginePtr {
             else { CStr::from_ptr(p).to_string_lossy().into() }
         }
     }
+
+    /* ─── WASM ──────────────────────────────────────────────── */
+
+    pub fn wasm_compile(&self, wasm_bytes: &[u8]) -> Result<*mut JSCValueHandle, String> {
+        let ptr = unsafe { klyron_jsc_wasm_compile(self.ptr, wasm_bytes.as_ptr(), wasm_bytes.len()) };
+        if ptr.is_null() { Err("wasm compile failed".into()) } else { Ok(ptr) }
+    }
+
+    pub fn wasm_instantiate(&self, wasm_bytes: &[u8], imports: *mut JSCValueHandle) -> Result<*mut JSCValueHandle, String> {
+        let ptr = unsafe { klyron_jsc_wasm_instantiate(self.ptr, wasm_bytes.as_ptr(), wasm_bytes.len(), imports) };
+        if ptr.is_null() { Err("wasm instantiate failed".into()) } else { Ok(ptr) }
+    }
+}
+
+/* ─── Console public helpers (used by console.rs) ───────────── */
+
+fn console_to_argv(args: &[*const std::ffi::c_void]) -> Vec<*mut JSCValueHandle> {
+    args.iter().map(|p| *p as *mut JSCValueHandle).collect()
+}
+
+pub fn console_log(engine: *mut JSCEngineHandle, args: &[*const std::ffi::c_void]) {
+    let mut argv = console_to_argv(args);
+    unsafe { klyron_jsc_console_log(engine, argv.len() as c_int, argv.as_mut_ptr()); }
+}
+
+pub fn console_warn(engine: *mut JSCEngineHandle, args: &[*const std::ffi::c_void]) {
+    let mut argv = console_to_argv(args);
+    unsafe { klyron_jsc_console_warn(engine, argv.len() as c_int, argv.as_mut_ptr()); }
+}
+
+pub fn console_error(engine: *mut JSCEngineHandle, args: &[*const std::ffi::c_void]) {
+    let mut argv = console_to_argv(args);
+    unsafe { klyron_jsc_console_error(engine, argv.len() as c_int, argv.as_mut_ptr()); }
+}
+
+pub fn console_info(engine: *mut JSCEngineHandle, args: &[*const std::ffi::c_void]) {
+    let mut argv = console_to_argv(args);
+    unsafe { klyron_jsc_console_info(engine, argv.len() as c_int, argv.as_mut_ptr()); }
+}
+
+pub fn console_debug(engine: *mut JSCEngineHandle, args: &[*const std::ffi::c_void]) {
+    let mut argv = console_to_argv(args);
+    unsafe { klyron_jsc_console_debug(engine, argv.len() as c_int, argv.as_mut_ptr()); }
+}
+
+pub fn console_table(engine: *mut JSCEngineHandle, value: *mut JSCValueHandle) {
+    unsafe { klyron_jsc_console_table(engine, value); }
+}
+
+pub fn console_assert(engine: *mut JSCEngineHandle, condition: bool, args: &[*const std::ffi::c_void]) {
+    if !condition {
+        let mut argv = console_to_argv(args);
+        unsafe { klyron_jsc_console_error(engine, argv.len() as c_int, argv.as_mut_ptr()); }
+    }
 }
 
 impl Drop for JSCEnginePtr {
@@ -643,4 +717,3 @@ impl Drop for JSCEnginePtr {
 }
 
 unsafe impl Send for JSCEnginePtr {}
-unsafe impl Sync for JSCEnginePtr {}

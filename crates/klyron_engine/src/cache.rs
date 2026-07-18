@@ -1,14 +1,12 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_CACHE_DIR: &str = ".klyron/cache/engine";
 const DEFAULT_MAX_MEMORY_ENTRIES: usize = 10000;
-const DEFAULT_MAX_MEMORY_SIZE_MB: u64 = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {

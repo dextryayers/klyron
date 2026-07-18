@@ -69,7 +69,14 @@ impl BoaValue {
         if js_value.is_null() { return Self::Null; }
         if let Some(b) = js_value.as_boolean() { return Self::Boolean(b); }
         if let Some(n) = js_value.as_number() {
-            if n.fract() == 0.0 && n.is_finite() { return Self::Integer(n as i64); }
+            if n.is_infinite() || n.is_nan() {
+                return Self::Number(n);
+            }
+            if n.fract() == 0.0 && n.is_finite()
+                && n >= -(i64::MAX as f64) - 1.0 && n <= i64::MAX as f64
+            {
+                return Self::Integer(n as i64);
+            }
             return Self::Number(n);
         }
         if let Ok(s) = js_value.to_string(context) {

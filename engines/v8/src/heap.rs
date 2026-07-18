@@ -1,5 +1,7 @@
 
 #[cfg(feature = "native")]
+use crate::error::V8Error;
+#[cfg(feature = "native")]
 use crate::ffi_types;
 
 #[cfg(feature = "native")]

@@ -8,7 +8,8 @@
 
 static std::string timestamp() {
     time_t now = time(nullptr);
-    struct tm* t = localtime(&now);
+    struct tm result;
+    struct tm* t = localtime_r(&now, &result);
     char buf[64];
     strftime(buf, sizeof(buf), "%H:%M:%S", t);
     return std::string("[") + buf + "]";

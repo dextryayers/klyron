@@ -133,7 +133,6 @@ impl V8Engine {
     pub fn json_stringify(&self, _value_ptr: *const std::ffi::c_void) -> Result<String, V8Error> {
         #[cfg(feature = "native")]
         {
-            #[cfg(feature = "native")]
             let v = _value_ptr as *mut ffi::V8ValueHandle;
             self.inner.json_stringify(v).map_err(|e| V8Error::EvalFailed(e))
         }
@@ -158,7 +157,6 @@ impl V8Engine {
     pub fn set_global(&self, _key: &str, _value_ptr: *const std::ffi::c_void) -> Result<(), V8Error> {
         #[cfg(feature = "native")]
         {
-            #[cfg(feature = "native")]
             let v = _value_ptr as *mut ffi::V8ValueHandle;
             self.inner.set_global(_key, v).map_err(V8Error::GlobalFailed)
         }

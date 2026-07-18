@@ -1,4 +1,5 @@
 use boa_engine::{Context, JsValue, NativeFunction, JsResult, js_string, JsString};
+use boa_engine::object::builtins::JsArray;
 use boa_engine::property::Attribute;
 use std::path::Path;
 
@@ -8,8 +9,18 @@ fn val_to_string(v: &JsValue, ctx: &mut Context) -> String {
         .unwrap_or_default()
 }
 
+fn sanitize_path(path: &str) -> Result<String, String> {
+    if path.contains("..") {
+        return Err("path traversal detected: '..' is not allowed".into());
+    }
+    Ok(path.to_string())
+}
+
 fn fs_read_file(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let path = args.first().map(|v| val_to_string(v, context)).unwrap_or_default();
+    let path = sanitize_path(&path).map_err(|e| {
+        boa_engine::JsNativeError::error().with_message(e)
+    })?;
     match std::fs::read_to_string(&path) {
         Ok(content) => Ok(JsValue::from(JsString::from(content))),
         Err(e) => Err(boa_engine::JsError::from_native(
@@ -20,6 +31,9 @@ fn fs_read_file(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsR
 
 fn fs_write_file(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let path = args.first().map(|v| val_to_string(v, context)).unwrap_or_default();
+    let path = sanitize_path(&path).map_err(|e| {
+        boa_engine::JsNativeError::error().with_message(e)
+    })?;
     let content = args.get(1).map(|v| val_to_string(v, context)).unwrap_or_default();
     match std::fs::write(&path, &content) {
         Ok(_) => Ok(JsValue::undefined()),
@@ -31,6 +45,9 @@ fn fs_write_file(_this: &JsValue, args: &[JsValue], context: &mut Context) -> Js
 
 fn fs_append_file(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let path = args.first().map(|v| val_to_string(v, context)).unwrap_or_default();
+    let path = sanitize_path(&path).map_err(|e| {
+        boa_engine::JsNativeError::error().with_message(e)
+    })?;
     let content = args.get(1).map(|v| val_to_string(v, context)).unwrap_or_default();
     use std::io::Write;
     match std::fs::OpenOptions::new().append(true).create(true).open(&path) {
@@ -65,6 +82,9 @@ fn fs_is_file(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsRes
 
 fn fs_mkdir(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let path = args.first().map(|v| val_to_string(v, context)).unwrap_or_default();
+    let path = sanitize_path(&path).map_err(|e| {
+        boa_engine::JsNativeError::error().with_message(e)
+    })?;
     let recursive = args.get(1).and_then(|v| v.as_boolean()).unwrap_or(false);
     let result = if recursive { std::fs::create_dir_all(&path) } else { std::fs::create_dir(&path) };
     match result {
@@ -77,6 +97,9 @@ fn fs_mkdir(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResul
 
 fn fs_remove_file(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let path = args.first().map(|v| val_to_string(v, context)).unwrap_or_default();
+    let path = sanitize_path(&path).map_err(|e| {
+        boa_engine::JsNativeError::error().with_message(e)
+    })?;
     match std::fs::remove_file(&path) {
         Ok(_) => Ok(JsValue::undefined()),
         Err(e) => Err(boa_engine::JsError::from_native(
@@ -87,6 +110,9 @@ fn fs_remove_file(_this: &JsValue, args: &[JsValue], context: &mut Context) -> J
 
 fn fs_remove_dir(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let path = args.first().map(|v| val_to_string(v, context)).unwrap_or_default();
+    let path = sanitize_path(&path).map_err(|e| {
+        boa_engine::JsNativeError::error().with_message(e)
+    })?;
     match std::fs::remove_dir_all(&path) {
         Ok(_) => Ok(JsValue::undefined()),
         Err(e) => Err(boa_engine::JsError::from_native(
@@ -99,11 +125,12 @@ fn fs_read_dir(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsRe
     let path = args.first().map(|v| val_to_string(v, context)).unwrap_or_default();
     match std::fs::read_dir(&path) {
         Ok(entries) => {
-            let names: Vec<String> = entries
-                .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
-                .collect();
-            let names_json = serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_string());
-            context.eval(boa_engine::Source::from_bytes(&names_json))
+            let arr = JsArray::new(context);
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let _ = arr.push(JsValue::from(JsString::from(name)), context);
+            }
+            Ok(JsValue::from(arr))
         }
         Err(e) => Err(boa_engine::JsError::from_native(
             boa_engine::JsNativeError::error().with_message(format!("readDir {}: {}", path, e))
@@ -113,7 +140,13 @@ fn fs_read_dir(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsRe
 
 fn fs_rename(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let from = args.first().map(|v| val_to_string(v, context)).unwrap_or_default();
+    let from = sanitize_path(&from).map_err(|e| {
+        boa_engine::JsNativeError::error().with_message(e)
+    })?;
     let to = args.get(1).map(|v| val_to_string(v, context)).unwrap_or_default();
+    let to = sanitize_path(&to).map_err(|e| {
+        boa_engine::JsNativeError::error().with_message(e)
+    })?;
     match std::fs::rename(&from, &to) {
         Ok(_) => Ok(JsValue::undefined()),
         Err(e) => Err(boa_engine::JsError::from_native(
@@ -124,7 +157,13 @@ fn fs_rename(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResu
 
 fn fs_copy(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let from = args.first().map(|v| val_to_string(v, context)).unwrap_or_default();
+    let from = sanitize_path(&from).map_err(|e| {
+        boa_engine::JsNativeError::error().with_message(e)
+    })?;
     let to = args.get(1).map(|v| val_to_string(v, context)).unwrap_or_default();
+    let to = sanitize_path(&to).map_err(|e| {
+        boa_engine::JsNativeError::error().with_message(e)
+    })?;
     match std::fs::copy(&from, &to) {
         Ok(_) => Ok(JsValue::undefined()),
         Err(e) => Err(boa_engine::JsError::from_native(
@@ -143,11 +182,15 @@ fn fs_stat(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult
             let modified = meta.modified()
                 .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as f64)
                 .unwrap_or(0.0);
-            let code = format!(
-                "({{ size: {}, isFile: {}, isDir: {}, created: {}, modified: {} }})",
-                meta.len(), meta.is_file(), meta.is_dir(), created, modified,
-            );
-            context.eval(boa_engine::Source::from_bytes(&code))
+
+            let obj = boa_engine::object::ObjectInitializer::new(context)
+                .property(js_string!("size"), meta.len(), Attribute::all())
+                .property(js_string!("isFile"), meta.is_file(), Attribute::all())
+                .property(js_string!("isDir"), meta.is_dir(), Attribute::all())
+                .property(js_string!("created"), created, Attribute::all())
+                .property(js_string!("modified"), modified, Attribute::all())
+                .build();
+            Ok(JsValue::from(obj))
         }
         Err(e) => Err(boa_engine::JsError::from_native(
             boa_engine::JsNativeError::error().with_message(format!("stat {}: {}", path, e))

@@ -153,19 +153,19 @@ pub fn detect_best_engine() -> JsEngineKind {
 
 use std::sync::Mutex;
 
+#[allow(dead_code)]
 struct Adapter<E> {
     engine: Mutex<E>,
 }
 
-impl<E> Adapter<E>
-where
-    E: JsEngineInternal,
-{
+#[allow(dead_code)]
+impl<E> Adapter<E> {
     fn wrap(engine: E) -> Self {
         Self { engine: Mutex::new(engine) }
     }
 }
 
+#[allow(dead_code)]
 trait JsEngineInternal {
     fn eval_inner(&mut self, code: &str) -> Result<String, String>;
     fn execute_script_inner(&mut self, filename: &str, source: &str) -> Result<String, String>;

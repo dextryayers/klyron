@@ -36,7 +36,7 @@ pub struct Runtime {
 
 impl Runtime {
     #[cfg(feature = "native")]
-    pub fn new(config: Option<RuntimeConfig>) -> Result<Self, V8Error> {
+    pub fn new(_config: Option<RuntimeConfig>) -> Result<Self, V8Error> {
         ffi::V8EnginePtr::init().map(|inner| Self { inner }).map_err(|e| V8Error::InitFailed(e))
     }
 

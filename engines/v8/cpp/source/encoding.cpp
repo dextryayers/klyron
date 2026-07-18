@@ -36,7 +36,7 @@ static std::vector<unsigned char> base64_decode_internal(const char* input) {
         }
     }
 
-    static const unsigned char decode_table[256] = {0};
+    static unsigned char decode_table[256] = {0};
     static bool table_init = false;
     if (!table_init) {
         for (int i = 0; i < 64; i++) {
@@ -131,7 +131,7 @@ klyron_v8_value_t* klyron_v8_encoding_text_decoder_new(klyron_v8_context_t* ctx,
     obj->Set(context, v8::String::NewFromUtf8(iso, "encoding", v8::NewStringType::kNormal).ToLocalChecked(), encoding).Check();
 
     auto decode_fn = v8::Function::New(context,
-        [enc](const v8::FunctionCallbackInfo<v8::Value>& info) {
+        [](const v8::FunctionCallbackInfo<v8::Value>& info) {
             auto iso = info.GetIsolate();
             v8::HandleScope scope(iso);
             if (info[0]->IsArrayBuffer() || info[0]->IsTypedArray()) {

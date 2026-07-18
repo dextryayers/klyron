@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <map>
 #include <vector>
 
 static void console_log_internal(klyron_jsc_engine_t* engine, const char* level, int argc, klyron_jsc_value_t** argv) {
@@ -98,7 +99,8 @@ klyron_jsc_value_t* klyron_jsc_console_assert(klyron_jsc_engine_t* engine, klyro
 
 klyron_jsc_value_t* klyron_jsc_console_count(klyron_jsc_engine_t* engine, const char* label) {
     if (!engine) return nullptr;
-    static int counter = 0;
+    static std::map<const void*, int> counters;
+    int& counter = counters[engine];
     const char* lbl = label ? label : "default";
     std::fprintf(stdout, "[count] %s: %d\n", lbl, ++counter);
     std::fflush(stdout);

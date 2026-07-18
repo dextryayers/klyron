@@ -6,7 +6,7 @@ use crate::ffi;
 use std::ffi::CString;
 
 #[cfg(feature = "native")]
-pub type NativeCallback = extern "C" fn(
+pub type NativeCallback = unsafe extern "C" fn(
     ctx: *mut ffi::V8ContextHandle,
     argc: i32,
     argv: *mut *mut ffi::V8ValueHandle,

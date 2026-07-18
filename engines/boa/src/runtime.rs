@@ -7,6 +7,7 @@ pub struct BoaRuntime {
 }
 
 impl BoaRuntime {
+    /// Creates a new runtime, panicking on failure. Prefer [`try_new()`](Self::try_new) for graceful error handling.
     pub fn new() -> Self {
         match Self::try_new() {
             Ok(r) => r,
@@ -21,6 +22,11 @@ impl BoaRuntime {
         Ok(Self { context })
     }
 
+    pub fn from_context(context: Context) -> Self {
+        Self { context }
+    }
+
+    /// Creates a new runtime with limits, panicking on failure. Prefer [`try_new_with_limits()`](Self::try_new_with_limits) for graceful error handling.
     pub fn new_with_limits(
         stack_limit: Option<usize>,
         recursion_limit: Option<usize>,
@@ -97,17 +103,15 @@ impl BoaRuntime {
         self.context.global_object()
     }
 
-    pub fn stack_trace(&self) -> String {
+    pub fn stack_trace(&mut self) -> String {
         let code = "(function() { try { throw new Error(); } catch(e) { return e.stack || String(e); } })()";
-        let mut ctx = Context::builder().build().ok();
-        if let Some(ref mut c) = ctx {
-            let result = c.eval(Source::from_bytes(code));
-            if let Ok(val) = result {
-                let s = val.to_string(c).map(|s| s.to_std_string_escaped()).unwrap_or_default();
-                return s;
-            }
+        let result = self.context.eval(Source::from_bytes(code));
+        match result {
+            Ok(val) => val.to_string(&mut self.context)
+                .map(|s| s.to_std_string_escaped())
+                .unwrap_or_else(|_| "  (no stack trace)".to_string()),
+            Err(_) => "  (no stack trace)".to_string(),
         }
-        "  (no stack trace)".to_string()
     }
 }
 

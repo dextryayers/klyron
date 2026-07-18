@@ -4,19 +4,36 @@
 #include <cstdlib>
 #include <map>
 #include <functional>
+#include <atomic>
+#include <chrono>
 
 struct TimerEntry {
     unsigned int id;
     bool recurring;
     bool active;
+    double delay_ms;
+    std::chrono::steady_clock::time_point last_fired;
 };
 
-static std::map<unsigned int, TimerEntry> g_timers;
-static unsigned int g_next_timer_id = 1;
+/* Per-engine timer state */
+struct TimerState {
+    std::map<unsigned int, TimerEntry> timers;
+    std::atomic<unsigned int> next_id{1};
+};
+
+static std::map<klyron_jsc_engine_t*, TimerState> g_engine_timers;
+static std::mutex g_timers_mutex;
+
+static TimerState& get_timer_state(klyron_jsc_engine_t* engine) {
+    std::lock_guard<std::mutex> lock(g_timers_mutex);
+    return g_engine_timers[engine];
+}
 
 static void execute_timer_cb(klyron_jsc_engine_t* engine, unsigned int id) {
-    auto it = g_timers.find(id);
-    if (it == g_timers.end() || !it->second.active) return;
+    if (!engine || !engine->ctx) return;
+    TimerState& state = get_timer_state(engine);
+    auto it = state.timers.find(id);
+    if (it == state.timers.end() || !it->second.active) return;
     JSObjectRef global = JSContextGetGlobalObject(engine->ctx);
     char cb_name[64];
     std::snprintf(cb_name, sizeof(cb_name), "__klyron_timer_%u", id);
@@ -31,7 +48,7 @@ static void execute_timer_cb(klyron_jsc_engine_t* engine, unsigned int id) {
         if (call_exc) jsc_capture_exception(engine, call_exc);
     }
     if (!it->second.recurring) {
-        g_timers.erase(id);
+        state.timers.erase(id);
         char prop_name[64];
         std::snprintf(prop_name, sizeof(prop_name), "__klyron_timer_%u", id);
         JSStringRef del_prop = jsc_string_from_cstr(prop_name);
@@ -42,8 +59,9 @@ static void execute_timer_cb(klyron_jsc_engine_t* engine, unsigned int id) {
 
 klyron_jsc_value_t* klyron_jsc_set_timeout(klyron_jsc_engine_t* engine, klyron_jsc_value_t* callback, double ms) {
     if (!engine || !callback) return nullptr;
-    unsigned int id = g_next_timer_id++;
-    g_timers[id] = {id, false, true};
+    TimerState& state = get_timer_state(engine);
+    unsigned int id = state.next_id.fetch_add(1, std::memory_order_seq_cst);
+    state.timers[id] = {id, false, true, ms, std::chrono::steady_clock::now()};
     JSObjectRef global = JSContextGetGlobalObject(engine->ctx);
     char prop_name[64];
     std::snprintf(prop_name, sizeof(prop_name), "__klyron_timer_%u", id);
@@ -53,7 +71,7 @@ klyron_jsc_value_t* klyron_jsc_set_timeout(klyron_jsc_engine_t* engine, klyron_j
     JSStringRelease(prop);
     if (exc) {
         jsc_capture_exception(engine, exc);
-        g_timers.erase(id);
+        state.timers.erase(id);
         return nullptr;
     }
     auto v = new klyron_jsc_value_t(engine->ctx, JSValueMakeNumber(engine->ctx, (double)id));
@@ -63,8 +81,9 @@ klyron_jsc_value_t* klyron_jsc_set_timeout(klyron_jsc_engine_t* engine, klyron_j
 
 klyron_jsc_value_t* klyron_jsc_set_interval(klyron_jsc_engine_t* engine, klyron_jsc_value_t* callback, double ms) {
     if (!engine || !callback) return nullptr;
-    unsigned int id = g_next_timer_id++;
-    g_timers[id] = {id, true, true};
+    TimerState& state = get_timer_state(engine);
+    unsigned int id = state.next_id.fetch_add(1, std::memory_order_seq_cst);
+    state.timers[id] = {id, true, true, ms, std::chrono::steady_clock::now()};
     JSObjectRef global = JSContextGetGlobalObject(engine->ctx);
     char prop_name[64];
     std::snprintf(prop_name, sizeof(prop_name), "__klyron_timer_%u", id);
@@ -74,7 +93,7 @@ klyron_jsc_value_t* klyron_jsc_set_interval(klyron_jsc_engine_t* engine, klyron_
     JSStringRelease(prop);
     if (exc) {
         jsc_capture_exception(engine, exc);
-        g_timers.erase(id);
+        state.timers.erase(id);
         return nullptr;
     }
     auto v = new klyron_jsc_value_t(engine->ctx, JSValueMakeNumber(engine->ctx, (double)id));
@@ -89,11 +108,12 @@ klyron_jsc_value_t* klyron_jsc_set_immediate(klyron_jsc_engine_t* engine, klyron
 klyron_jsc_result_t klyron_jsc_clear_timeout(klyron_jsc_engine_t* engine, double id) {
     klyron_jsc_result_t result = {false, {0}};
     if (!engine) return result;
+    TimerState& state = get_timer_state(engine);
     unsigned int uid = (unsigned int)id;
-    auto it = g_timers.find(uid);
-    if (it != g_timers.end()) {
+    auto it = state.timers.find(uid);
+    if (it != state.timers.end()) {
         it->second.active = false;
-        g_timers.erase(it);
+        state.timers.erase(it);
         JSObjectRef global = JSContextGetGlobalObject(engine->ctx);
         char prop_name[64];
         std::snprintf(prop_name, sizeof(prop_name), "__klyron_timer_%u", uid);
@@ -115,9 +135,16 @@ klyron_jsc_result_t klyron_jsc_clear_immediate(klyron_jsc_engine_t* engine, doub
 
 void klyron_jsc_timer_poll(klyron_jsc_engine_t* engine) {
     if (!engine) return;
+    TimerState& state = get_timer_state(engine);
+    auto now = std::chrono::steady_clock::now();
     std::vector<unsigned int> to_execute;
-    for (const auto& pair : g_timers) {
-        if (pair.second.active) to_execute.push_back(pair.first);
+    for (const auto& pair : state.timers) {
+        if (!pair.second.active) continue;
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - pair.second.last_fired).count();
+        if (elapsed >= (long long)pair.second.delay_ms) {
+            to_execute.push_back(pair.first);
+        }
     }
     for (unsigned int id : to_execute) {
         execute_timer_cb(engine, id);

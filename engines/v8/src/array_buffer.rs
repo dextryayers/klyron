@@ -5,8 +5,6 @@ use crate::ffi;
 
 pub struct V8ArrayBuffer {
     #[cfg(feature = "native")]
-    ctx: *mut ffi::V8ContextHandle,
-    #[cfg(feature = "native")]
     handle: *mut ffi::V8ValueHandle,
 }
 
@@ -15,7 +13,7 @@ impl V8ArrayBuffer {
     pub fn new(ctx: *mut ffi::V8ContextHandle, data: &[u8]) -> Result<Self, V8Error> {
         let handle = unsafe { ffi::klyron_v8_array_buffer_new(ctx, data.as_ptr(), data.len()) };
         if handle.is_null() { Err(V8Error::EvalFailed("array_buffer_new failed".into())) }
-        else { Ok(Self { ctx, handle }) }
+        else { Ok(Self { handle }) }
     }
 
     #[cfg(not(feature = "native"))]
@@ -30,7 +28,7 @@ impl V8ArrayBuffer {
 
     #[cfg(feature = "native")]
     pub fn from_value(value: *mut ffi::V8ValueHandle) -> Self {
-        Self { ctx: std::ptr::null_mut(), handle: value }
+        Self { handle: value }
     }
 }
 

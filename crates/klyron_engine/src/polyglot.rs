@@ -89,6 +89,7 @@ pub trait PolyglotEngine: Send + Sync {
 }
 
 /// WASM-based engine using wasmtime
+#[allow(dead_code)]
 pub struct WasmEngine {
     module: wasmtime::Module,
     store: wasmtime::Store<()>,

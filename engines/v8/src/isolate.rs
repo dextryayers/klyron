@@ -63,7 +63,7 @@ impl V8Isolate {
 
     #[cfg(feature = "native")]
     pub fn get_heap_stats(&self) -> Result<ffi::V8HeapStats, V8Error> {
-        let mut stats = ffi_types::V8HeapStats::zeroed();
+        let mut stats = crate::ffi_types::V8HeapStats::zeroed();
         let r = unsafe { ffi::klyron_v8_get_heap_stats(self.handle, &mut stats) };
         if r.success { Ok(stats) } else { Err(V8Error::Internal("get_heap_stats failed".into())) }
     }
