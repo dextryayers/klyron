@@ -1,216 +1,144 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+pub mod export;
+pub mod metrics;
 
-use anyhow::{Context, Result};
-use opentelemetry::{
-  global,
-  trace::Tracer,
-  KeyValue,
-};
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{
-  metrics as sdk_metrics,
-  runtime,
-  trace as sdktrace,
-  Resource,
-};
-use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TelemetryTransport {
-  Grpc,
-  Http,
-}
+use anyhow::Result;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TelemetryConfig {
-  pub service_name: String,
-  pub service_version: String,
-  pub otlp_endpoint: String,
-  pub transport: TelemetryTransport,
-  pub sampling_rate: f64,
-  pub batch_size: u32,
-  pub export_interval_ms: u64,
-  pub enabled: bool,
-}
-
-impl Default for TelemetryConfig {
-  fn default() -> Self {
-    TelemetryConfig {
-      service_name: "klyron".into(),
-      service_version: "0.1.0".into(),
-      otlp_endpoint: "http://localhost:4317".into(),
-      transport: TelemetryTransport::Grpc,
-      sampling_rate: 1.0,
-      batch_size: 100,
-      export_interval_ms: 5000,
-      enabled: true,
-    }
-  }
-}
+pub use export::{ExportConfig, TelemetryExporter, Transport};
+pub use metrics::{HistogramSummary, MetricSnapshot, MetricsCollector};
 
 pub struct TelemetryManager {
-  config: TelemetryConfig,
-  trace_count: AtomicU64,
+    collector: Arc<MetricsCollector>,
+    exporter: TelemetryExporter,
+    #[allow(dead_code)]
+    service_name: String,
 }
 
 impl TelemetryManager {
-  pub fn new() -> Self {
-    TelemetryManager {
-      config: TelemetryConfig::default(),
-      trace_count: AtomicU64::new(0),
-    }
-  }
-
-  pub fn with_config(config: TelemetryConfig) -> Self {
-    TelemetryManager {
-      config,
-      trace_count: AtomicU64::new(0),
-    }
-  }
-
-  pub fn init(&mut self) -> Result<()> {
-    if !self.config.enabled {
-      return Ok(());
+    pub fn new() -> Self {
+        Self {
+            collector: Arc::new(MetricsCollector::new()),
+            exporter: TelemetryExporter::new(),
+            service_name: "klyron".to_string(),
+        }
     }
 
-    let svc_name: &'static str = Box::leak(self.config.service_name.clone().into_boxed_str());
-    let svc_ver: &'static str = Box::leak(self.config.service_version.clone().into_boxed_str());
-
-    let resource = Resource::new(vec![
-      KeyValue::new("service.name", svc_name),
-      KeyValue::new("service.version", svc_ver),
-    ]);
-
-    let exporter = match self.config.transport {
-      TelemetryTransport::Grpc => opentelemetry_otlp::SpanExporter::builder()
-        .with_tonic()
-        .with_endpoint(self.config.otlp_endpoint.clone())
-        .build()
-        .context("failed to build gRPC OTLP span exporter")?,
-      TelemetryTransport::Http => opentelemetry_otlp::SpanExporter::builder()
-        .with_http()
-        .with_endpoint(self.config.otlp_endpoint.clone())
-        .build()
-        .context("failed to build HTTP OTLP span exporter")?,
-    };
-
-    let tracer_provider = sdktrace::TracerProvider::builder()
-      .with_batch_exporter(exporter, runtime::Tokio)
-      .with_resource(resource.clone())
-      .with_sampler(opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(self.config.sampling_rate))
-      .build();
-    global::set_tracer_provider(tracer_provider);
-
-    let meter_exporter = opentelemetry_otlp::MetricExporter::builder()
-      .with_http()
-      .build()
-      .context("failed to build OTLP metric exporter")?;
-
-    let meter_provider = sdk_metrics::SdkMeterProvider::builder()
-      .with_resource(resource)
-      .with_reader(
-        sdk_metrics::PeriodicReader::builder(meter_exporter, runtime::Tokio)
-          .with_interval(Duration::from_millis(self.config.export_interval_ms))
-          .build(),
-      )
-      .build();
-    global::set_meter_provider(meter_provider);
-
-    Ok(())
-  }
-
-  pub fn start_span(&self, span_name: &str) -> Option<opentelemetry::global::BoxedSpan> {
-    let count = self.trace_count.fetch_add(1, Ordering::SeqCst);
-    if count as f64 >= self.config.sampling_rate * 100.0 {
-      return None;
+    pub fn with_config(config: ExportConfig) -> Self {
+        let service_name = config.service_name.clone();
+        Self {
+            collector: Arc::new(MetricsCollector::new()),
+            exporter: TelemetryExporter::with_config(config),
+            service_name,
+        }
     }
-    let svc_name: &'static str = Box::leak(self.config.service_name.clone().into_boxed_str());
-    let tracer = global::tracer(svc_name);
-    Some(tracer.start(span_name.to_string()))
-  }
 
-  pub fn record_count(&self, name: &'static str, value: u64, attributes: Vec<KeyValue>) {
-    let meter = global::meter(name);
-    let counter = meter.u64_counter(name).with_description("").build();
-    counter.add(value, &attributes);
-  }
+    pub fn init(&mut self) -> Result<()> {
+        self.exporter.init()
+    }
 
-  pub fn record_gauge(&self, name: &'static str, value: u64, attributes: Vec<KeyValue>) {
-    let meter = global::meter(name);
-    let gauge = meter.u64_gauge(name).with_description("").build();
-    gauge.record(value, &attributes);
-  }
+    pub fn collector(&self) -> &MetricsCollector {
+        &self.collector
+    }
 
-  pub fn record_histogram(&self, name: &'static str, value: f64, attributes: Vec<KeyValue>) {
-    let meter = global::meter(name);
-    let histogram = meter.f64_histogram(name).with_description("").build();
-    histogram.record(value, &attributes);
-  }
+    pub fn exporter(&self) -> &TelemetryExporter {
+        &self.exporter
+    }
 
-  pub fn shutdown(&self) {
-    global::shutdown_tracer_provider();
-  }
+    pub fn inc_counter(&self, name: &str, value: u64) {
+        self.collector.inc_counter(name, value);
+    }
+
+    pub fn set_gauge(&self, name: &str, value: u64) {
+        self.collector.set_gauge(name, value);
+    }
+
+    pub fn record_histogram(&self, name: &str, value: f64) {
+        self.collector.record_histogram(name, value);
+    }
+
+    pub fn record_count(&self, name: &str, value: u64, attributes: Vec<opentelemetry::KeyValue>) {
+        self.exporter.record_count(name, value, attributes);
+    }
+
+    pub fn record_gauge(&self, name: &str, value: u64, attributes: Vec<opentelemetry::KeyValue>) {
+        self.exporter.record_gauge(name, value, attributes);
+    }
+
+    pub fn record_histogram_export(&self, name: &str, value: f64, attributes: Vec<opentelemetry::KeyValue>) {
+        self.exporter.record_histogram(name, value, attributes);
+    }
+
+    pub fn start_span(&self, span_name: &str) -> Option<opentelemetry::global::BoxedSpan> {
+        self.exporter.start_span(span_name)
+    }
+
+    pub fn flush(&self) -> Result<()> {
+        let snapshot = self.collector.snapshot();
+        self.exporter.export_snapshot(snapshot)?;
+        self.collector.reset();
+        Ok(())
+    }
+
+    pub fn shutdown(&self) {
+        self.exporter.shutdown();
+    }
+
+    pub fn snapshot(&self) -> MetricSnapshot {
+        self.collector.snapshot()
+    }
 }
 
 impl Default for TelemetryManager {
-  fn default() -> Self {
-    Self::new()
-  }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+    use super::*;
 
-  #[test]
-  fn test_telemetry_config_default() {
-    let config = TelemetryConfig::default();
-    assert_eq!(config.service_name, "klyron");
-    assert_eq!(config.sampling_rate, 1.0);
-    assert!(config.enabled);
-  }
+    #[test]
+    fn test_telemetry_manager_new() {
+        let mgr = TelemetryManager::new();
+        assert_eq!(mgr.collector.get_counter("test"), 0);
+    }
 
-  #[test]
-  fn test_telemetry_manager_new() {
-    let mgr = TelemetryManager::new();
-    assert_eq!(mgr.trace_count.load(Ordering::SeqCst), 0);
-  }
+    #[test]
+    fn test_telemetry_counters() {
+        let mgr = TelemetryManager::new();
+        mgr.inc_counter("hits", 42);
+        assert_eq!(mgr.collector.get_counter("hits"), 42);
+    }
 
-  #[test]
-  fn test_telemetry_manager_disabled() {
-    let config = TelemetryConfig {
-      enabled: false,
-      ..Default::default()
-    };
-    let mut mgr = TelemetryManager::with_config(config);
-    assert!(mgr.init().is_ok());
-    assert_eq!(mgr.trace_count.load(Ordering::SeqCst), 0);
-  }
+    #[test]
+    fn test_telemetry_histogram() {
+        let mgr = TelemetryManager::new();
+        mgr.record_histogram("latency", 10.0);
+        let snap = mgr.snapshot();
+        assert_eq!(snap.histograms["latency"].count, 1);
+    }
 
-  #[test]
-  fn test_start_span_without_init() {
-    let mgr = TelemetryManager::new();
-    let span = mgr.start_span("test");
-    assert!(span.is_some());
-  }
+    #[test]
+    fn test_telemetry_flush() {
+        let mut mgr = TelemetryManager::with_config(ExportConfig {
+            enabled: false,
+            ..Default::default()
+        });
+        mgr.init().unwrap();
+        mgr.inc_counter("flush_test", 7);
+        assert!(mgr.flush().is_ok());
+        assert_eq!(mgr.collector.get_counter("flush_test"), 0);
+    }
 
-  #[test]
-  fn test_telemetry_config_serialization() {
-    let config = TelemetryConfig {
-      service_name: "test-svc".into(),
-      service_version: "1.0.0".into(),
-      otlp_endpoint: "http://localhost:4318".into(),
-      transport: TelemetryTransport::Http,
-      sampling_rate: 0.5,
-      batch_size: 50,
-      export_interval_ms: 10000,
-      enabled: true,
-    };
-    let json = serde_json::to_string(&config).unwrap();
-    let deserialized: TelemetryConfig = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized.service_name, "test-svc");
-    assert_eq!(deserialized.transport, TelemetryTransport::Http);
-    assert_eq!(deserialized.sampling_rate, 0.5);
-  }
+    #[test]
+    fn test_telemetry_manager_disabled() {
+        let config = ExportConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        let mut mgr = TelemetryManager::with_config(config);
+        assert!(mgr.init().is_ok());
+    }
 }

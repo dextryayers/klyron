@@ -1,3 +1,7 @@
+pub mod health;
+pub mod rollback;
+pub mod strategy;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;

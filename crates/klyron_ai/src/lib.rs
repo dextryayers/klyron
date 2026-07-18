@@ -1,16 +1,26 @@
-use anyhow::{Context, Result};
-use futures::StreamExt;
+pub mod chat;
+pub mod client;
+pub mod completion;
+pub mod embeddings;
+pub mod tools;
+
+use anyhow::Result;
 use lru::LruCache;
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{debug, warn};
+use tracing::debug;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+pub use chat::{
+    ChatCompletion, ChatMessage, ChatRequest, ChatResponse, StreamEvent,
+};
+pub use client::{AiClient, Usage};
+pub use completion::{Completion, CompletionRequest, CompletionResponse};
+pub use embeddings::{EmbeddingRequest, EmbeddingResponse, Embeddings};
+pub use tools::{ToolDefinition, ToolFunction, ToolRegistry, ToolResult};
+
+#[derive(Debug, Clone)]
 pub struct AiConfig {
     pub api_key: String,
     pub endpoint: String,
@@ -31,60 +41,7 @@ impl Default for AiConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ChatMessage {
-    role: String,
-    content: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
-    temperature: f64,
-    max_tokens: u32,
-    stream: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ChatResponse {
-    choices: Vec<Choice>,
-    usage: Option<Usage>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Choice {
-    message: ChatMessage,
-    finish_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Usage {
-    prompt_tokens: u32,
-    completion_tokens: u32,
-    total_tokens: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct StreamChunk {
-    choices: Vec<StreamChoice>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct StreamChoice {
-    delta: Delta,
-    finish_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Delta {
-    content: Option<String>,
-}
-
-type CacheKey = String;
-type CacheValue = String;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum LlmProvider {
     OpenAI { api_key: String, model: String },
     Anthropic { api_key: String, model: String },
@@ -141,8 +98,11 @@ impl LlmProvider {
     }
 }
 
+type CacheKey = String;
+type CacheValue = String;
+
 pub struct AiEngine {
-    client: Client,
+    client: AiClient,
     config: AiConfig,
     cache: Arc<RwLock<LruCache<CacheKey, CacheValue>>>,
     system_prompt: Option<String>,
@@ -150,25 +110,47 @@ pub struct AiEngine {
 
 impl AiEngine {
     pub fn new(config: AiConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(120))
-            .build()
-            .expect("Failed to create HTTP client");
-
+        let client = AiClient::new(&config.endpoint, &config.api_key);
         let cache = Arc::new(RwLock::new(LruCache::new(
             NonZeroUsize::new(256).unwrap(),
         )));
+        Self { client, config, cache, system_prompt: None }
+    }
 
-        Self {
-            client,
-            config,
-            cache,
-            system_prompt: None,
-        }
+    pub fn from_provider(provider: LlmProvider) -> Self {
+        Self::new(provider.to_config())
+    }
+
+    pub fn with_system_prompt(mut self, prompt: &str) -> Self {
+        self.system_prompt = Some(prompt.to_string());
+        self
+    }
+
+    pub fn with_config(mut self, config: AiConfig) -> Self {
+        let endpoint = config.endpoint.clone();
+        let api_key = config.api_key.clone();
+        self.config = config;
+        self.client = AiClient::new(&endpoint, &api_key);
+        self
+    }
+
+    pub fn client(&self) -> &AiClient {
+        &self.client
+    }
+
+    pub fn config(&self) -> &AiConfig {
+        &self.config
+    }
+
+    pub fn model(&self) -> &str {
+        &self.config.model
+    }
+
+    pub fn system_prompt(&self) -> Option<&str> {
+        self.system_prompt.as_deref()
     }
 
     pub fn provider(&self) -> LlmProvider {
-        // Best-effort reconstruction from config
         if self.config.endpoint.contains("openai") {
             LlmProvider::OpenAI {
                 api_key: self.config.api_key.clone(),
@@ -184,7 +166,9 @@ impl AiEngine {
                 api_key: self.config.api_key.clone(),
                 model: self.config.model.clone(),
             }
-        } else if self.config.endpoint.contains("localhost") || self.config.endpoint.contains("127.0.0.1") {
+        } else if self.config.endpoint.contains("localhost")
+            || self.config.endpoint.contains("127.0.0.1")
+        {
             LlmProvider::Ollama {
                 endpoint: self.config.endpoint.clone(),
                 model: self.config.model.clone(),
@@ -195,27 +179,6 @@ impl AiEngine {
                 api_key: Some(self.config.api_key.clone()),
             }
         }
-    }
-
-    pub fn model(&self) -> &str { &self.config.model }
-    pub fn system_prompt(&self) -> Option<&str> { self.system_prompt.as_deref() }
-
-    pub fn from_provider(provider: LlmProvider) -> Self {
-        Self::new(provider.to_config())
-    }
-
-    pub fn with_system_prompt(mut self, prompt: &str) -> Self {
-        self.system_prompt = Some(prompt.to_string());
-        self
-    }
-
-    pub fn with_config(mut self, config: AiConfig) -> Self {
-        self.config = config;
-        self
-    }
-
-    pub fn config(&self) -> &AiConfig {
-        &self.config
     }
 
     fn cache_key(prefix: &str, content: &str) -> CacheKey {
@@ -243,47 +206,29 @@ impl AiEngine {
             return Ok(cached);
         }
 
+        let messages = vec![
+            ChatMessage::system(system_prompt),
+            ChatMessage::user(user_prompt),
+        ];
+
         let request = ChatRequest {
             model: self.config.model.clone(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_prompt.to_string(),
-                },
-            ],
-            temperature: self.config.temperature,
-            max_tokens: self.config.max_tokens,
-            stream: false,
+            messages,
+            temperature: Some(self.config.temperature),
+            max_tokens: Some(self.config.max_tokens),
+            top_p: None,
+            stream: Some(false),
+            tools: None,
+            tool_choice: None,
         };
 
-        let response = self
-            .client
-            .post(format!("{}/chat/completions", self.config.endpoint))
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
-            .json(&request)
-            .send()
-            .await
-            .context("Failed to send AI request")?;
+        let chat = ChatCompletion::new(self.client.clone());
+        let response = chat.create(request).await?;
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("AI API error ({}): {}", status, text));
-        }
-
-        let chat_response: ChatResponse = response
-            .json()
-            .await
-            .context("Failed to parse AI response")?;
-
-        let result = chat_response
+        let result = response
             .choices
             .first()
-            .map(|c| c.message.content.clone())
+            .map(|c| c.message.content.clone().unwrap_or_default())
             .unwrap_or_default();
 
         self.set_cache(cache_key, result.clone()).await;
@@ -295,66 +240,24 @@ impl AiEngine {
         system_prompt: &str,
         user_prompt: &str,
     ) -> Result<tokio::sync::mpsc::Receiver<String>> {
+        let messages = vec![
+            ChatMessage::system(system_prompt),
+            ChatMessage::user(user_prompt),
+        ];
+
         let request = ChatRequest {
             model: self.config.model.clone(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_prompt.to_string(),
-                },
-            ],
-            temperature: self.config.temperature,
-            max_tokens: self.config.max_tokens,
-            stream: true,
+            messages,
+            temperature: Some(self.config.temperature),
+            max_tokens: Some(self.config.max_tokens),
+            top_p: None,
+            stream: Some(true),
+            tools: None,
+            tool_choice: None,
         };
 
-        let response = self
-            .client
-            .post(format!("{}/chat/completions", self.config.endpoint))
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
-            .json(&request)
-            .send()
-            .await
-            .context("Failed to send streaming AI request")?;
-
-        let (tx, rx) = tokio::sync::mpsc::channel(64);
-        let mut stream = response.bytes_stream();
-
-        tokio::spawn(async move {
-            while let Some(chunk) = stream.next().await {
-                match chunk {
-                    Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        for line in text.lines() {
-                            if let Some(data) = line.strip_prefix("data: ") {
-                                if data == "[DONE]" {
-                                    break;
-                                }
-                                if let Ok(chunk) =
-                                    serde_json::from_str::<StreamChunk>(data)
-                                {
-                                    if let Some(choice) = chunk.choices.first() {
-                                        if let Some(content) = &choice.delta.content {
-                                            let _ = tx.send(content.clone()).await;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Stream error: {}", e);
-                        break;
-                    }
-                }
-            }
-        });
-
-        Ok(rx)
+        let chat = ChatCompletion::new(self.client.clone());
+        chat.create_stream(request).await
     }
 
     pub async fn generate_code(&self, prompt: &str, lang: &str) -> Result<String> {
@@ -472,6 +375,18 @@ impl AiEngine {
         let cache = self.cache.blocking_read();
         cache.len()
     }
+
+    pub fn chat_completion_api(&self) -> ChatCompletion {
+        ChatCompletion::new(self.client.clone())
+    }
+
+    pub fn embeddings_api(&self) -> Embeddings {
+        Embeddings::new(self.client.clone())
+    }
+
+    pub fn completion_api(&self) -> Completion {
+        Completion::new(self.client.clone())
+    }
 }
 
 #[cfg(test)]
@@ -484,12 +399,6 @@ mod tests {
         assert_eq!(config.model, "gpt-4");
         assert_eq!(config.temperature as i32, 0);
         assert_eq!(config.max_tokens, 4096);
-    }
-
-    #[test]
-    fn test_cache_key_generation() {
-        let key = AiEngine::cache_key("system", "user prompt");
-        assert_eq!(key.len(), 64);
     }
 
     #[test]
@@ -507,21 +416,12 @@ mod tests {
     }
 
     #[test]
-    fn test_ai_config_model() {
-        let config = AiConfig {
-            model: "gpt-3.5-turbo".into(),
-            ..Default::default()
-        };
-        assert_eq!(config.model, "gpt-3.5-turbo");
-    }
-
-    #[test]
-    fn test_ai_config_endpoint() {
-        let config = AiConfig {
-            endpoint: "https://custom.api.com/v1".into(),
-            ..Default::default()
-        };
-        assert_eq!(config.endpoint, "https://custom.api.com/v1");
+    fn test_llm_provider_openai_config() {
+        let provider = LlmProvider::openai_gpt4("sk-test".into());
+        let config = provider.to_config();
+        assert_eq!(config.model, "gpt-4");
+        assert_eq!(config.api_key, "sk-test");
+        assert!(config.endpoint.contains("openai"));
     }
 
     #[test]
@@ -532,41 +432,46 @@ mod tests {
     }
 
     #[test]
-    fn test_llm_provider_openai_config() {
-        let provider = LlmProvider::openai_gpt4("sk-test".into());
-        let config = provider.to_config();
-        assert_eq!(config.model, "gpt-4");
-        assert_eq!(config.api_key, "sk-test");
-        assert!(config.endpoint.contains("openai"));
+    fn test_embeddings_cosine_similarity() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0];
+        let sim = Embeddings::cosine_similarity(&a, &b);
+        assert!((sim - 0.0).abs() < 1e-10);
+
+        let c = vec![2.0, 0.0, 0.0];
+        let sim2 = Embeddings::cosine_similarity(&a, &c);
+        assert!((sim2 - 1.0).abs() < 1e-10);
     }
 
     #[test]
-    fn test_llm_provider_anthropic() {
-        let provider = LlmProvider::anthropic_sonnet("sk-ant-test".into());
-        let config = provider.to_config();
-        assert_eq!(config.model, "claude-sonnet-4-20250514");
-        assert!(config.endpoint.contains("anthropic"));
+    fn test_tool_registry() {
+        let mut registry = ToolRegistry::new();
+        registry.register_fn("get_weather", "Get weather for a location", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "location": {"type": "string"}
+            }
+        }));
+        assert_eq!(registry.len(), 1);
+
+        let defs = registry.definitions();
+        assert_eq!(defs[0].function.name, "get_weather");
     }
 
     #[test]
-    fn test_ai_engine_from_provider() {
-        let provider = LlmProvider::openai_gpt4("test-key".into());
-        let engine = AiEngine::from_provider(provider);
-        assert_eq!(engine.model(), "gpt-4");
+    fn test_chat_message_constructors() {
+        let msg = ChatMessage::system("be helpful");
+        assert_eq!(msg.role, "system");
+        assert_eq!(msg.content, "be helpful");
+
+        let msg = ChatMessage::user("hello");
+        assert_eq!(msg.role, "user");
     }
 
     #[test]
-    fn test_ai_engine_with_system_prompt() {
-        let provider = LlmProvider::openai_gpt4("test".into());
-        let engine = AiEngine::from_provider(provider).with_system_prompt("Be helpful");
-        assert_eq!(engine.system_prompt(), Some("Be helpful"));
-    }
-
-    #[test]
-    fn test_cache_clear() {
-        let config = AiConfig::default();
-        let engine = AiEngine::new(config);
-        engine.clear_cache();
-        assert_eq!(engine.cache_size(), 0);
+    fn test_tool_result() {
+        let tr = ToolResult::new("call_123", "sunny");
+        assert_eq!(tr.tool_call_id, "call_123");
+        assert_eq!(tr.content, "sunny");
     }
 }

@@ -65,6 +65,7 @@ members = [
     "crates/klyron_mysql",
     "crates/klyron_napi",
     "crates/klyron_node",
+    "crates/klyron_permissions",
     "crates/klyron_plugin",
     "crates/klyron_pm",
     "crates/klyron_postgres",

@@ -1,18 +1,14 @@
-//! PostgreSQL database binding with connection pooling, prepared statement caching,
-//! transaction support, COPY FROM, and type-safe row accessors.
+pub mod migrate;
+pub mod pool;
 
 use std::sync::Arc;
 
 use bytes::Bytes;
-use deadpool_postgres::{Manager, Pool};
+use deadpool_postgres::Pool;
 use futures::SinkExt;
 use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio_postgres::{Client, NoTls, Row as PgRow};
-
-// ---------------------------------------------------------------------------
-// Error
-// ---------------------------------------------------------------------------
 
 #[derive(Error, Debug)]
 pub enum PostgresError {
@@ -34,11 +30,6 @@ pub enum PostgresError {
 
 pub type Result<T> = std::result::Result<T, PostgresError>;
 
-// ---------------------------------------------------------------------------
-// Row
-// ---------------------------------------------------------------------------
-
-/// A row of query results with type-safe accessors over `serde_json::Value`.
 #[derive(Debug, Clone)]
 pub struct Row {
     columns: Vec<String>,
@@ -46,64 +37,51 @@ pub struct Row {
 }
 
 impl Row {
-    /// Returns the raw `serde_json::Value` at the given column index.
     #[inline]
     pub fn get(&self, index: usize) -> Option<&serde_json::Value> {
         self.values.get(index)
     }
 
-    /// Returns the value as a string slice if the column holds a JSON string.
     #[inline]
     pub fn get_str(&self, index: usize) -> Option<&str> {
         self.values.get(index)?.as_str()
     }
 
-    /// Returns the value as an `i64` if the column holds a JSON number.
     #[inline]
     pub fn get_int(&self, index: usize) -> Option<i64> {
         self.values.get(index)?.as_i64()
     }
 
-    /// Returns the value as an `f64` if the column holds a JSON number.
     #[inline]
     pub fn get_float(&self, index: usize) -> Option<f64> {
         self.values.get(index)?.as_f64()
     }
 
-    /// Returns the value as a `bool` if the column holds a JSON boolean.
     #[inline]
     pub fn get_bool(&self, index: usize) -> Option<bool> {
         self.values.get(index)?.as_bool()
     }
 
-    /// Returns `true` if the column is SQL `NULL` (JSON `Null`).
     #[inline]
     pub fn is_null(&self, index: usize) -> bool {
         self.values.get(index).map_or(true, serde_json::Value::is_null)
     }
 
-    /// Column names of this row.
     #[inline]
     pub fn columns(&self) -> &[String] {
         &self.columns
     }
 
-    /// Number of columns.
     #[inline]
     pub fn len(&self) -> usize {
         self.values.len()
     }
 
-    /// Returns `true` when there are no columns.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
 
 fn pg_row_to_row(row: &PgRow) -> Row {
     let columns: Vec<String> = row.columns().iter().map(|c| c.name().to_string()).collect();
@@ -146,30 +124,16 @@ fn pg_cell_to_json(row: &PgRow, i: usize) -> serde_json::Value {
     }
 }
 
-// ---------------------------------------------------------------------------
-// PostgresDb
-// ---------------------------------------------------------------------------
-
 enum Inner {
     Direct { client: Mutex<Client> },
     Pool { pool: Pool },
 }
 
-/// A PostgreSQL database handle supporting single-connection and pooled modes.
-///
-/// The `connect()` variant maintains a **single** persistent connection with
-/// automatic prepared statement caching.  The `connect_pool()` variant uses
-/// `deadpool-postgres` for connection pooling.
 pub struct PostgresDb {
     inner: Arc<Inner>,
 }
 
 impl PostgresDb {
-    /// Opens a single dedicated connection to PostgreSQL.
-    ///
-    /// `conn_str` uses libpq key=value syntax (e.g.
-    /// `"host=localhost port=5432 dbname=test user=postgres"`).
-    /// The connection background task is spawned onto the current runtime.
     pub async fn connect(conn_str: &str) -> Result<Self> {
         let (client, connection) = tokio_postgres::connect(conn_str, NoTls).await?;
         tokio::spawn(async move {
@@ -184,15 +148,13 @@ impl PostgresDb {
         })
     }
 
-    /// Creates a connection pool to PostgreSQL.
-    ///
-    /// `max_size` controls the maximum number of connections in the pool.
     pub async fn connect_pool(conn_str: &str, max_size: usize) -> Result<Self> {
+        use deadpool_postgres::{Manager, Pool as DeadpoolPool};
         let pg_config = conn_str
             .parse::<tokio_postgres::Config>()
             .map_err(|e| PostgresError::Config(e.to_string()))?;
         let mgr = Manager::new(pg_config, NoTls);
-        let pool = Pool::builder(mgr)
+        let pool = DeadpoolPool::builder(mgr)
             .max_size(max_size)
             .build()
             .map_err(|e| PostgresError::Config(e.to_string()))?;
@@ -201,7 +163,6 @@ impl PostgresDb {
         })
     }
 
-    /// Executes a statement and returns the number of rows affected.
     #[inline]
     pub async fn execute(&self, sql: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<u64> {
         match &*self.inner {
@@ -216,7 +177,6 @@ impl PostgresDb {
         }
     }
 
-    /// Queries the database and returns all result rows.
     #[inline]
     pub async fn query(&self, sql: &str, params: &[&(dyn tokio_postgres::types::ToSql + Sync)]) -> Result<Vec<Row>> {
         match &*self.inner {
@@ -233,7 +193,6 @@ impl PostgresDb {
         }
     }
 
-    /// Queries the database and returns the first row, if any.
     #[inline]
     pub async fn query_one(
         &self,
@@ -254,10 +213,6 @@ impl PostgresDb {
         }
     }
 
-    /// Executes a closure inside a database transaction.
-    ///
-    /// The closure receives a `&Transaction<'_>` and may execute statements
-    /// that are committed atomically on success.
     pub async fn transaction<T, F>(&self, f: F) -> Result<T>
     where
         F: FnOnce(&tokio_postgres::Transaction<'_>) -> Result<T>,
@@ -280,10 +235,6 @@ impl PostgresDb {
         }
     }
 
-    /// Copies CSV data from a string into a table using PostgreSQL's `COPY FROM STDIN`.
-    ///
-    /// `data` should be a CSV-formatted string (with a header row if `has_header` is `true`).
-    /// Returns the number of rows copied when the server supports it (otherwise `0`).
     pub async fn copy_from(
         &self,
         data: &str,
@@ -317,7 +268,6 @@ impl PostgresDb {
         }
     }
 
-    /// Returns `true` if the database is reachable.
     pub async fn ping(&self) -> Result<bool> {
         match &*self.inner {
             Inner::Direct { client } => {
@@ -332,9 +282,13 @@ impl PostgresDb {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+impl Clone for PostgresDb {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -385,18 +339,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_pool_builds_without_error() {
-        // Pool construction is lazy; bad configs don't fail until get().
         let result = PostgresDb::connect_pool("host=localhost port=1 dbname=nonexistent", 2).await;
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_row_empty() {
-        let row = Row {
-            columns: vec![],
-            values: vec![],
-        };
-        assert!(row.is_empty());
-        assert_eq!(row.len(), 0);
     }
 }

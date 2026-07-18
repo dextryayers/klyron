@@ -1,6 +1,8 @@
 mod client;
 mod debugger;
-mod protocol;
+pub mod inspector;
+pub mod protocol;
+pub mod stepper;
 
 pub use client::DebugClient;
 pub use debugger::{Breakpoint, Debugger};

@@ -22,3 +22,5 @@ rustls-pemfile = "2"
 parking_lot = "0.12"
 tracing = "0.1"
 reqwest = { workspace = true, features = ["rustls-tls"] }
+tokio-tungstenite = "0.24"
+tokio-stream = "0.1"

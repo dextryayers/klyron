@@ -1,3 +1,9 @@
+pub mod autoloader;
+pub mod browser;
+pub mod composer;
+pub mod deno;
+pub mod node;
+
 use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::path::Path;
@@ -6,9 +12,6 @@ use anyhow::{Context, Result};
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
-
-pub mod autoloader;
-pub mod composer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompatStatus {

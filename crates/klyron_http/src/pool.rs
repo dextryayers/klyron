@@ -7,6 +7,7 @@ use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
 use tracing::{debug, trace};
 
+#[allow(dead_code)]
 struct PooledConnection {
     stream: TcpStream,
     host: String,
@@ -229,11 +230,9 @@ mod tests {
         let host = "get-fresh:7070".to_string();
         pool.put(host.clone(), stream).await;
 
-        // Getting from a different host should return None
         let diff = pool.get("other-host:9090").await;
         assert!(diff.is_none());
 
-        // Getting from the correct host should succeed
         let same = pool.get(&host).await;
         assert!(same.is_some());
     }

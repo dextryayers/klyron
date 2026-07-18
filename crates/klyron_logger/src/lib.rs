@@ -1,38 +1,16 @@
+pub mod format;
+pub mod sink;
+
+pub use format::*;
+pub use sink::*;
+
 use std::fs::OpenOptions;
-use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-use chrono::Utc;
-use flate2::write::GzEncoder;
-use flate2::Compression;
-use serde::Serialize;
+use crossbeam_channel::Sender;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
-pub enum LogLevel {
-    Trace = 0,
-    Debug = 1,
-    Info = 2,
-    Warn = 3,
-    Error = 4,
-    Fatal = 5,
-}
-
-impl LogLevel {
-    #[inline]
-    fn as_str(&self) -> &'static str {
-        match self {
-            LogLevel::Trace => "TRACE",
-            LogLevel::Debug => "DEBUG",
-            LogLevel::Info => "INFO",
-            LogLevel::Warn => "WARN",
-            LogLevel::Error => "ERROR",
-            LogLevel::Fatal => "FATAL",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct LoggerConfig {
     pub min_level: LogLevel,
     pub json_output: bool,
@@ -45,9 +23,8 @@ pub struct LoggerConfig {
 }
 
 impl Default for LoggerConfig {
-    #[inline]
     fn default() -> Self {
-        Self {
+        LoggerConfig {
             min_level: LogLevel::Info,
             json_output: false,
             file_path: None,
@@ -60,104 +37,14 @@ impl Default for LoggerConfig {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct LogEntry {
-    timestamp: String,
-    level: String,
-    message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    module: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    file: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    line: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    fields: Option<serde_json::Value>,
-}
-
-struct LogFile {
-    file: std::fs::File,
-    path: String,
-    size: u64,
-    max_size: u64,
-    backup_count: u32,
-    compression: bool,
-}
-
-impl LogFile {
-    fn open(path: &str, max_size: u64, backup_count: u32, compression: bool) -> anyhow::Result<Self> {
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
-        let size = file.metadata()?.len();
-        Ok(Self { file, path: path.to_string(), size, max_size, backup_count, compression })
-    }
-
-    fn write_line(&mut self, line: &str) -> anyhow::Result<()> {
-        if self.size >= self.max_size {
-            self.rotate()?;
-        }
-        let bytes = line.as_bytes();
-        self.file.write_all(bytes)?;
-        self.file.write_all(b"\n")?;
-        self.size += bytes.len() as u64 + 1;
-        Ok(())
-    }
-
-    fn rotate(&mut self) -> anyhow::Result<()> {
-        use std::fs;
-
-        for i in (1..self.backup_count).rev() {
-            let src = format!("{}.{}", self.path, i);
-            let dst = format!("{}.{}", self.path, i + 1);
-            if fs::metadata(&src).is_ok() {
-                let _ = fs::rename(&src, &dst);
-            }
-        }
-
-        let first_backup = format!("{}.1", self.path);
-        let _ = fs::rename(&self.path, &first_backup);
-
-        if self.compression {
-            let dst_path = format!("{}.1.gz", self.path);
-            if let Ok(mut src) = fs::File::open(&first_backup) {
-                let mut buf = Vec::new();
-                if src.read_to_end(&mut buf).is_ok() {
-                    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-                    if encoder.write_all(&buf).is_ok() {
-                        if let Ok(compressed) = encoder.finish() {
-                            let _ = fs::write(&dst_path, &compressed);
-                        }
-                    }
-                }
-            }
-            let _ = fs::remove_file(&first_backup);
-        }
-
-        self.file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&self.path)?;
-        self.size = 0;
-        Ok(())
-    }
-}
-
-enum LogMsg {
-    Line(String),
-    Flush(tokio::sync::oneshot::Sender<()>),
-}
-
 pub struct Logger {
     min_level: LogLevel,
     json_output: bool,
     include_location: bool,
     color_enabled: bool,
-    async_tx: crossbeam_channel::Sender<LogMsg>,
+    async_tx: Sender<LogMsg>,
     fields: Option<serde_json::Value>,
-    otel_endpoint: Option<String>,
+    file_sink: Option<Arc<std::sync::Mutex<FileSink>>>,
 }
 
 impl Logger {
@@ -170,187 +57,163 @@ impl Logger {
                     LogMsg::Line(line) => {
                         println!("{line}");
                     }
-                    LogMsg::Flush(tx) => { let _ = tx.send(()); }
+                    LogMsg::Flush(tx) => {
+                        let _ = tx.send(());
+                    }
                 }
             }
         });
 
-        Self {
+        Logger {
             min_level: LogLevel::Info,
             json_output: false,
             include_location: false,
             color_enabled: true,
             async_tx,
             fields: None,
-            otel_endpoint: None,
+            file_sink: None,
         }
     }
 
     pub fn with_config(config: LoggerConfig) -> anyhow::Result<Self> {
-        let log_file = if let Some(ref path) = config.file_path {
-            let lf = LogFile::open(
+        let file_sink = if let Some(ref path) = config.file_path {
+            let sink = FileSink::open_with_config(
                 path,
                 config.max_file_size,
                 config.max_backup_files,
                 config.compression_enabled,
             )?;
-            Some(Arc::new(std::sync::Mutex::new(lf)))
+            Some(Arc::new(std::sync::Mutex::new(sink)))
         } else {
             None
         };
 
         let (async_tx, async_rx) = crossbeam_channel::unbounded::<LogMsg>();
-        let logger_file = log_file.clone();
+        let logger_file = file_sink.clone();
 
         std::thread::spawn(move || {
             for msg in async_rx {
                 match msg {
                     LogMsg::Line(line) => {
-                        if let Some(ref lf) = logger_file {
-                            if let Ok(mut f) = lf.lock() {
-                                let _ = f.write_line(&line);
+                        if let Some(ref sink) = logger_file {
+                            if let Ok(mut f) = sink.lock() {
+                                let _ = f.write(&line);
                             }
                         }
                     }
-                    LogMsg::Flush(tx) => { let _ = tx.send(()); }
+                    LogMsg::Flush(tx) => {
+                        let _ = tx.send(());
+                    }
                 }
             }
         });
 
-        Ok(Self {
+        Ok(Logger {
             min_level: config.min_level,
             json_output: config.json_output,
             include_location: config.include_location,
             color_enabled: config.color_enabled,
             async_tx,
             fields: None,
-            otel_endpoint: None,
+            file_sink,
         })
     }
 
-    #[inline]
     pub fn with_min_level(mut self, level: LogLevel) -> Self {
         self.min_level = level;
         self
     }
 
-    #[inline]
     pub fn with_json(mut self, enabled: bool) -> Self {
         self.json_output = enabled;
         self
     }
 
     pub fn with_file(mut self, path: &Path) -> anyhow::Result<Self> {
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
-        let lf = LogFile {
-            file,
-            path: path.to_string_lossy().to_string(),
-            size: path.metadata().ok().map(|m| m.len()).unwrap_or(0),
-            max_size: 10 * 1024 * 1024,
-            backup_count: 5,
-            compression: true,
-        };
-        let lf = std::sync::Mutex::new(lf);
-        self.async_tx = {
-            let (tx, rx) = crossbeam_channel::unbounded::<LogMsg>();
-            std::thread::spawn(move || {
-                for msg in rx {
-                    match msg {
-                        LogMsg::Line(line) => {
-                            if let Ok(mut f) = lf.lock() {
-                                let _ = f.write_line(&line);
-                            }
+        let sink = FileSink::open(path.to_str().unwrap())?;
+        let sink = Arc::new(std::sync::Mutex::new(sink));
+
+        let (async_tx, async_rx) = crossbeam_channel::unbounded::<LogMsg>();
+        let file_sink = sink.clone();
+
+        std::thread::spawn(move || {
+            for msg in async_rx {
+                match msg {
+                    LogMsg::Line(line) => {
+                        if let Ok(mut f) = file_sink.lock() {
+                            let _ = f.write(&line);
                         }
-                        LogMsg::Flush(tx) => { let _ = tx.send(()); }
+                    }
+                    LogMsg::Flush(tx) => {
+                        let _ = tx.send(());
                     }
                 }
-            });
-            tx
-        };
+            }
+        });
+
+        self.async_tx = async_tx;
+        self.file_sink = Some(sink);
         Ok(self)
     }
 
-    #[inline]
     pub fn with_location(mut self, enabled: bool) -> Self {
         self.include_location = enabled;
         self
     }
 
-    #[inline]
     pub fn with_fields(mut self, fields: serde_json::Value) -> Self {
         self.fields = Some(fields);
         self
     }
 
-    pub fn with_otel(mut self, endpoint: &str) -> Self {
-        self.otel_endpoint = Some(endpoint.to_string());
-        self
-    }
-
-    #[inline]
     pub fn is_enabled(&self, level: LogLevel) -> bool {
         level >= self.min_level
     }
 
-    #[inline]
     pub fn trace(&self, msg: &str) {
         self.log(LogLevel::Trace, msg, None);
     }
 
-    #[inline]
     pub fn debug(&self, msg: &str) {
         self.log(LogLevel::Debug, msg, None);
     }
 
-    #[inline]
     pub fn info(&self, msg: &str) {
         self.log(LogLevel::Info, msg, None);
     }
 
-    #[inline]
     pub fn warn(&self, msg: &str) {
         self.log(LogLevel::Warn, msg, None);
     }
 
-    #[inline]
     pub fn error(&self, msg: &str) {
         self.log(LogLevel::Error, msg, None);
     }
 
-    #[inline]
     pub fn fatal(&self, msg: &str) {
         self.log(LogLevel::Fatal, msg, None);
     }
 
-    #[inline]
     pub fn trace_with(&self, msg: &str, meta: serde_json::Value) {
         self.log(LogLevel::Trace, msg, Some(meta));
     }
 
-    #[inline]
     pub fn debug_with(&self, msg: &str, meta: serde_json::Value) {
         self.log(LogLevel::Debug, msg, Some(meta));
     }
 
-    #[inline]
     pub fn info_with(&self, msg: &str, meta: serde_json::Value) {
         self.log(LogLevel::Info, msg, Some(meta));
     }
 
-    #[inline]
     pub fn warn_with(&self, msg: &str, meta: serde_json::Value) {
         self.log(LogLevel::Warn, msg, Some(meta));
     }
 
-    #[inline]
     pub fn error_with(&self, msg: &str, meta: serde_json::Value) {
         self.log(LogLevel::Error, msg, Some(meta));
     }
 
-    #[inline]
     pub fn fatal_with(&self, msg: &str, meta: serde_json::Value) {
         self.log(LogLevel::Fatal, msg, Some(meta));
     }
@@ -376,46 +239,23 @@ impl Logger {
             (None, meta) => meta,
         };
 
-        let entry = LogEntry {
-            timestamp: Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
-            level: level.as_str().to_string(),
-            message: msg.to_string(),
-            module: None,
-            file: None,
-            line: None,
-            fields,
+        let mut entry = LogEntry::new(level, msg);
+        if let Some(f) = fields {
+            entry = entry.with_fields(f);
+        }
+
+        let output = if self.json_output {
+            entry.to_json()
+        } else {
+            entry.to_colored_text(self.color_enabled)
         };
 
-        if self.json_output {
-            let json = serde_json::to_string(&entry).unwrap_or_default();
-            self.write_output(level, &json);
-        } else {
-            let ts = &entry.timestamp[..23];
-            let formatted = if self.color_enabled {
-                let color = match level {
-                    LogLevel::Trace => "\x1b[90m",
-                    LogLevel::Debug => "\x1b[36m",
-                    LogLevel::Info => "\x1b[32m",
-                    LogLevel::Warn => "\x1b[33m",
-                    LogLevel::Error => "\x1b[31m",
-                    LogLevel::Fatal => "\x1b[35m",
-                };
-                let reset = "\x1b[0m";
-                format!("{color}{ts} [{:5}] {}{reset}", entry.level, entry.message)
-            } else {
-                format!("{ts} [{:5}] {}", entry.level, entry.message)
-            };
-            self.write_output(level, &formatted);
-        }
-    }
-
-    fn write_output(&self, level: LogLevel, line: &str) {
         match level {
-            LogLevel::Error | LogLevel::Fatal => eprintln!("{line}"),
-            _ => println!("{line}"),
+            LogLevel::Error | LogLevel::Fatal => eprintln!("{output}"),
+            _ => println!("{output}"),
         }
 
-        let _ = self.async_tx.send(LogMsg::Line(line.to_string()));
+        let _ = self.async_tx.send(LogMsg::Line(output));
     }
 
     pub fn flush(&self) {
@@ -426,23 +266,19 @@ impl Logger {
 }
 
 impl Default for Logger {
-    #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[inline]
 pub fn info(msg: &str) {
     Logger::new().info(msg);
 }
 
-#[inline]
 pub fn warn(msg: &str) {
     Logger::new().warn(msg);
 }
 
-#[inline]
 pub fn error(msg: &str) {
     Logger::new().error(msg);
 }
@@ -486,9 +322,7 @@ mod tests {
         let path = dir.join("klyron_test.log");
         let _ = std::fs::remove_file(&path);
         {
-            let logger = Logger::new()
-                .with_file(&path)
-                .unwrap();
+            let logger = Logger::new().with_file(&path).unwrap();
             logger.info("file test");
             logger.flush();
         }
@@ -530,5 +364,43 @@ mod tests {
         let logger = Logger::new().with_min_level(LogLevel::Trace);
         logger.trace("trace message");
         assert!(logger.is_enabled(LogLevel::Trace));
+    }
+
+    #[test]
+    fn test_log_level_from_str() {
+        assert_eq!(LogLevel::from_str("INFO"), Some(LogLevel::Info));
+        assert_eq!(LogLevel::from_str("WARNING"), Some(LogLevel::Warn));
+        assert_eq!(LogLevel::from_str("ERROR"), Some(LogLevel::Error));
+        assert_eq!(LogLevel::from_str("unknown"), None);
+    }
+
+    #[test]
+    fn test_log_entry_new() {
+        let entry = LogEntry::new(LogLevel::Info, "hello");
+        assert_eq!(entry.level, "INFO");
+        assert_eq!(entry.message, "hello");
+    }
+
+    #[test]
+    fn test_log_entry_with_fields() {
+        let entry = LogEntry::new(LogLevel::Debug, "test")
+            .with_fields(serde_json::json!({"key": "value"}));
+        assert!(entry.fields.is_some());
+    }
+
+    #[test]
+    fn test_log_entry_to_json() {
+        let entry = LogEntry::new(LogLevel::Info, "json check");
+        let json = entry.to_json();
+        assert!(json.contains("INFO"));
+        assert!(json.contains("json check"));
+    }
+
+    #[test]
+    fn test_log_entry_to_text() {
+        let entry = LogEntry::new(LogLevel::Info, "text check");
+        let text = entry.to_text();
+        assert!(text.contains("INFO"));
+        assert!(text.contains("text check"));
     }
 }

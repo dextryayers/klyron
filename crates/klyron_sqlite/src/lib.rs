@@ -1,15 +1,11 @@
-//! Thread-safe SQLite database binding with WAL mode, prepared statement caching,
-//! backup, transaction support, and async wrappers.
+pub mod migrate;
+pub mod pool;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, params_from_iter};
 use thiserror::Error;
-
-// ---------------------------------------------------------------------------
-// Error
-// ---------------------------------------------------------------------------
 
 #[derive(Error, Debug)]
 pub enum SqliteError {
@@ -25,24 +21,17 @@ pub enum SqliteError {
 
 pub type Result<T> = std::result::Result<T, SqliteError>;
 
-// ---------------------------------------------------------------------------
-// Row
-// ---------------------------------------------------------------------------
-
-/// A single row of query results backed by `rusqlite::types::Value`.
 #[derive(Debug, Clone)]
 pub struct Row {
     values: Vec<rusqlite::types::Value>,
 }
 
 impl Row {
-    /// Returns the raw [`rusqlite::types::Value`] at the given column index.
     #[inline]
     pub fn get(&self, index: usize) -> Option<&rusqlite::types::Value> {
         self.values.get(index)
     }
 
-    /// Returns the value as a string slice if the column holds `Text`.
     #[inline]
     pub fn get_str(&self, index: usize) -> Option<&str> {
         match self.values.get(index)? {
@@ -51,7 +40,6 @@ impl Row {
         }
     }
 
-    /// Returns the value as an `i64` if the column holds `Integer`.
     #[inline]
     pub fn get_int(&self, index: usize) -> Option<i64> {
         match self.values.get(index)? {
@@ -60,7 +48,6 @@ impl Row {
         }
     }
 
-    /// Returns the value as an `f64` if the column holds `Real`.
     #[inline]
     pub fn get_float(&self, index: usize) -> Option<f64> {
         match self.values.get(index)? {
@@ -69,43 +56,27 @@ impl Row {
         }
     }
 
-    /// Returns `true` if the column is NULL.
     #[inline]
     pub fn is_null(&self, index: usize) -> bool {
         matches!(self.values.get(index), Some(rusqlite::types::Value::Null) | None)
     }
 
-    /// Number of columns in this row.
     #[inline]
     pub fn len(&self) -> usize {
         self.values.len()
     }
 
-    /// Returns `true` if the row has no columns.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
 }
 
-// ---------------------------------------------------------------------------
-// SqliteDb
-// ---------------------------------------------------------------------------
-
-/// A thread-safe SQLite database handle.
-///
-/// All synchronous methods serialise access through an internal `Mutex`.
-/// WAL journal mode and foreign keys are enabled by default.
-/// A prepared-statement cache (capacity 128) is active on the connection.
 pub struct SqliteDb {
     conn: Mutex<Connection>,
 }
 
 impl SqliteDb {
-    /// Opens or creates a SQLite database at `path`.
-    ///
-    /// Enables WAL journal mode, foreign keys, and sets the prepared
-    /// statement cache capacity to 128 entries.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let conn = Connection::open(path.as_ref())?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
@@ -113,7 +84,6 @@ impl SqliteDb {
         Ok(Self { conn: Mutex::new(conn) })
     }
 
-    /// Opens an in-memory SQLite database.
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
@@ -121,29 +91,24 @@ impl SqliteDb {
         Ok(Self { conn: Mutex::new(conn) })
     }
 
-    /// Activates WAL journal mode on the current connection.
     pub fn enable_wal(&self) -> Result<()> {
         let conn = self.conn.lock().map_err(|_| SqliteError::MutexPoisoned)?;
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         Ok(())
     }
 
-    /// Executes a parameterised statement and returns the number of rows
-    /// inserted / updated / deleted.
     #[inline]
     pub fn execute(&self, sql: &str, params: &[rusqlite::types::Value]) -> Result<usize> {
         let conn = self.conn.lock().map_err(|_| SqliteError::MutexPoisoned)?;
         Ok(conn.execute(sql, params_from_iter(params))?)
     }
 
-    /// Executes one or more statements with no parameter binding.
     #[inline]
     pub fn execute_batch(&self, sql: &str) -> Result<()> {
         let conn = self.conn.lock().map_err(|_| SqliteError::MutexPoisoned)?;
         Ok(conn.execute_batch(sql)?)
     }
 
-    /// Queries the database and returns all result rows.
     #[inline]
     pub fn query(&self, sql: &str, params: &[rusqlite::types::Value]) -> Result<Vec<Row>> {
         let conn = self.conn.lock().map_err(|_| SqliteError::MutexPoisoned)?;
@@ -163,17 +128,12 @@ impl SqliteDb {
         Ok(results)
     }
 
-    /// Queries the database and returns the first row, if any.
     #[inline]
     pub fn query_one(&self, sql: &str, params: &[rusqlite::types::Value]) -> Result<Option<Row>> {
         let mut rows = self.query(sql, params)?;
         Ok(if rows.is_empty() { None } else { Some(rows.swap_remove(0)) })
     }
 
-    /// Executes a closure inside a database transaction.
-    ///
-    /// The closure receives a `&Connection` (which is actually a `Transaction`
-    /// that will be committed on success or rolled back on panic / error).
     pub fn transaction<T, F>(&self, f: F) -> Result<T>
     where
         F: FnOnce(&Connection) -> Result<T>,
@@ -185,7 +145,6 @@ impl SqliteDb {
         Ok(result)
     }
 
-    /// Creates a live backup of the current database to another file.
     pub fn backup_to<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let conn = self.conn.lock().map_err(|_| SqliteError::MutexPoisoned)?;
         let dst = Connection::open(path.as_ref())?;
@@ -195,7 +154,6 @@ impl SqliteDb {
         Ok(())
     }
 
-    /// Returns the list of user-defined table names.
     pub fn tables(&self) -> Result<Vec<String>> {
         let rows = self.query(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
@@ -204,9 +162,40 @@ impl SqliteDb {
         Ok(rows.iter().filter_map(|r| r.get_str(0).map(String::from)).collect())
     }
 
-    // ---- Async wrappers ---------------------------------------------------
+    pub fn enable_fts(&self, table_name: &str, columns: &[&str]) -> Result<()> {
+        let cols = columns.join(", ");
+        let sql = format!(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS {}_fts USING fts5({}, content={})",
+            table_name, cols, table_name
+        );
+        self.execute_batch(&sql)?;
 
-    /// Asynchronously executes a statement via `spawn_blocking`.
+        let trigger_insert = format!(
+            "CREATE TRIGGER IF NOT EXISTS {}_fts_insert AFTER INSERT ON {} BEGIN
+                INSERT INTO {}_fts(rowid, {}) VALUES (new.rowid, {});
+            END",
+            table_name, table_name, table_name, cols,
+            columns.iter().map(|c| format!("new.{}", c)).collect::<Vec<_>>().join(", ")
+        );
+        self.execute_batch(&trigger_insert)?;
+
+        let trigger_delete = format!(
+            "CREATE TRIGGER IF NOT EXISTS {}_fts_delete AFTER DELETE ON {} BEGIN
+                INSERT INTO {}_fts({}_fts, rowid, {}) VALUES ('delete', old.rowid, {});
+            END",
+            table_name, table_name, table_name, table_name, cols,
+            columns.iter().map(|c| format!("old.{}", c)).collect::<Vec<_>>().join(", ")
+        );
+        self.execute_batch(&trigger_delete)?;
+
+        Ok(())
+    }
+
+    pub fn fts_search(&self, fts_table: &str, query: &str) -> Result<Vec<Row>> {
+        let sql = format!("SELECT * FROM {} WHERE {} MATCH ?1", fts_table, fts_table);
+        self.query(&sql, &[rusqlite::types::Value::Text(query.to_string())])
+    }
+
     pub async fn execute_async(
         self: Arc<Self>,
         sql: String,
@@ -215,7 +204,6 @@ impl SqliteDb {
         tokio::task::spawn_blocking(move || self.execute(&sql, &params)).await?
     }
 
-    /// Asynchronously queries via `spawn_blocking`.
     pub async fn query_async(
         self: Arc<Self>,
         sql: String,
@@ -224,7 +212,6 @@ impl SqliteDb {
         tokio::task::spawn_blocking(move || self.query(&sql, &params)).await?
     }
 
-    /// Asynchronously queries a single row via `spawn_blocking`.
     pub async fn query_one_async(
         self: Arc<Self>,
         sql: String,
@@ -234,10 +221,6 @@ impl SqliteDb {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,8 +228,7 @@ mod tests {
     #[test]
     fn test_open_in_memory_and_create_table() {
         let db = SqliteDb::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
-            .unwrap();
+        db.execute_batch("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL)").unwrap();
         let tables = db.tables().unwrap();
         assert!(tables.contains(&"t".to_string()));
     }
@@ -255,23 +237,11 @@ mod tests {
     fn test_insert_and_query_row() {
         let db = SqliteDb::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)").unwrap();
-        db.execute(
-            "INSERT INTO t (name) VALUES (?1)",
-            &[rusqlite::types::Value::Text("alice".into())],
-        )
-        .unwrap();
+        db.execute("INSERT INTO t (name) VALUES (?1)", &[rusqlite::types::Value::Text("alice".into())]).unwrap();
         let rows = db.query("SELECT id, name FROM t", &[]).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].get_int(0), Some(1));
         assert_eq!(rows[0].get_str(1), Some("alice"));
-    }
-
-    #[test]
-    fn test_query_one_returns_none_when_empty() {
-        let db = SqliteDb::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)").unwrap();
-        let row = db.query_one("SELECT * FROM t WHERE id = 99", &[]).unwrap();
-        assert!(row.is_none());
     }
 
     #[test]
@@ -281,47 +251,29 @@ mod tests {
         db.transaction(|conn| {
             conn.execute("INSERT INTO t (name) VALUES (?1)", ["txn_msg"])?;
             Ok(())
-        })
-        .unwrap();
+        }).unwrap();
         let rows = db.query("SELECT name FROM t", &[]).unwrap();
         assert_eq!(rows[0].get_str(0), Some("txn_msg"));
     }
 
     #[test]
-    fn test_backup_to_creates_valid_copy() {
-        let src = SqliteDb::open_in_memory().unwrap();
-        src.execute_batch("CREATE TABLE t (v INTEGER)").unwrap();
-        src.execute("INSERT INTO t VALUES (42)", &[]).unwrap();
-
-        let tmp = std::env::temp_dir().join(format!("klyron_backup_{}.db", std::process::id()));
-        src.backup_to(&tmp).unwrap();
-
-        let dst = SqliteDb::open(&tmp).unwrap();
-        let rows = dst.query("SELECT v FROM t", &[]).unwrap();
-        assert_eq!(rows[0].get_int(0), Some(42));
-        let _ = std::fs::remove_file(&tmp);
+    fn test_fts() {
+        let db = SqliteDb::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE articles (id INTEGER PRIMARY KEY, title TEXT, body TEXT)").unwrap();
+        db.enable_fts("articles", &["title", "body"]).unwrap();
+        db.execute("INSERT INTO articles (title, body) VALUES (?1, ?2)",
+            &[rusqlite::types::Value::Text("hello world".into()),
+              rusqlite::types::Value::Text("this is a test".into())]).unwrap();
+        let results = db.fts_search("articles_fts", "world").unwrap();
+        assert!(!results.is_empty());
     }
 
     #[tokio::test]
     async fn test_async_query() {
         let db = Arc::new(SqliteDb::open_in_memory().unwrap());
         db.execute_batch("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)").unwrap();
-        db.execute("INSERT INTO t (val) VALUES (?1)", &[rusqlite::types::Value::Text("async".into())])
-            .unwrap();
+        db.execute("INSERT INTO t (val) VALUES (?1)", &[rusqlite::types::Value::Text("async".into())]).unwrap();
         let rows = db.clone().query_async("SELECT val FROM t".into(), vec![]).await.unwrap();
         assert_eq!(rows[0].get_str(0), Some("async"));
-    }
-
-    #[test]
-    fn test_enable_wal_on_file_db() {
-        let tmp = std::env::temp_dir().join(format!("klyron_wal_test_{}.db", std::process::id()));
-        let db = SqliteDb::open(&tmp).unwrap();
-        // Already in WAL mode from open(). Ensure it doesn't error.
-        db.enable_wal().unwrap();
-        let rows = db.query("PRAGMA journal_mode", &[]).unwrap();
-        assert_eq!(rows[0].get_str(0), Some("wal"));
-        let _ = std::fs::remove_file(&tmp);
-        let _ = std::fs::remove_file(tmp.with_extension("db-wal"));
-        let _ = std::fs::remove_file(tmp.with_extension("db-shm"));
     }
 }

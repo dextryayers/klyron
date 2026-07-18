@@ -1,14 +1,17 @@
-use std::path::{Path, PathBuf};
+pub mod hash;
+pub mod net;
+pub mod path;
+
+pub use hash::*;
+pub use net::*;
+pub use path::*;
+
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
-use chrono::{DateTime, Utc};
-use once_cell::sync::Lazy;
-use regex::Regex;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use url::Url;
 
-// ── Semver ────────────────────────────────────────────────────────────────
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Semver {
@@ -20,12 +23,10 @@ pub struct Semver {
 }
 
 impl Semver {
-    #[inline]
     pub fn new(major: u64, minor: u64, patch: u64) -> Self {
         Self { major, minor, patch, pre: None, build: None }
     }
 
-    #[inline]
     pub fn parse(version: &str) -> anyhow::Result<Self> {
         let version = version.trim();
         let (version, build) = match version.split_once('+') {
@@ -46,7 +47,6 @@ impl Semver {
         Ok(Self { major, minor, patch, pre, build })
     }
 
-    #[inline]
     pub fn compatible(&self, other: &Semver) -> bool {
         self.major == other.major && self.minor >= other.minor
     }
@@ -72,64 +72,9 @@ impl FromStr for Semver {
     }
 }
 
-// ── PathUtil ──────────────────────────────────────────────────────────────
-
-pub struct PathUtil;
-
-impl PathUtil {
-    #[inline]
-    pub fn join(base: &Path, segments: &[&str]) -> PathBuf {
-        let mut p = base.to_path_buf();
-        for s in segments {
-            p = p.join(s);
-        }
-        p
-    }
-
-    #[inline]
-    pub fn extension(p: &Path) -> &str {
-        p.extension().and_then(|e| e.to_str()).unwrap_or("")
-    }
-
-    #[inline]
-    pub fn file_stem(p: &Path) -> &str {
-        p.file_stem().and_then(|s| s.to_str()).unwrap_or("")
-    }
-
-    #[inline]
-    pub fn normalize(p: &Path) -> PathBuf {
-        let mut components = Vec::new();
-        for component in p.components() {
-            match component {
-                std::path::Component::Normal(c) => components.push(c),
-                std::path::Component::ParentDir => { components.pop(); }
-                _ => {}
-            }
-        }
-        let mut result = PathBuf::new();
-        for c in components {
-            result = result.join(c);
-        }
-        result
-    }
-
-    #[inline]
-    pub fn is_js_like(p: &Path) -> bool {
-        matches!(Self::extension(p), "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs")
-    }
-
-    #[inline]
-    pub fn to_unix(p: &Path) -> String {
-        p.to_string_lossy().replace('\\', "/")
-    }
-}
-
-// ── ShellUtil ─────────────────────────────────────────────────────────────
-
 pub struct ShellUtil;
 
 impl ShellUtil {
-    #[inline]
     pub fn build_cmd(program: &str, args: &[&str]) -> std::process::Command {
         let mut cmd = std::process::Command::new(program);
         cmd.args(args);
@@ -147,7 +92,6 @@ impl ShellUtil {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
-    #[inline]
     pub fn run_interactive(program: &str, args: &[&str]) -> anyhow::Result<std::process::ExitStatus> {
         let status = Self::build_cmd(program, args)
             .spawn()
@@ -175,7 +119,6 @@ impl ShellUtil {
         None
     }
 
-    #[inline]
     pub fn escape_arg(arg: &str) -> String {
         if arg.contains(' ') || arg.contains('\'') || arg.contains('"') {
             format!("\"{}\"", arg.replace('\\', "\\\\").replace('"', "\\\""))
@@ -185,122 +128,33 @@ impl ShellUtil {
     }
 }
 
-// ── HashUtil ──────────────────────────────────────────────────────────────
-
-pub struct HashUtil;
-
-impl HashUtil {
-    #[inline]
-    pub fn xxhash64(data: &[u8]) -> u64 {
-        use std::hash::Hasher;
-        let mut hasher = twox_hash::XxHash64::default();
-        hasher.write(data);
-        hasher.finish()
-    }
-
-    #[inline]
-    pub fn xxhash32(data: &[u8]) -> u32 {
-        use std::hash::Hasher;
-        let mut hasher = twox_hash::XxHash32::default();
-        hasher.write(data);
-        hasher.finish() as u32
-    }
-
-    #[inline]
-    pub fn sha256(data: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        format!("{:x}", hasher.finalize())
-    }
-
-    #[inline]
-    pub fn sha256_bytes(data: &[u8]) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        hasher.finalize().into()
-    }
-
-    #[inline]
-    pub fn md5(data: &[u8]) -> String {
-        let mut hasher = md5::Md5::new();
-        hasher.update(data);
-        format!("{:x}", hasher.finalize())
-    }
-
-    #[inline]
-    pub fn hash_file(path: &Path) -> anyhow::Result<String> {
-        let data = std::fs::read(path)?;
-        Ok(Self::sha256(&data))
-    }
-}
-
-// ── UrlUtil ───────────────────────────────────────────────────────────────
-
-pub struct UrlUtil;
-
-impl UrlUtil {
-    #[inline]
-    pub fn parse(url_str: &str) -> anyhow::Result<Url> {
-        Url::parse(url_str).map_err(|e| anyhow::anyhow!("Invalid URL '{url_str}': {e}"))
-    }
-
-    #[inline]
-    pub fn join(base: &Url, path: &str) -> anyhow::Result<Url> {
-        base.join(path).map_err(|e| anyhow::anyhow!("Failed to join URL: {e}"))
-    }
-
-    #[inline]
-    pub fn is_http(url: &Url) -> bool {
-        matches!(url.scheme(), "http" | "https")
-    }
-
-    #[inline]
-    pub fn is_localhost(url: &Url) -> bool {
-        url.host_str().map_or(false, |h| h == "localhost" || h == "127.0.0.1" || h == "::1")
-    }
-
-    #[inline]
-    pub fn query_param(url: &Url, key: &str) -> Option<String> {
-        url.query_pairs().find(|(k, _)| k == key).map(|(_, v)| v.to_string())
-    }
-}
-
-// ── JsonUtil ──────────────────────────────────────────────────────────────
-
 pub struct JsonUtil;
 
 impl JsonUtil {
-    #[inline]
     pub fn to_string<T: Serialize>(value: &T) -> anyhow::Result<String> {
         serde_json::to_string(value).map_err(|e| anyhow::anyhow!("Serialization failed: {e}"))
     }
 
-    #[inline]
     pub fn to_string_pretty<T: Serialize>(value: &T) -> anyhow::Result<String> {
         serde_json::to_string_pretty(value).map_err(|e| anyhow::anyhow!("Serialization failed: {e}"))
     }
 
-    #[inline]
     pub fn from_str<'a, T: Deserialize<'a>>(s: &'a str) -> anyhow::Result<T> {
         serde_json::from_str(s).map_err(|e| anyhow::anyhow!("Deserialization failed: {e}"))
     }
 
-    #[inline]
     pub fn to_vec<T: Serialize>(value: &T) -> anyhow::Result<Vec<u8>> {
         serde_json::to_vec(value).map_err(|e| anyhow::anyhow!("Serialization failed: {e}"))
     }
 
-    #[inline]
     pub fn from_slice<'a, T: Deserialize<'a>>(data: &'a [u8]) -> anyhow::Result<T> {
         serde_json::from_slice(data).map_err(|e| anyhow::anyhow!("Deserialization failed: {e}"))
     }
 
-    #[inline]
     pub fn is_valid(s: &str) -> bool {
         serde_json::from_str::<serde_json::Value>(s).is_ok()
     }
 
-    #[inline]
     pub fn merge(base: &mut serde_json::Value, overrides: serde_json::Value) {
         merge_json(base, overrides);
     }
@@ -321,12 +175,9 @@ fn merge_json(base: &mut serde_json::Value, overrides: serde_json::Value) {
     }
 }
 
-// ── TimeUtil ──────────────────────────────────────────────────────────────
-
 pub struct TimeUtil;
 
 impl TimeUtil {
-    #[inline]
     pub fn format_duration(dur: &Duration) -> String {
         let total_ns = dur.as_nanos();
         if total_ns < 1_000 {
@@ -350,22 +201,18 @@ impl TimeUtil {
         format!("{hours:.2}h")
     }
 
-    #[inline]
     pub fn now_iso() -> String {
         Utc::now().to_rfc3339()
     }
 
-    #[inline]
     pub fn unix_ts() -> i64 {
         Utc::now().timestamp()
     }
 
-    #[inline]
     pub fn unix_ts_ms() -> i64 {
         Utc::now().timestamp_millis()
     }
 
-    #[inline]
     pub fn parse_iso(s: &str) -> anyhow::Result<DateTime<Utc>> {
         DateTime::parse_from_rfc3339(s)
             .map(|dt| dt.with_timezone(&Utc))
@@ -374,12 +221,9 @@ impl TimeUtil {
     }
 }
 
-// ── StrUtil ───────────────────────────────────────────────────────────────
-
 pub struct StrUtil;
 
 impl StrUtil {
-    #[inline]
     pub fn to_kebab(s: &str) -> String {
         s.trim()
             .chars()
@@ -397,7 +241,6 @@ impl StrUtil {
             .to_string()
     }
 
-    #[inline]
     pub fn to_snake(s: &str) -> String {
         s.trim()
             .chars()
@@ -415,7 +258,6 @@ impl StrUtil {
             .to_string()
     }
 
-    #[inline]
     pub fn to_camel(s: &str) -> String {
         s.trim()
             .split(|c: char| !c.is_alphanumeric())
@@ -435,7 +277,6 @@ impl StrUtil {
             .collect()
     }
 
-    #[inline]
     pub fn to_pascal(s: &str) -> String {
         s.trim()
             .split(|c: char| !c.is_alphanumeric())
@@ -450,7 +291,6 @@ impl StrUtil {
             .collect()
     }
 
-    #[inline]
     pub fn truncate(s: &str, max_len: usize) -> String {
         if s.len() <= max_len {
             s.to_string()
@@ -464,26 +304,32 @@ impl StrUtil {
     }
 
     pub fn slug(s: &str) -> String {
+        use once_cell::sync::Lazy;
+        use regex::Regex;
         static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[^a-zA-Z0-9\-_]").unwrap());
         RE.replace_all(
             &s.to_lowercase().replace(' ', "-").replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "-"),
-            ""
-        ).to_string()
+            "",
+        )
+        .to_string()
     }
 
-    #[inline]
     pub fn indent(s: &str, level: usize) -> String {
         let prefix = "  ".repeat(level);
-        s.lines().map(|line| format!("{prefix}{line}")).collect::<Vec<_>>().join("\n")
+        s.lines()
+            .map(|line| format!("{prefix}{line}"))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
-    #[inline]
     pub fn pluralize(count: usize, singular: &str, plural: &str) -> String {
-        if count == 1 { singular.to_string() } else { plural.to_string() }
+        if count == 1 {
+            singular.to_string()
+        } else {
+            plural.to_string()
+        }
     }
 }
-
-// ── Legacy re-exports (backward compat) ───────────────────────────────────
 
 pub fn is_valid_semver(version: &str) -> bool {
     Semver::parse(version).is_ok()
@@ -501,7 +347,7 @@ pub fn format_bytes(bytes: u64) -> String {
 }
 
 pub fn hash_string(input: &str) -> String {
-    HashUtil::sha256(input.as_bytes())
+    crate::hash::HashUtil::sha256(input.as_bytes())
 }
 
 pub fn temp_dir() -> PathBuf {
@@ -514,7 +360,7 @@ pub fn ensure_temp_dir() -> anyhow::Result<PathBuf> {
     Ok(dir)
 }
 
-pub fn project_name_from_dir(dir: &Path) -> String {
+pub fn project_name_from_dir(dir: &std::path::Path) -> String {
     dir.file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "project".to_string())
@@ -523,8 +369,6 @@ pub fn project_name_from_dir(dir: &Path) -> String {
 pub fn slugify(name: &str) -> String {
     StrUtil::slug(name)
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -579,16 +423,6 @@ mod tests {
     }
 
     #[test]
-    fn test_hash() {
-        let h = HashUtil::sha256(b"hello");
-        assert_eq!(h.len(), 64);
-        let h32 = HashUtil::xxhash32(b"hello");
-        assert!(h32 > 0);
-        let md = HashUtil::md5(b"hello");
-        assert_eq!(md.len(), 32);
-    }
-
-    #[test]
     fn test_str_util() {
         assert_eq!(StrUtil::to_kebab("HelloWorld"), "hello-world");
         assert_eq!(StrUtil::to_snake("HelloWorld"), "hello_world");
@@ -606,13 +440,6 @@ mod tests {
         assert!(formatted.contains("5.00s") || formatted.contains("5s"));
         let iso = TimeUtil::now_iso();
         assert!(iso.contains('T'));
-    }
-
-    #[test]
-    fn test_path_util() {
-        assert_eq!(PathUtil::extension(Path::new("test.js")), "js");
-        assert!(PathUtil::is_js_like(Path::new("test.tsx")));
-        assert!(!PathUtil::is_js_like(Path::new("test.py")));
     }
 
     #[test]

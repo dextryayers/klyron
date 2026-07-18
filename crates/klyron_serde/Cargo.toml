@@ -8,6 +8,7 @@ license.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 simd-json = { workspace = true, optional = true }
+bincode = "1"
 
 [features]
 default = ["simd"]

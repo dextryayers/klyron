@@ -1,22 +1,31 @@
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+pub mod assert;
+pub mod assertions;
+pub mod coverage;
+pub mod mock;
+pub mod property;
+pub mod runner;
 
-use anyhow::{Context, Result};
-use chrono::Utc;
-use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
-use quick_xml::Writer;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
 
-pub mod assertions;
-pub mod property;
+pub use assert::*;
+pub use coverage::*;
+pub use mock::*;
+pub use property::*;
+pub use runner::*;
 
-/// Discover JS/TS test files in a directory tree
 pub fn discover_js_test_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let patterns = &[
-        "**/*.test.js", "**/*.test.jsx", "**/*.test.ts", "**/*.test.tsx",
-        "**/*.spec.js", "**/*.spec.jsx", "**/*.spec.ts", "**/*.spec.tsx",
+        "**/*.test.js",
+        "**/*.test.jsx",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.spec.js",
+        "**/*.spec.jsx",
+        "**/*.spec.ts",
+        "**/*.spec.tsx",
     ];
     for pattern in patterns {
         if let Ok(glob_results) = glob::glob(&dir.join(pattern).to_string_lossy()) {
@@ -30,7 +39,6 @@ pub fn discover_js_test_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Check if a project has a test script in package.json
 pub fn has_test_script(dir: &Path) -> bool {
     let pkg = dir.join("package.json");
     let content = match std::fs::read_to_string(pkg) {
@@ -51,7 +59,6 @@ pub fn has_test_script(dir: &Path) -> bool {
     false
 }
 
-/// Check if a project has a specific JS test framework dependency
 pub fn has_test_framework_dep(dir: &Path) -> bool {
     let frameworks = ["vitest", "jest", "mocha", "ava", "tape", "uvu", "node:test"];
     let pkg = dir.join("package.json");
@@ -77,617 +84,110 @@ pub fn has_test_framework_dep(dir: &Path) -> bool {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TestBackend {
-  Vitest,
-  Jest,
-  PhpUnit,
-  Pest,
-  Pytest,
-  Rspec,
-  CargoTest,
-  GoTest,
+    Vitest,
+    Jest,
+    PhpUnit,
+    Pest,
+    Pytest,
+    Rspec,
+    CargoTest,
+    GoTest,
 }
 
 impl TestBackend {
-  pub fn name(self) -> &'static str {
-    match self {
-      TestBackend::Vitest => "Vitest",
-      TestBackend::Jest => "Jest",
-      TestBackend::PhpUnit => "PHPUnit",
-      TestBackend::Pest => "Pest",
-      TestBackend::Pytest => "pytest",
-      TestBackend::Rspec => "RSpec",
-      TestBackend::CargoTest => "cargo test",
-      TestBackend::GoTest => "go test",
+    pub fn name(self) -> &'static str {
+        match self {
+            TestBackend::Vitest => "Vitest",
+            TestBackend::Jest => "Jest",
+            TestBackend::PhpUnit => "PHPUnit",
+            TestBackend::Pest => "Pest",
+            TestBackend::Pytest => "pytest",
+            TestBackend::Rspec => "RSpec",
+            TestBackend::CargoTest => "cargo test",
+            TestBackend::GoTest => "go test",
+        }
     }
-  }
 
-  pub fn command(self) -> (&'static str, Vec<&'static str>) {
-    match self {
-      TestBackend::Vitest => ("npx", vec!["vitest", "run"]),
-      TestBackend::Jest => ("npx", vec!["jest"]),
-      TestBackend::PhpUnit => ("./vendor/bin/phpunit", vec![]),
-      TestBackend::Pest => ("./vendor/bin/pest", vec![]),
-      TestBackend::Pytest => ("python", vec!["-m", "pytest"]),
-      TestBackend::Rspec => ("bundle", vec!["exec", "rspec"]),
-      TestBackend::CargoTest => ("cargo", vec!["test"]),
-      TestBackend::GoTest => ("go", vec!["test", "./..."]),
+    pub fn command(self) -> (&'static str, Vec<&'static str>) {
+        match self {
+            TestBackend::Vitest => ("npx", vec!["vitest", "run"]),
+            TestBackend::Jest => ("npx", vec!["jest"]),
+            TestBackend::PhpUnit => ("./vendor/bin/phpunit", vec![]),
+            TestBackend::Pest => ("./vendor/bin/pest", vec![]),
+            TestBackend::Pytest => ("python", vec!["-m", "pytest"]),
+            TestBackend::Rspec => ("bundle", vec!["exec", "rspec"]),
+            TestBackend::CargoTest => ("cargo", vec!["test"]),
+            TestBackend::GoTest => ("go", vec!["test", "./..."]),
+        }
     }
-  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TestCategory {
-  Unit,
-  Integration,
-  E2e,
+    Unit,
+    Integration,
+    E2e,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestResult {
-  pub name: String,
-  pub passed: u64,
-  pub failed: u64,
-  pub skipped: u64,
-  pub time: f64,
-  pub backend: TestBackend,
-  pub category: TestCategory,
-  pub output: String,
+    pub name: String,
+    pub passed: u64,
+    pub failed: u64,
+    pub skipped: u64,
+    pub time: f64,
+    pub backend: TestBackend,
+    pub category: TestCategory,
+    pub output: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestSuiteResult {
-  pub name: String,
-  pub results: Vec<TestResult>,
-  pub total_time: f64,
-  pub total_passed: u64,
-  pub total_failed: u64,
-  pub total_skipped: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct TestRunnerConfig {
-    pub parallel: bool,
-    pub retry: u32,
-    pub timeout: Option<Duration>,
-    pub category: Option<TestCategory>,
-    pub junit_output: Option<PathBuf>,
-    pub shuffle: bool,
-    pub verbose: bool,
-}
-
-impl Default for TestRunnerConfig {
-    fn default() -> Self {
-        TestRunnerConfig {
-            parallel: true,
-            retry: 0,
-            timeout: None,
-            category: None,
-            junit_output: None,
-            shuffle: false,
-            verbose: false,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct TestRunner {
-  config: TestRunnerConfig,
-}
-
-impl TestRunner {
-  pub fn new() -> Self {
-    TestRunner::default()
-  }
-
-  pub fn with_config(config: TestRunnerConfig) -> Self {
-    TestRunner { config }
-  }
-
-  pub fn detect(dir: &Path) -> TestBackend {
-    if dir.join("vitest.config.ts").exists() || dir.join("vitest.config.js").exists() {
-      TestBackend::Vitest
-    } else if dir.join("jest.config.ts").exists()
-      || dir.join("jest.config.js").exists()
-      || dir.join("jest.config.json").exists()
-    {
-      TestBackend::Jest
-    } else if dir.join("phpunit.xml").exists() || dir.join("phpunit.xml.dist").exists() {
-      let content = std::fs::read_to_string(dir.join("phpunit.xml"))
-        .or_else(|_| std::fs::read_to_string(dir.join("phpunit.xml.dist")))
-        .unwrap_or_default();
-      if content.contains("pest") || content.contains("Pest") {
-        TestBackend::Pest
-      } else {
-        TestBackend::PhpUnit
-      }
-    } else if dir.join("pyproject.toml").exists() || dir.join("pytest.ini").exists() {
-      TestBackend::Pytest
-    } else if dir.join("Gemfile").exists() || dir.join(".rspec").exists() {
-      TestBackend::Rspec
-    } else if dir.join("Cargo.toml").exists() {
-      TestBackend::CargoTest
-    } else if dir.join("go.mod").exists() {
-      TestBackend::GoTest
-    } else {
-      TestBackend::CargoTest
-    }
-  }
-
-  pub fn list_tests(dir: &Path) -> Result<Vec<String>> {
-    let backend = Self::detect(dir);
-    match backend {
-      TestBackend::CargoTest => {
-        let output = std::process::Command::new("cargo")
-          .args(["test", "--", "--list"])
-          .current_dir(dir)
-          .output()
-          .context("failed to list cargo tests")?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(stdout.lines().filter(|l| l.contains(": test")).map(|l| {
-          l.trim_end_matches(": test").to_string()
-        }).collect())
-      }
-      TestBackend::Vitest => {
-        let output = std::process::Command::new("npx")
-          .args(["vitest", "run", "--list"])
-          .current_dir(dir)
-          .output()
-          .context("failed to list vitest tests")?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(stdout.lines().map(|l| l.to_string()).collect())
-      }
-      TestBackend::Pytest => {
-        let output = std::process::Command::new("python")
-          .args(["-m", "pytest", "--collect-only", "-q"])
-          .current_dir(dir)
-          .output()
-          .context("failed to list pytest tests")?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(stdout.lines()
-          .filter(|l| l.contains("::"))
-          .map(|l| l.trim().to_string())
-          .collect())
-      }
-      _ => Ok(Vec::new()),
-    }
-  }
-
-  pub fn run(dir: &Path, filter: Option<&str>) -> Result<TestResult> {
-    let runner = TestRunner::new();
-    runner.run_internal(dir, filter, TestCategory::Unit)
-  }
-
-  pub fn run_with_config(&self, dir: &Path, filter: Option<&str>) -> Result<TestSuiteResult> {
-    let categories = match self.config.category {
-      Some(cat) => vec![cat],
-      None => vec![TestCategory::Unit, TestCategory::Integration, TestCategory::E2e],
-    };
-
-    let results: Vec<TestResult> = if self.config.parallel {
-      categories.into_par_iter().map(|cat| {
-        let f = match cat {
-          TestCategory::Unit => filter.or(Some("unit")),
-          TestCategory::Integration => filter.or(Some("integration")),
-          TestCategory::E2e => filter.or(Some("e2e")),
-        };
-        self.run_internal(dir, f, cat).unwrap_or_else(|e| TestResult {
-          name: format!("{cat:?}"),
-          passed: 0,
-          failed: 1,
-          skipped: 0,
-          time: 0.0,
-          backend: TestRunner::detect(dir),
-          category: cat,
-          output: format!("{e:#}"),
-        })
-      }).collect()
-    } else {
-      categories.into_iter().map(|cat| {
-        let f = match cat {
-          TestCategory::Unit => filter.or(Some("unit")),
-          TestCategory::Integration => filter.or(Some("integration")),
-          TestCategory::E2e => filter.or(Some("e2e")),
-        };
-        self.run_internal(dir, f, cat).unwrap_or_else(|e| TestResult {
-          name: format!("{cat:?}"),
-          passed: 0,
-          failed: 1,
-          skipped: 0,
-          time: 0.0,
-          backend: TestRunner::detect(dir),
-          category: cat,
-          output: format!("{e:#}"),
-        })
-      }).collect()
-    };
-
-    let total_time = results.iter().map(|r| r.time).sum();
-    let total_passed = results.iter().map(|r| r.passed).sum();
-    let total_failed = results.iter().map(|r| r.failed).sum();
-    let total_skipped = results.iter().map(|r| r.skipped).sum();
-
-    let suite = TestSuiteResult {
-      name: dir.file_name().unwrap_or_default().to_string_lossy().to_string(),
-      results,
-      total_time,
-      total_passed,
-      total_failed,
-      total_skipped,
-    };
-
-    if let Some(ref junit_path) = self.config.junit_output {
-      let junit_xml = generate_junit_xml(&suite)?;
-      std::fs::write(junit_path, junit_xml).context("failed to write JUnit XML")?;
-    }
-
-    Ok(suite)
-  }
-
-    fn run_internal(&self, dir: &Path, filter: Option<&str>, category: TestCategory) -> Result<TestResult> {
-        let backend = Self::detect(dir);
-        let (program, mut args) = backend.command();
-
-        if self.config.shuffle {
-            match backend {
-                TestBackend::CargoTest => args.push("--shuffle"),
-                TestBackend::Pytest => {
-                    args.push("--random-order");
-                    args.push("-p");
-                    args.push("randomly");
-                }
-                TestBackend::Vitest => args.push("--sequence.shuffle"),
-                TestBackend::Jest => args.push("--randomize"),
-                _ => {}
-            }
-        }
-
-        if self.config.verbose {
-            match backend {
-                TestBackend::CargoTest => args.push("--nocapture"),
-                TestBackend::Pytest => args.push("-v"),
-                TestBackend::Vitest => args.push("--reporter=verbose"),
-                TestBackend::Jest => args.push("--verbose"),
-                _ => {}
-            }
-        }
-    if let Some(f) = filter {
-      match backend {
-        TestBackend::CargoTest => args.push(f),
-        TestBackend::Pytest => args.extend(["-k", f]),
-        TestBackend::Jest | TestBackend::Vitest => args.extend(["-t", f]),
-        _ => {}
-      }
-    }
-
-    let max_retries = self.config.retry;
-
-    for attempt in 0..=max_retries {
-      let start = Instant::now();
-
-      let mut child = std::process::Command::new(program)
-        .args(&args)
-        .current_dir(dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .with_context(|| format!("failed to run {} tests", backend.name()))?;
-
-      if let Some(timeout) = self.config.timeout {
-        let start_wait = Instant::now();
-        loop {
-          match child.try_wait() {
-            Ok(Some(_status)) => {
-              let elapsed = start_wait.elapsed();
-              let output = child.wait_with_output()?;
-              return Ok(Self::process_output(output, backend, category, elapsed));
-            }
-            Ok(None) => {
-              if start_wait.elapsed() >= timeout {
-                child.kill()?;
-                anyhow::bail!("test timed out after {timeout:?}");
-              }
-              std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(e) => anyhow::bail!("failed to wait for test process: {e}"),
-          }
-        }
-      } else {
-        let output = child.wait_with_output()?;
-        let elapsed = start.elapsed();
-        let result = Self::process_output(output, backend, category, elapsed);
-
-        if result.failed > 0 && attempt < max_retries {
-          eprintln!("retry {}/{} for {category:?} tests...", attempt + 1, max_retries);
-          continue;
-        }
-        return Ok(result);
-      };
-    }
-
-    anyhow::bail!("test execution failed after {max_retries} retries")
-  }
-
-  fn process_output(
-    output: std::process::Output,
-    backend: TestBackend,
-    category: TestCategory,
-    elapsed: Duration,
-  ) -> TestResult {
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let combined = format!("{stdout}\n{stderr}");
-    let (passed, failed, skipped) = Self::parse_counts(&combined, backend);
-    TestResult {
-      name: format!("{category:?}"),
-      passed,
-      failed,
-      skipped,
-      time: elapsed.as_secs_f64(),
-      backend,
-      category,
-      output: combined,
-    }
-  }
-
-  pub fn to_junit_xml(suite: &TestSuiteResult) -> Result<String> {
-    generate_junit_xml(suite)
-  }
-
-  #[allow(dead_code)]
-  fn to_junit_xml_old(_dir: &Path, suite: &TestSuiteResult) -> Result<String> {
-    generate_junit_xml(suite)
-  }
-
-  fn parse_counts(output: &str, backend: TestBackend) -> (u64, u64, u64) {
-    match backend {
-      TestBackend::CargoTest => {
-        let mut passed = 0u64;
-        let mut failed = 0u64;
-        let mut skipped = 0u64;
-        for line in output.lines() {
-          if line.contains("FAILED") {
-            failed += 1;
-          } else if line.contains("test result:") {
-            if let Some(n) = Self::extract_num(line, "passed") {
-              passed = n;
-            }
-            if let Some(n) = Self::extract_num(line, "failed") {
-              failed = n;
-            }
-            if let Some(n) = Self::extract_num(line, "ignored") {
-              skipped = n;
-            }
-          }
-        }
-        (passed, failed, skipped)
-      }
-      TestBackend::Pytest => {
-        let mut passed = 0u64;
-        let mut failed = 0u64;
-        let mut skipped = 0u64;
-        let lower = output.to_lowercase();
-        for line in lower.lines() {
-          if line.contains("passed") {
-            passed += 1;
-          }
-          if line.contains("failed") {
-            failed += 1;
-          }
-          if line.contains("skipped") {
-            skipped += 1;
-          }
-        }
-        (passed, failed, skipped)
-      }
-      _ => {
-        let passed = output.matches("PASS").count() as u64
-          + output.matches("✓").count() as u64;
-        let failed = output.matches("FAIL").count() as u64
-          + output.matches("✗").count() as u64;
-        let skipped = output.matches("SKIP").count() as u64
-          + output.matches("○").count() as u64;
-        (passed, failed, skipped)
-      }
-    }
-  }
-
-  fn extract_num(line: &str, label: &str) -> Option<u64> {
-    let pattern = format!(" {label}");
-    line.find(&pattern).and_then(|pos| {
-      let before = &line[..pos].trim();
-      before.split_whitespace().last().and_then(|s| s.parse().ok())
-    })
-  }
-
-  pub fn run_watch(dir: &Path) -> Result<()> {
-    let backend = Self::detect(dir);
-    let (program, args) = backend.command();
-    let mut cmd = std::process::Command::new(program);
-    cmd.args(&args).current_dir(dir);
-    match backend {
-      TestBackend::Vitest => {
-        cmd.arg("--watch");
-      }
-      TestBackend::Jest => {
-        cmd.arg("--watchAll");
-      }
-      TestBackend::CargoTest => {
-        cmd.arg("--");
-        cmd.arg("--nocapture");
-      }
-      _ => {}
-    }
-    let status = cmd.status().with_context(|| "watch mode failed")?;
-    if status.success() {
-      Ok(())
-    } else {
-      anyhow::bail!("watch mode exited with status: {}", status)
-    }
-  }
-
-  pub fn run_coverage(dir: &Path) -> Result<()> {
-    let backend = Self::detect(dir);
-    match backend {
-      TestBackend::Vitest => {
-        std::process::Command::new("npx")
-          .args(["vitest", "run", "--coverage"])
-          .current_dir(dir)
-          .status()?;
-      }
-      TestBackend::CargoTest => {
-        std::process::Command::new("cargo")
-          .args(["test", "--", "--nocapture"])
-          .env("CARGO_INCREMENTAL", "0")
-          .env("RUSTFLAGS", "-Cinstrument-coverage")
-          .current_dir(dir)
-          .status()?;
-      }
-      _ => {
-        anyhow::bail!("coverage not supported for {}", backend.name());
-      }
-    }
-    Ok(())
-  }
-}
-
-impl Default for TestRunner {
-  fn default() -> Self {
-    TestRunner {
-      config: TestRunnerConfig::default(),
-    }
-  }
-}
-
-fn generate_junit_xml(suite: &TestSuiteResult) -> Result<String> {
-  let mut buffer = Vec::new();
-  let mut writer = Writer::new_with_indent(&mut buffer, b' ', 2);
-
-  writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))?;
-
-  let mut testsuites = BytesStart::new("testsuites");
-  testsuites.push_attribute(("name", suite.name.as_str()));
-  testsuites.push_attribute(("tests", suite.results.len().to_string().as_str()));
-  testsuites.push_attribute(("failures", suite.total_failed.to_string().as_str()));
-  testsuites.push_attribute(("time", format!("{:.3}", suite.total_time).as_str()));
-  writer.write_event(Event::Start(testsuites))?;
-
-  for result in &suite.results {
-    let mut testsuite = BytesStart::new("testsuite");
-    testsuite.push_attribute(("name", result.name.as_str()));
-    testsuite.push_attribute(("tests", (result.passed + result.failed + result.skipped).to_string().as_str()));
-    testsuite.push_attribute(("failures", result.failed.to_string().as_str()));
-    testsuite.push_attribute(("skipped", result.skipped.to_string().as_str()));
-    testsuite.push_attribute(("time", format!("{:.3}", result.time).as_str()));
-    testsuite.push_attribute(("timestamp", Utc::now().to_rfc3339().as_str()));
-    writer.write_event(Event::Start(testsuite))?;
-
-    let mut tc = BytesStart::new("testcase");
-    tc.push_attribute(("name", format!("{}_{}", result.name, result.backend.name()).as_str()));
-    tc.push_attribute(("classname", suite.name.as_str()));
-    tc.push_attribute(("time", format!("{:.3}", result.time).as_str()));
-    writer.write_event(Event::Start(tc))?;
-
-    if result.failed > 0 {
-      let mut failure = BytesStart::new("failure");
-      failure.push_attribute(("message", "tests failed"));
-      writer.write_event(Event::Start(failure))?;
-      writer.write_event(Event::Text(BytesText::new(&result.output)))?;
-      writer.write_event(Event::End(BytesEnd::new("failure")))?;
-    }
-
-    writer.write_event(Event::End(BytesEnd::new("testcase")))?;
-    writer.write_event(Event::End(BytesEnd::new("testsuite")))?;
-  }
-
-  writer.write_event(Event::End(BytesEnd::new("testsuites")))?;
-  Ok(String::from_utf8(buffer)?)
+    pub name: String,
+    pub results: Vec<TestResult>,
+    pub total_time: f64,
+    pub total_passed: u64,
+    pub total_failed: u64,
+    pub total_skipped: u64,
 }
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-  use std::path::PathBuf;
+    use super::*;
+    use std::path::PathBuf;
 
-  fn test_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-  }
+    fn test_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
 
-  #[test]
-  fn test_new() {
-    let runner = TestRunner::new();
-    let _ = runner;
-  }
+    #[test]
+    fn test_backend_name() {
+        assert_eq!(TestBackend::Vitest.name(), "Vitest");
+        assert_eq!(TestBackend::CargoTest.name(), "cargo test");
+    }
 
-  #[test]
-  fn test_detect_cargo() {
-    let dir = test_dir();
-    let backend = TestRunner::detect(&dir);
-    assert_eq!(backend, TestBackend::CargoTest);
-  }
+    #[test]
+    fn test_detect_cargo() {
+        let dir = test_dir();
+        let backend = TestRunner::detect(&dir);
+        assert_eq!(backend, TestBackend::CargoTest);
+    }
 
-  #[test]
-  fn test_backend_name() {
-    assert_eq!(TestBackend::Vitest.name(), "Vitest");
-    assert_eq!(TestBackend::CargoTest.name(), "cargo test");
-  }
-
-  #[test]
-  fn test_parse_counts_cargo() {
-    let output = "test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out";
-    let (p, f, s) = TestRunner::parse_counts(output, TestBackend::CargoTest);
-    assert_eq!(p, 10);
-    assert_eq!(f, 0);
-    assert_eq!(s, 1);
-  }
-
-  #[test]
-  fn test_extract_num() {
-    let line = "test result: ok. 10 passed; 0 failed; 1 ignored";
-    assert_eq!(TestRunner::extract_num(line, "passed"), Some(10));
-    assert_eq!(TestRunner::extract_num(line, "failed"), Some(0));
-    assert_eq!(TestRunner::extract_num(line, "ignored"), Some(1));
-  }
-
-  #[test]
-  fn test_junit_generation() {
-    let suite = TestSuiteResult {
-      name: "test-suite".into(),
-      results: vec![TestResult {
-        name: "unit".into(),
-        passed: 5,
-        failed: 1,
-        skipped: 0,
-        time: 1.23,
-        backend: TestBackend::CargoTest,
-        category: TestCategory::Unit,
-        output: "error log".into(),
-      }],
-      total_time: 1.23,
-      total_passed: 5,
-      total_failed: 1,
-      total_skipped: 0,
-    };
-    let xml = generate_junit_xml(&suite).unwrap();
-    assert!(xml.contains("testsuites"));
-    assert!(xml.contains("testcase"));
-    assert!(xml.contains("failure"));
-  }
-
-  #[test]
-  fn test_test_result_serde() {
-    let result = TestResult {
-      name: "test".into(),
-      passed: 5,
-      failed: 1,
-      skipped: 0,
-      time: 1.23,
-      backend: TestBackend::CargoTest,
-      category: TestCategory::Unit,
-      output: "ok".into(),
-    };
-    let json = serde_json::to_string(&result).unwrap();
-    let deserialized: TestResult = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized.passed, 5);
-    assert_eq!(deserialized.failed, 1);
-  }
+    #[test]
+    fn test_test_result_serde() {
+        let result = TestResult {
+            name: "test".into(),
+            passed: 5,
+            failed: 1,
+            skipped: 0,
+            time: 1.23,
+            backend: TestBackend::CargoTest,
+            category: TestCategory::Unit,
+            output: "ok".into(),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let deserialized: TestResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.passed, 5);
+        assert_eq!(deserialized.failed, 1);
+    }
 }

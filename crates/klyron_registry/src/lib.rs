@@ -1,3 +1,7 @@
+pub mod cache;
+pub mod publish;
+pub mod version;
+
 use chrono::{DateTime, Utc};
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
@@ -1468,7 +1472,7 @@ pub struct PackageVersion {
 
 pub fn resolve_semver_version(versions: &[String], constraint: &str) -> Option<String> {
   // Check for exact version match first
-  if let Ok(exact) = Version::parse(constraint) {
+  if let Ok(_exact) = Version::parse(constraint) {
     if versions.iter().any(|v| v == constraint) {
       return Some(constraint.to_string());
     }

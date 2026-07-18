@@ -1,16 +1,16 @@
-//! klyron_runtime — V8 isolate pool, snapshot caching, concurrent execution
-
-pub use klyron_core::*;
+pub mod lifecycle;
+pub mod supervisor;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
 use anyhow::Result;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
-// ── RuntimeMetrics ────────────────────────────────────────────────────────
+pub use klyron_core::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RuntimeMetrics {
@@ -21,8 +21,6 @@ pub struct RuntimeMetrics {
     pub snapshot_cache_hits: u64,
     pub snapshot_cache_misses: u64,
 }
-
-// ── Send-safe Runtime wrapper ─────────────────────────────────────────────
 
 pub struct SendRuntime(Runtime);
 
@@ -44,8 +42,6 @@ impl SendRuntime {
         self.0.execute_script(name, source)
     }
 }
-
-// ── V8 Isolate Pool ───────────────────────────────────────────────────────
 
 static ISOLATE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -159,8 +155,6 @@ impl Drop for RuntimeHandle {
     }
 }
 
-// ── Startup Snapshot Caching ──────────────────────────────────────────────
-
 pub struct StartupSnapshotCache {
     store: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     hits: AtomicU64,
@@ -214,8 +208,6 @@ impl StartupSnapshotCache {
         (self.hits.load(Ordering::Relaxed), self.misses.load(Ordering::Relaxed))
     }
 }
-
-// ── RuntimePool (concurrent script execution) ────────────────────────────
 
 pub struct RuntimePool {
     isolates: IsolatePool,
@@ -275,8 +267,6 @@ impl RuntimePool {
     }
 }
 
-// ── Inline hot-path helpers ───────────────────────────────────────────────
-
 #[inline]
 pub fn create_runtime(extensions: Vec<deno_core::Extension>, enable_typescript: bool, async_: bool) -> Result<Runtime> {
     Runtime::builder()
@@ -290,8 +280,6 @@ pub fn create_runtime(extensions: Vec<deno_core::Extension>, enable_typescript: 
 pub fn execute_script(runtime: &mut Runtime, name: &str, source: &str) -> Result<String> {
     runtime.execute_script(name, source)
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
