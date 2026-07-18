@@ -7,6 +7,6 @@ license.workspace = true
 [dependencies]
 anyhow = "1"
 glob = "0.3"
-notify = "6"
+notify = "8"
 crossbeam-channel = "0.5"
 thiserror = "2"
