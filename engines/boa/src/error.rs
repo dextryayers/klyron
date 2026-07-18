@@ -1,5 +1,5 @@
 use std::fmt;
-
+use boa_engine::JsNativeErrorKind;
 use klyron_engine_common::error::{CommonError, CommonErrorKind};
 
 #[derive(Debug)]
@@ -14,24 +14,32 @@ pub enum BoaError {
     ReferenceError(String),
     Timeout,
     OutOfMemory,
+    JsError(String),
+    StackTrace(String),
 }
 
 impl BoaError {
-    pub fn catch_error(_context: &mut boa_engine::Context) -> Option<Self> {
-        None
+    pub fn from_js_error(err: &boa_engine::JsError) -> Self {
+        let msg = err.to_string();
+        let kind = err.as_native().map(|n| &n.kind);
+        match kind {
+            Some(JsNativeErrorKind::Type) => Self::TypeError(msg),
+            Some(JsNativeErrorKind::Range) => Self::RangeError(msg),
+            Some(JsNativeErrorKind::Reference) => Self::ReferenceError(msg),
+            Some(JsNativeErrorKind::Syntax) => Self::SyntaxError(msg),
+            _ => Self::ExecutionFailed(msg),
+        }
     }
 
-    pub fn format_stack_trace(error: &boa_engine::JsValue, context: &mut boa_engine::Context) -> String {
-        error.to_string(context)
-            .map(|s| s.to_std_string_escaped())
-            .unwrap_or_else(|_| "No stack trace".to_string())
+    pub fn from_js_error_with_context(err: &boa_engine::JsError) -> Self {
+        Self::from_js_error(err)
     }
 
     pub fn to_common_kind(&self) -> CommonErrorKind {
         match self {
             Self::NotInitialized => CommonErrorKind::NotInitialized,
             Self::InitFailed(msg) => CommonErrorKind::InitFailed(msg.clone()),
-            Self::ExecutionFailed(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
+            Self::ExecutionFailed(msg) | Self::JsError(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
             Self::CompileError(msg) => CommonErrorKind::CompileError(msg.clone()),
             Self::SyntaxError(msg) => CommonErrorKind::SyntaxError(msg.clone()),
             Self::TypeError(msg) => CommonErrorKind::TypeError(msg.clone()),
@@ -39,6 +47,7 @@ impl BoaError {
             Self::ReferenceError(msg) => CommonErrorKind::ReferenceError(msg.clone()),
             Self::Timeout => CommonErrorKind::Timeout,
             Self::OutOfMemory => CommonErrorKind::OutOfMemory,
+            Self::StackTrace(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
         }
     }
 }
@@ -56,6 +65,8 @@ impl fmt::Display for BoaError {
             Self::ReferenceError(msg) => write!(f, "Reference error: {msg}"),
             Self::Timeout => write!(f, "Script timeout"),
             Self::OutOfMemory => write!(f, "Out of memory"),
+            Self::JsError(msg) => write!(f, "{msg}"),
+            Self::StackTrace(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -63,17 +74,23 @@ impl fmt::Display for BoaError {
 impl std::error::Error for BoaError {}
 
 impl CommonError for BoaError {
-    fn kind(&self) -> CommonErrorKind {
-        self.to_common_kind()
-    }
-
+    fn kind(&self) -> CommonErrorKind { self.to_common_kind() }
     fn format_stack_trace(&self) -> Option<String> {
-        Some("Stack trace: (Boa)".to_string())
+        match self {
+            Self::JsError(msg) if msg.contains("\n  at ") => {
+                let parts: Vec<&str> = msg.splitn(2, "\n  at ").collect();
+                if parts.len() > 1 { Some(format!("  at {}", parts[1])) } else { Some(msg.clone()) }
+            }
+            Self::StackTrace(s) => Some(s.clone()),
+            _ => None,
+        }
     }
 }
 
 impl From<anyhow::Error> for BoaError {
-    fn from(e: anyhow::Error) -> Self {
-        Self::ExecutionFailed(e.to_string())
-    }
+    fn from(e: anyhow::Error) -> Self { Self::ExecutionFailed(e.to_string()) }
+}
+
+impl From<boa_engine::JsError> for BoaError {
+    fn from(e: boa_engine::JsError) -> Self { Self::from_js_error(&e) }
 }

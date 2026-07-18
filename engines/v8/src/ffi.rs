@@ -4,6 +4,8 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_double, c_int, c_uint, c_void, c_uchar};
 
 use crate::ffi_types::*;
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_double, c_int, c_uint, c_void, c_uchar, c_ulong};
 
 /* Opaque handle types matching C typedefs */
 #[repr(C)] pub struct V8IsolateHandle  { _private: [u8; 0] }
@@ -13,6 +15,48 @@ use crate::ffi_types::*;
 #[repr(C)] pub struct V8ModuleHandle   { _private: [u8; 0] }
 #[repr(C)] pub struct V8PromiseHandle  { _private: [u8; 0] }
 #[repr(C)] pub struct V8SnapshotHandle { _private: [u8; 0] }
+#[repr(C)] pub struct V8Stream         { _private: [u8; 0] }
+
+#[repr(C)]
+pub struct V8Url {
+    pub href: *mut c_char,
+    pub protocol: *mut c_char,
+    pub hostname: *mut c_char,
+    pub port: *mut c_char,
+    pub pathname: *mut c_char,
+    pub search: *mut c_char,
+    pub hash: *mut c_char,
+    pub host: *mut c_char,
+    pub origin: *mut c_char,
+}
+
+#[repr(C)]
+pub struct V8Stat {
+    pub dev: u64,
+    pub ino: u64,
+    pub mode: u32,
+    pub uid: u32,
+    pub gid: u32,
+    pub size: u64,
+    pub blksize: u64,
+    pub blocks: u64,
+    pub atime: u64,
+    pub mtime: u64,
+    pub ctime: u64,
+    pub file_type: i32,
+}
+
+#[repr(C)]
+pub struct V8ProcessInfo {
+    pub exec_path: *mut c_char,
+    pub argv: *mut *mut c_char,
+    pub argc: c_int,
+    pub cwd: *mut c_char,
+    pub platform: *mut c_char,
+    pub pid: u64,
+    pub title: *mut c_char,
+    pub ppid: u64,
+}
 
 unsafe extern "C" {
     /* Platform lifecycle */
@@ -193,6 +237,79 @@ unsafe extern "C" {
     fn klyron_v8_patch_version() -> c_int;
     fn klyron_v8_free_string(s: *mut c_char);
     fn klyron_v8_free_buffer(buf: *mut c_uchar);
+
+    /* Buffer */
+    fn klyron_v8_buffer_new(ctx: *mut V8ContextHandle, size: usize) -> *mut V8ValueHandle;
+    fn klyron_v8_buffer_from_string(ctx: *mut V8ContextHandle, str: *const c_char, encoding: *const c_char) -> *mut V8ValueHandle;
+    fn klyron_v8_buffer_from_bytes(ctx: *mut V8ContextHandle, data: *const c_uchar, length: usize) -> *mut V8ValueHandle;
+    fn klyron_v8_buffer_to_string(ctx: *mut V8ContextHandle, buf: *mut V8ValueHandle, encoding: *const c_char, start: usize, end: usize) -> V8StringResult;
+    fn klyron_v8_buffer_get_data(ctx: *mut V8ContextHandle, buf: *mut V8ValueHandle) -> *mut c_uchar;
+    fn klyron_v8_buffer_get_length(ctx: *mut V8ContextHandle, buf: *mut V8ValueHandle) -> usize;
+    fn klyron_v8_buffer_copy(ctx: *mut V8ContextHandle, dst: *mut V8ValueHandle, dst_offset: usize, src: *mut V8ValueHandle, src_offset: usize, count: usize) -> V8Result;
+    fn klyron_v8_buffer_concat(ctx: *mut V8ContextHandle, bufs: *mut *mut V8ValueHandle, count: usize) -> *mut V8ValueHandle;
+    fn klyron_v8_buffer_slice(ctx: *mut V8ContextHandle, buf: *mut V8ValueHandle, start: usize, end: usize) -> *mut V8ValueHandle;
+    fn klyron_v8_buffer_write(ctx: *mut V8ContextHandle, buf: *mut V8ValueHandle, data: *const c_uchar, offset: usize, length: usize) -> V8Result;
+
+    /* Console */
+    fn klyron_v8_console_new(ctx: *mut V8ContextHandle) -> *mut V8ValueHandle;
+    fn klyron_v8_console_log(ctx: *mut V8ContextHandle, msg: *const c_char);
+    fn klyron_v8_console_warn(ctx: *mut V8ContextHandle, msg: *const c_char);
+    fn klyron_v8_console_error(ctx: *mut V8ContextHandle, msg: *const c_char);
+    fn klyron_v8_console_info(ctx: *mut V8ContextHandle, msg: *const c_char);
+    fn klyron_v8_console_debug(ctx: *mut V8ContextHandle, msg: *const c_char);
+
+    /* Crypto */
+    fn klyron_v8_crypto_random_bytes(ctx: *mut V8ContextHandle, size: usize) -> *mut V8ValueHandle;
+    fn klyron_v8_crypto_random_uuid(ctx: *mut V8ContextHandle) -> V8StringResult;
+
+    /* Encoding */
+    fn klyron_v8_encoding_text_encoder_new(ctx: *mut V8ContextHandle) -> *mut V8ValueHandle;
+    fn klyron_v8_encoding_text_decoder_new(ctx: *mut V8ContextHandle, label: *const c_char) -> *mut V8ValueHandle;
+    fn klyron_v8_encoding_encode(ctx: *mut V8ContextHandle, input: *const c_char) -> *mut V8ValueHandle;
+    fn klyron_v8_encoding_decode(ctx: *mut V8ContextHandle, data: *const c_uchar, length: usize, encoding: *const c_char) -> V8StringResult;
+    fn klyron_v8_encoding_base64_encode(ctx: *mut V8ContextHandle, data: *const c_uchar, length: usize) -> V8StringResult;
+    fn klyron_v8_encoding_base64_decode(ctx: *mut V8ContextHandle, input: *const c_char) -> *mut V8ValueHandle;
+    fn klyron_v8_encoding_hex_encode(ctx: *mut V8ContextHandle, data: *const c_uchar, length: usize) -> V8StringResult;
+    fn klyron_v8_encoding_hex_decode(ctx: *mut V8ContextHandle, input: *const c_char) -> *mut V8ValueHandle;
+
+    /* Timers */
+    fn klyron_v8_timer_set_timeout(ctx: *mut V8ContextHandle, cb: Option<unsafe extern "C" fn(*mut c_void)>, data: *mut c_void, ms: u64) -> c_int;
+    fn klyron_v8_timer_set_interval(ctx: *mut V8ContextHandle, cb: Option<unsafe extern "C" fn(*mut c_void)>, data: *mut c_void, ms: u64) -> c_int;
+    fn klyron_v8_timer_set_immediate(ctx: *mut V8ContextHandle, cb: Option<unsafe extern "C" fn(*mut c_void)>, data: *mut c_void) -> c_int;
+    fn klyron_v8_timer_clear(id: c_int);
+    fn klyron_v8_timer_clear_all();
+
+    /* URL */
+    fn klyron_v8_url_parse(url: *const c_char, base: *const c_char) -> *mut V8Url;
+    fn klyron_v8_url_dispose(url: *mut V8Url);
+
+    /* FS */
+    fn klyron_v8_fs_read_file(ctx: *mut V8ContextHandle, path: *const c_char, result: *mut *mut V8ValueHandle) -> V8Result;
+    fn klyron_v8_fs_write_file(ctx: *mut V8ContextHandle, path: *const c_char, data: *const c_uchar, length: usize) -> V8Result;
+    fn klyron_v8_fs_append_file(ctx: *mut V8ContextHandle, path: *const c_char, data: *const c_uchar, length: usize) -> V8Result;
+    fn klyron_v8_fs_stat(ctx: *mut V8ContextHandle, path: *const c_char, stat: *mut V8Stat) -> V8Result;
+    fn klyron_v8_fs_mkdir(ctx: *mut V8ContextHandle, path: *const c_char, mode: i32) -> V8Result;
+    fn klyron_v8_fs_rmdir(ctx: *mut V8ContextHandle, path: *const c_char) -> V8Result;
+    fn klyron_v8_fs_unlink(ctx: *mut V8ContextHandle, path: *const c_char) -> V8Result;
+    fn klyron_v8_fs_rename(ctx: *mut V8ContextHandle, old_path: *const c_char, new_path: *const c_char) -> V8Result;
+    fn klyron_v8_fs_exists(ctx: *mut V8ContextHandle, path: *const c_char, exists: *mut bool) -> V8Result;
+    fn klyron_v8_fs_read_dir(ctx: *mut V8ContextHandle, path: *const c_char) -> *mut V8ValueHandle;
+
+    /* Process */
+    fn klyron_v8_process_info(ctx: *mut V8ContextHandle) -> *mut V8ProcessInfo;
+    fn klyron_v8_process_exit(ctx: *mut V8ContextHandle, code: c_int) -> V8Result;
+    fn klyron_v8_process_env_get(ctx: *mut V8ContextHandle, name: *const c_char) -> V8StringResult;
+    fn klyron_v8_process_env_all(ctx: *mut V8ContextHandle) -> *mut V8ValueHandle;
+    fn klyron_v8_process_info_dispose(info: *mut V8ProcessInfo);
+
+    /* Stream */
+    fn klyron_v8_stream_new_readable(ctx: *mut V8ContextHandle, read_cb: Option<unsafe extern "C" fn(*mut V8Stream, *mut c_uchar, usize, *mut c_void) -> usize>, user_data: *mut c_void) -> *mut V8Stream;
+    fn klyron_v8_stream_new_writable(ctx: *mut V8ContextHandle, write_cb: Option<unsafe extern "C" fn(*mut V8Stream, *const c_uchar, usize, *mut c_void) -> usize>, user_data: *mut c_void) -> *mut V8Stream;
+    fn klyron_v8_stream_new_transform(ctx: *mut V8ContextHandle, read_cb: Option<unsafe extern "C" fn(*mut V8Stream, *mut c_uchar, usize, *mut c_void) -> usize>, write_cb: Option<unsafe extern "C" fn(*mut V8Stream, *const c_uchar, usize, *mut c_void) -> usize>, user_data: *mut c_void) -> *mut V8Stream;
+    fn klyron_v8_stream_write(ctx: *mut V8ContextHandle, stream: *mut V8Stream, data: *const c_uchar, length: usize) -> V8Result;
+    fn klyron_v8_stream_end(ctx: *mut V8ContextHandle, stream: *mut V8Stream, data: *const c_uchar, length: usize) -> V8Result;
+    fn klyron_v8_stream_destroy(ctx: *mut V8ContextHandle, stream: *mut V8Stream) -> V8Result;
+    fn klyron_v8_stream_set_close_callback(stream: *mut V8Stream, cb: Option<unsafe extern "C" fn(*mut V8Stream, *mut c_void)>, user_data: *mut c_void);
 }
 
 pub struct V8EnginePtr {

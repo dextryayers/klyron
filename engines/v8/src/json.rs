@@ -1,0 +1,46 @@
+
+#[cfg(feature = "native")]
+use crate::ffi;
+#[cfg(feature = "native")]
+use std::ffi::CString;
+
+pub struct V8Json {
+    #[cfg(feature = "native")]
+    ctx: *mut ffi::V8ContextHandle,
+}
+
+impl V8Json {
+    #[cfg(feature = "native")]
+    pub fn new(ctx: *mut ffi::V8ContextHandle) -> Self {
+        Self { ctx }
+    }
+
+    #[cfg(not(feature = "native"))]
+    pub fn new(_ctx: *mut std::ffi::c_void) -> Self {
+        Self {}
+    }
+
+    #[cfg(feature = "native")]
+    pub fn stringify(&self, value: *mut ffi::V8ValueHandle) -> Result<String, V8Error> {
+        let r = unsafe { ffi::klyron_v8_json_stringify(self.ctx, value) };
+        if r.success {
+            let s = if r.data.is_null() { String::new() }
+            else {
+                let s = unsafe { std::ffi::CStr::from_ptr(r.data).to_string_lossy().into() };
+                unsafe { ffi::klyron_v8_free_string(r.data) };
+                s
+            };
+            Ok(s)
+        } else {
+            Err(V8Error::EvalFailed("JSON stringify failed".into()))
+        }
+    }
+
+    #[cfg(feature = "native")]
+    pub fn parse(&self, json: &str) -> Result<*mut ffi::V8ValueHandle, V8Error> {
+        let c = CString::new(json).map_err(|e| V8Error::EvalFailed(e.to_string()))?;
+        let ptr = unsafe { ffi::klyron_v8_json_parse(self.ctx, c.as_ptr()) };
+        if ptr.is_null() { Err(V8Error::EvalFailed("JSON parse failed".into())) }
+        else { Ok(ptr) }
+    }
+}

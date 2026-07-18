@@ -1,79 +1,24 @@
 use crate::error::BoaError;
-use boa_engine::{Context, JsValue};
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context as TaskContext, Poll, Waker};
+use boa_engine::{Context, JsValue, JsResult};
 
-pub struct BoaPromise {
-    inner: Arc<Mutex<PromiseInner>>,
+pub fn js_promise_new(context: &mut Context) -> JsResult<boa_engine::JsValue> {
+    let code = "new Promise((resolve) => resolve(undefined))";
+    // In 0.19, we use Source::from_bytes
+    Ok(context.eval(boa_engine::Source::from_bytes(code))?)
 }
 
-struct PromiseInner {
-    state: PromiseState,
-    waker: Option<Waker>,
+pub fn promise_resolve(val: &JsValue, context: &mut Context) -> Result<String, BoaError> {
+    Ok(val.to_string(context)
+        .map_err(|e| BoaError::from_js_error(&e))?
+        .to_std_string_escaped())
 }
 
-enum PromiseState {
-    Pending,
-    Resolved(String),
-    Rejected(String),
+pub fn promise_reject(val: &JsValue, context: &mut Context) -> Result<String, BoaError> {
+    Ok(val.to_string(context)
+        .map_err(|e| BoaError::from_js_error(&e))?
+        .to_std_string_escaped())
 }
 
-impl BoaPromise {
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(PromiseInner {
-                state: PromiseState::Pending,
-                waker: None,
-            })),
-        }
-    }
-
-    pub fn resolve_js(val: &JsValue, context: &mut Context) -> Result<String, BoaError> {
-        if val.is_null() || val.is_undefined() {
-            return Ok(String::new());
-        }
-        let s = val.to_string(context)
-            .map_err(|e| BoaError::ExecutionFailed(e.to_string()))?;
-        Ok(s.to_std_string_escaped())
-    }
-
-    pub fn reject_js(val: &JsValue, context: &mut Context) -> Result<String, BoaError> {
-        let s = val.to_string(context)
-            .map_err(|e| BoaError::ExecutionFailed(e.to_string()))?;
-        Err(BoaError::ExecutionFailed(s.to_std_string_escaped()))
-    }
-
-    pub fn resolve(&mut self, value: String) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.state = PromiseState::Resolved(value);
-        if let Some(waker) = inner.waker.take() {
-            waker.wake();
-        }
-    }
-
-    pub fn reject(&mut self, reason: String) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.state = PromiseState::Rejected(reason);
-        if let Some(waker) = inner.waker.take() {
-            waker.wake();
-        }
-    }
-}
-
-impl Future for BoaPromise {
-    type Output = Result<String, String>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
-        let mut inner = self.inner.lock().unwrap();
-        match &inner.state {
-            PromiseState::Pending => {
-                inner.waker = Some(cx.waker().clone());
-                Poll::Pending
-            }
-            PromiseState::Resolved(val) => Poll::Ready(Ok(val.clone())),
-            PromiseState::Rejected(err) => Poll::Ready(Err(err.clone())),
-        }
-    }
+pub fn create_js_promise(context: &mut Context) -> JsResult<JsValue> {
+    js_promise_new(context)
 }

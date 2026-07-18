@@ -1,8 +1,9 @@
 use std::fmt;
-use klyron_engine_common::CommonError;
+use klyron_engine_common::error::{CommonError, CommonErrorKind};
 
 #[derive(Debug)]
 pub enum QuickJSError {
+    NotInitialized,
     InitFailed(String),
     EvalFailed(String),
     ModuleFailed(String),
@@ -16,6 +17,7 @@ pub enum QuickJSError {
 impl fmt::Display for QuickJSError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::NotInitialized => write!(f, "QuickJS not initialized"),
             Self::InitFailed(msg) => write!(f, "QuickJS init failed: {msg}"),
             Self::EvalFailed(msg) => write!(f, "QuickJS eval error: {msg}"),
             Self::ModuleFailed(msg) => write!(f, "QuickJS module error: {msg}"),
@@ -30,8 +32,20 @@ impl fmt::Display for QuickJSError {
 
 impl std::error::Error for QuickJSError {}
 
+impl QuickJSError {
+    pub fn to_common_kind(&self) -> CommonErrorKind {
+        match self {
+            Self::NotInitialized => CommonErrorKind::NotInitialized,
+            Self::InitFailed(msg) => CommonErrorKind::InitFailed(msg.clone()),
+            Self::EvalFailed(msg) | Self::ModuleFailed(msg) | Self::GlobalGetFailed(msg)
+                | Self::GlobalSetFailed(msg) | Self::CallFailed(msg) | Self::Internal(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
+            Self::SnapshotFailed(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
+        }
+    }
+}
+
 impl CommonError for QuickJSError {
-    fn kind(&self) -> klyron_engine_common::CommonErrorKind {
-        klyron_engine_common::CommonErrorKind::ExecutionFailed(self.to_string())
+    fn kind(&self) -> CommonErrorKind {
+        self.to_common_kind()
     }
 }

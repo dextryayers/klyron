@@ -317,6 +317,143 @@ klyron_v8_value_t* klyron_v8_array_buffer_new(
     klyron_v8_context_t* ctx, const unsigned char* data, size_t length);
 
 /*
+ * Buffer operations (Node.js Buffer-like)
+ */
+klyron_v8_value_t* klyron_v8_buffer_new(klyron_v8_context_t* ctx, size_t size);
+klyron_v8_value_t* klyron_v8_buffer_from_string(klyron_v8_context_t* ctx, const char* str, const char* encoding);
+klyron_v8_value_t* klyron_v8_buffer_from_bytes(klyron_v8_context_t* ctx, const unsigned char* data, size_t length);
+klyron_v8_string_result_t klyron_v8_buffer_to_string(klyron_v8_context_t* ctx, klyron_v8_value_t* buf, const char* encoding, size_t start, size_t end);
+unsigned char* klyron_v8_buffer_get_data(klyron_v8_context_t* ctx, klyron_v8_value_t* buf);
+size_t klyron_v8_buffer_get_length(klyron_v8_context_t* ctx, klyron_v8_value_t* buf);
+klyron_v8_result_t klyron_v8_buffer_copy(klyron_v8_context_t* ctx, klyron_v8_value_t* dst, size_t dst_offset, klyron_v8_value_t* src, size_t src_offset, size_t count);
+klyron_v8_value_t* klyron_v8_buffer_concat(klyron_v8_context_t* ctx, klyron_v8_value_t** bufs, size_t count);
+klyron_v8_value_t* klyron_v8_buffer_slice(klyron_v8_context_t* ctx, klyron_v8_value_t* buf, size_t start, size_t end);
+klyron_v8_result_t klyron_v8_buffer_write(klyron_v8_context_t* ctx, klyron_v8_value_t* buf, const unsigned char* data, size_t offset, size_t length);
+
+/*
+ * Console API
+ */
+klyron_v8_value_t* klyron_v8_console_new(klyron_v8_context_t* ctx);
+void klyron_v8_console_log(klyron_v8_context_t* ctx, const char* msg);
+void klyron_v8_console_warn(klyron_v8_context_t* ctx, const char* msg);
+void klyron_v8_console_error(klyron_v8_context_t* ctx, const char* msg);
+void klyron_v8_console_info(klyron_v8_context_t* ctx, const char* msg);
+void klyron_v8_console_debug(klyron_v8_context_t* ctx, const char* msg);
+
+/*
+ * Crypto primitives
+ */
+klyron_v8_value_t* klyron_v8_crypto_random_bytes(klyron_v8_context_t* ctx, size_t size);
+klyron_v8_string_result_t klyron_v8_crypto_random_uuid(klyron_v8_context_t* ctx);
+
+/*
+ * Encoding (TextEncoder/TextDecoder, base64, hex)
+ */
+klyron_v8_value_t* klyron_v8_encoding_text_encoder_new(klyron_v8_context_t* ctx);
+klyron_v8_value_t* klyron_v8_encoding_text_decoder_new(klyron_v8_context_t* ctx, const char* label);
+klyron_v8_value_t* klyron_v8_encoding_encode(klyron_v8_context_t* ctx, const char* input);
+klyron_v8_string_result_t klyron_v8_encoding_decode(klyron_v8_context_t* ctx, const unsigned char* data, size_t length, const char* encoding);
+klyron_v8_string_result_t klyron_v8_encoding_base64_encode(klyron_v8_context_t* ctx, const unsigned char* data, size_t length);
+klyron_v8_value_t* klyron_v8_encoding_base64_decode(klyron_v8_context_t* ctx, const char* input);
+klyron_v8_string_result_t klyron_v8_encoding_hex_encode(klyron_v8_context_t* ctx, const unsigned char* data, size_t length);
+klyron_v8_value_t* klyron_v8_encoding_hex_decode(klyron_v8_context_t* ctx, const char* input);
+
+/*
+ * Timers
+ */
+typedef void (*KlyronV8TimerCallback)(void* user_data);
+typedef int klyron_v8_timer_id_t;
+klyron_v8_timer_id_t klyron_v8_timer_set_timeout(klyron_v8_context_t* ctx, KlyronV8TimerCallback cb, void* data, uint64_t ms);
+klyron_v8_timer_id_t klyron_v8_timer_set_interval(klyron_v8_context_t* ctx, KlyronV8TimerCallback cb, void* data, uint64_t ms);
+klyron_v8_timer_id_t klyron_v8_timer_set_immediate(klyron_v8_context_t* ctx, KlyronV8TimerCallback cb, void* data);
+void klyron_v8_timer_clear(klyron_v8_timer_id_t id);
+void klyron_v8_timer_clear_all(void);
+
+/*
+ * URL parsing and resolution
+ */
+typedef struct {
+    char* href;
+    char* protocol;
+    char* hostname;
+    char* port;
+    char* pathname;
+    char* search;
+    char* hash;
+    char* host;
+    char* origin;
+} klyron_v8_url_t;
+
+klyron_v8_url_t* klyron_v8_url_parse(const char* url, const char* base);
+void klyron_v8_url_dispose(klyron_v8_url_t* url);
+
+/*
+ * File system operations
+ */
+typedef struct {
+    uint64_t dev;
+    uint64_t ino;
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
+    uint64_t size;
+    uint64_t blksize;
+    uint64_t blocks;
+    uint64_t atime;
+    uint64_t mtime;
+    uint64_t ctime;
+    int32_t type; /* 0=file, 1=dir, 2=symlink, 3=other */
+} klyron_v8_stat_t;
+
+klyron_v8_result_t klyron_v8_fs_read_file(klyron_v8_context_t* ctx, const char* path, klyron_v8_value_t** result);
+klyron_v8_result_t klyron_v8_fs_write_file(klyron_v8_context_t* ctx, const char* path, const unsigned char* data, size_t length);
+klyron_v8_result_t klyron_v8_fs_append_file(klyron_v8_context_t* ctx, const char* path, const unsigned char* data, size_t length);
+klyron_v8_result_t klyron_v8_fs_stat(klyron_v8_context_t* ctx, const char* path, klyron_v8_stat_t* stat);
+klyron_v8_result_t klyron_v8_fs_mkdir(klyron_v8_context_t* ctx, const char* path, int32_t mode);
+klyron_v8_result_t klyron_v8_fs_rmdir(klyron_v8_context_t* ctx, const char* path);
+klyron_v8_result_t klyron_v8_fs_unlink(klyron_v8_context_t* ctx, const char* path);
+klyron_v8_result_t klyron_v8_fs_rename(klyron_v8_context_t* ctx, const char* old_path, const char* new_path);
+klyron_v8_result_t klyron_v8_fs_exists(klyron_v8_context_t* ctx, const char* path, bool* exists);
+klyron_v8_value_t* klyron_v8_fs_read_dir(klyron_v8_context_t* ctx, const char* path);
+
+/*
+ * Process information
+ */
+typedef struct {
+    char* exec_path;
+    char** argv;
+    int argc;
+    char* cwd;
+    char* platform;
+    uint64_t pid;
+    char* title;
+    uint64_t ppid;
+} klyron_v8_process_info_t;
+
+klyron_v8_process_info_t* klyron_v8_process_info(klyron_v8_context_t* ctx);
+klyron_v8_result_t klyron_v8_process_exit(klyron_v8_context_t* ctx, int code);
+klyron_v8_string_result_t klyron_v8_process_env_get(klyron_v8_context_t* ctx, const char* name);
+klyron_v8_value_t* klyron_v8_process_env_all(klyron_v8_context_t* ctx);
+void klyron_v8_process_info_dispose(klyron_v8_process_info_t* info);
+
+/*
+ * Stream implementation
+ */
+typedef struct klyron_v8_stream klyron_v8_stream_t;
+
+typedef size_t (*KlyronV8StreamReadCallback)(klyron_v8_stream_t* stream, unsigned char* buf, size_t count, void* user_data);
+typedef size_t (*KlyronV8StreamWriteCallback)(klyron_v8_stream_t* stream, const unsigned char* buf, size_t count, void* user_data);
+typedef void (*KlyronV8StreamCloseCallback)(klyron_v8_stream_t* stream, void* user_data);
+
+klyron_v8_stream_t* klyron_v8_stream_new_readable(klyron_v8_context_t* ctx, KlyronV8StreamReadCallback read_cb, void* user_data);
+klyron_v8_stream_t* klyron_v8_stream_new_writable(klyron_v8_context_t* ctx, KlyronV8StreamWriteCallback write_cb, void* user_data);
+klyron_v8_stream_t* klyron_v8_stream_new_transform(klyron_v8_context_t* ctx, KlyronV8StreamReadCallback read_cb, KlyronV8StreamWriteCallback write_cb, void* user_data);
+klyron_v8_result_t klyron_v8_stream_write(klyron_v8_context_t* ctx, klyron_v8_stream_t* stream, const unsigned char* data, size_t length);
+klyron_v8_result_t klyron_v8_stream_end(klyron_v8_context_t* ctx, klyron_v8_stream_t* stream, const unsigned char* data, size_t length);
+klyron_v8_result_t klyron_v8_stream_destroy(klyron_v8_context_t* ctx, klyron_v8_stream_t* stream);
+void klyron_v8_stream_set_close_callback(klyron_v8_stream_t* stream, KlyronV8StreamCloseCallback cb, void* user_data);
+
+/*
  * Utility
  */
 const char* klyron_v8_version(void);

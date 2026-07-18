@@ -1,6 +1,6 @@
 use klyron_engine_common::permissions::{CommonPermission, CommonPermissions};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Permission {
     Read, Write, Net, Env, Run, Ffi, All,
 }

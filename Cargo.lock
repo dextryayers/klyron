@@ -3544,7 +3544,7 @@ dependencies = [
 
 [[package]]
 name = "klyron-engine-boa"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "boa_engine",
@@ -3567,11 +3567,15 @@ name = "klyron-engine-jsc"
 version = "1.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "cc",
+ "hex",
  "klyron-engine-common",
  "pkg-config",
+ "rand 0.8.7",
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]
