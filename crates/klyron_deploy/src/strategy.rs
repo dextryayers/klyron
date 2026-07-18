@@ -448,7 +448,8 @@ mod tests {
 
     #[test]
     fn test_blue_green_deploy() {
-        let (strategy, deploy, service, dir) = test_config();
+        let (mut strategy, deploy, service, dir) = test_config();
+        strategy.strategy = DeployStrategy::BlueGreen;
         let result = StrategyEngine::execute(&strategy, &deploy, &service, &dir).unwrap();
         assert_eq!(result.strategy, DeployStrategy::BlueGreen);
     }

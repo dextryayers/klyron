@@ -46,15 +46,23 @@ impl PathUtil {
     }
 
     pub fn find_up(start: &Path, filename: &str) -> Option<PathBuf> {
-        let mut current = Some(start.to_path_buf());
-        while let Some(dir) = current {
-            let candidate = dir.join(filename);
+        let mut current = start.to_path_buf();
+        loop {
+            let candidate = current.join(filename);
             if candidate.exists() {
                 return Some(candidate);
             }
-            current = dir.parent().map(|p| p.to_path_buf());
+            match current.parent() {
+                Some(parent) => current = parent.to_path_buf(),
+                None => {
+                    let cwd_candidate = PathBuf::from(filename);
+                    if cwd_candidate.exists() {
+                        return Some(cwd_candidate);
+                    }
+                    return None;
+                }
+            }
         }
-        None
     }
 
     pub fn find_all_up(start: &Path, filename: &str) -> Vec<PathBuf> {

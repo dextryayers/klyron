@@ -50,8 +50,8 @@ impl JsTestResults {
     pub fn summary(&self) -> String {
         format!(
             "Tests: {} passed, {} failed, {} total ({}.{:03}s)",
-            self.passed(),
-            self.failed(),
+            self.passed,
+            self.failed,
             self.total,
             self.duration_ms / 1000,
             self.duration_ms % 1000,

@@ -135,6 +135,7 @@ fn resolve_module(
     let mut dynamic_imports = Vec::new();
 
     let import_re = Regex::new(r#"(?:import|require)\s*\(?\s*["']([^"']+)["']\s*\)?"#).unwrap();
+    let named_import_re = Regex::new(r#"import\s+(?:\{[^}]*\}|\*\s+as\s+\w+|\w+(?:\s*,\s*\{[^}]*\})?)\s+from\s+["']([^"']+)["']"#).unwrap();
     let dynamic_re = Regex::new(r#"import\s*\(\s*["']([^"']+)["']\s*\)"#).unwrap();
 
     for line in content.lines() {
@@ -145,6 +146,17 @@ fn resolve_module(
             dynamic_imports.push(spec.clone());
             if spec.starts_with('.') {
                 if let Some(resolved) = resolve_specifier(file, &spec) {
+                    deps.push(resolved.clone());
+                    resolve_module(&resolved, graph, visited, stack)?;
+                }
+            }
+            continue;
+        }
+
+        if let Some(caps) = named_import_re.captures(trimmed) {
+            let spec = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            if spec.starts_with('.') || spec.starts_with('/') {
+                if let Some(resolved) = resolve_specifier(file, spec) {
                     deps.push(resolved.clone());
                     resolve_module(&resolved, graph, visited, stack)?;
                 }

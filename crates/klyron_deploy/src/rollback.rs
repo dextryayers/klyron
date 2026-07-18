@@ -227,8 +227,8 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join("klyron_test_rollback");
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("klyron_test_rollback_{}", name));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn test_rollback_manager_new() {
-        let dir = temp_dir();
+        let dir = temp_dir("new");
         let manager = RollbackManager::new(&dir).unwrap();
         assert!(manager.get_deployment_history().is_empty());
         assert!(manager.get_current_deployment().is_none());
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_record_deployment() {
-        let dir = temp_dir();
+        let dir = temp_dir("record");
         let mut manager = RollbackManager::new(&dir).unwrap();
         let config = HashMap::new();
         let record = manager.record_deployment("1.0.0", "rolling", "docker", &config).unwrap();
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_mark_success_and_failed() {
-        let dir = temp_dir();
+        let dir = temp_dir("mark");
         let mut manager = RollbackManager::new(&dir).unwrap();
         let config = HashMap::new();
         let record = manager.record_deployment("1.0.0", "rolling", "docker", &config).unwrap();
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn test_rollback() {
-        let dir = temp_dir();
+        let dir = temp_dir("rollback");
         let mut manager = RollbackManager::new(&dir).unwrap();
         let config = HashMap::new();
 
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_auto_rollback_on_failure() {
-        let dir = temp_dir();
+        let dir = temp_dir("auto_rollback");
         let mut manager = RollbackManager::new(&dir).unwrap();
         let config = HashMap::new();
 
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     fn test_list_versions() {
-        let dir = temp_dir();
+        let dir = temp_dir("list");
         let mut manager = RollbackManager::new(&dir).unwrap();
         let config = HashMap::new();
 
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_old_deployments() {
-        let dir = temp_dir();
+        let dir = temp_dir("cleanup");
         let mut manager = RollbackManager::new(&dir).unwrap();
         let config = HashMap::new();
 
@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn test_deployment_status_transitions() {
-        let dir = temp_dir();
+        let dir = temp_dir("transitions");
         let mut manager = RollbackManager::new(&dir).unwrap();
         let config = HashMap::new();
 

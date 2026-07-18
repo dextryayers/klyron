@@ -81,6 +81,9 @@ pub fn resolve_semver(versions: &[String], constraint: &str) -> Option<String> {
     if constraint == "*" || constraint == "latest" {
         return sort_versions(versions).into_iter().next();
     }
+    if versions.contains(&constraint.to_string()) {
+        return Some(constraint.to_string());
+    }
     if let Ok(req) = VersionReq::parse(constraint) {
         let mut matched: Vec<&String> = versions
             .iter()
@@ -92,9 +95,6 @@ pub fn resolve_semver(versions: &[String], constraint: &str) -> Option<String> {
                 .cmp(&Version::parse(a).unwrap_or(Version::new(0, 0, 0)))
         });
         return matched.first().map(|s| (*s).clone());
-    }
-    if versions.contains(&constraint.to_string()) {
-        return Some(constraint.to_string());
     }
     None
 }
@@ -153,9 +153,9 @@ pub fn max_satisfying<'a>(
         .iter()
         .filter(|v| Version::parse(v).map(|ver| req.matches(&ver)).unwrap_or(false))
         .max_by(|a, b| {
-            Version::parse(b)
+            Version::parse(a)
                 .unwrap_or(Version::new(0, 0, 0))
-                .cmp(&Version::parse(a).unwrap_or(Version::new(0, 0, 0)))
+                .cmp(&Version::parse(b).unwrap_or(Version::new(0, 0, 0)))
         })
 }
 
