@@ -1,54 +1,74 @@
 use crate::color::Color;
+use std::io::Write;
 
 const BANNER: &str = r#"
-                                                                               =-                         
-                                                                           +*                             
-                                                                  **                +=                    
-                                                       -:::--           ::::+ *::-          +*            
-                                                   :::--=**      -:::::::::::::-         +                
-                                               :::==-**##  =-::::::::::::::::-      ::                    
-                                           *::+-+***#%%=---:::---::::::::::-   -:::-                      
-                                         ::==****#####----++++*####::::::-:::::::=                        
-                                      :::+*****#####****#######%#:::::::::::::-     ***                   
-                                    ::-*****################%%%+--:::::::----                             
-                                   ::-****################%%%*---::::-----=                               
-                                 :::=*####################%%+--:::------+  +#    =                        
-                                ::::#######################==**#==---=+       *=                          
-                               ::::*#########################%*==---+*   ==+                              
-                               :::*#############%%%%########%*==--=+=====#                                
-                              -:-############%%%%=#%%%#####%%%==+=====+      =:::                         
-                              :%%%#########%%%::::::%%####%%#==+====+      :::                            
-                              :%::%%#####%%%%:::::::%%######+++=+=                                        
-                               :-::%%%%%%%%%:::::::*%%#####+++=    #*                                     
-                               :%:::%%%%%%%%::::::#%%####*++   ***#*   %+*                                
-                                :%--%%%%%%%%%+-#%%#*####*   *#%  %                                        
-                                 :+###%%%%%###**######*  %%%###*+#                                        
-                                   :+##############*   %%%#########*+===%                                 
-                               +       #******#      %%###############%+                                  
-                              =*####%%%%%%        %#######%%%%%%#***                                      
-                                +######%%%%%=*###########%%%                                              
-                                   #***#*##  +*#######%##                                                 
-                                                                                                          
-                                                                                                          
-                                                                                                          
-                                                                                                          
-                                                                                                          
-               ::   =::      :=          ::    ::      ::::::::=     ::::::::     -::    ::               
-               :: *::        :=           +::::=       ::     :-     ::     :     -: ::  ::               
-               ::  ::        :+             ::         ::::::::      ::     :     -:  :::::               
-               ::   +::      ::::::::       ::         ::    ::      ::::::::     -:    :::"#;
+                                                                                =-                         
+                                                                            +*                             
+                                                                   **                +=                    
+                                                        -:::--           ::::+ *::-          +*            
+                                                    :::--=**      -:::::::::::::-         +                
+                                                :::==-**##  =-::::::::::::::::-      ::                    
+                                            *::+-+***#%%=---:::---::::::::::-   -:::-                      
+                                          ::==****#####----++++*####::::::-:::::::=                        
+                                       :::+*****#####****#######%#:::::::::::::-     ***                   
+                                     ::-*****################%%%+--:::::::----                             
+                                    ::-****################%%%*---::::-----=                               
+                                  :::=*####################%%+--:::------+  +#    =                        
+                                 ::::#######################==**#==---=+       *=                          
+                                ::::*#########################%*==---+*   ==+                              
+                                :::*#############%%%%########%*==--=+=====#                                
+                               -:-############%%%%=#%%%#####%%%==+=====+      =:::                         
+                               :%%%#########%%%::::::%%####%%#==+====+      :::                            
+                               :%::%%#####%%%%:::::::%%######+++=+=                                        
+                                :-::%%%%%%%%%:::::::*%%#####+++=    #*                                     
+                                :%:::%%%%%%%%::::::#%%####*++   ***#*   %+*                                
+                                 :%--%%%%%%%%%+-#%%#*####*   *#%  %                                        
+                                  :+###%%%%%###**######*  %%%###*+#                                        
+                                    :+##############*   %%%#########*+===%                                 
+                                +       #******#      %%###############%+                                  
+                               =*####%%%%%%        %#######%%%%%%#***                                      
+                                 +######%%%%%=*###########%%%                                              
+                                    #***#*##  +*#######%##                                                 
+                                                                                                           
+                                                                                                           
+                                                                                                           
+                                                                                                           
+                                                                                                           
+                ::   =::      :=          ::    ::      ::::::::=     ::::::::     -::    ::               
+                :: *::        :=           +::::=       ::     :-     ::     :     -: ::  ::               
+                ::  ::        :+             ::         ::::::::      ::     :     -:  :::::               
+                ::   +::      ::::::::       ::         ::    ::      ::::::::     -:    :::"#;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn ansi_rgb(r: u8, g: u8, b: u8) -> String {
+    format!("\x1b[38;2;{};{};{}m", r, g, b)
+}
+
+fn rgb_paint(r: u8, g: u8, b: u8, text: &str) -> String {
+    format!("{}{}\x1b[0m", ansi_rgb(r, g, b), text)
+}
+
+fn hide_cursor() {
+    print!("\x1b[?25l");
+    std::io::stdout().flush().ok();
+}
+
+fn show_cursor() {
+    print!("\x1b[?25h");
+    std::io::stdout().flush().ok();
+}
+
 pub fn show_splash() {
+    hide_cursor();
     print!("\x1b[2J\x1b[H");
     animate_loading(1);
     print_banner();
 
     println!();
     println!("{}", Color::BRIGHT_CYAN.bold("  ╭──────────────────────────────────────────────────────────────╮"));
-    println!("{}", Color::BRIGHT_CYAN.bold("  │              Klyron - Universal Polyglot Runtime              │"));
-    println!("{}", Color::BRIGHT_CYAN.bold("  │               Code Anything, Run Anywhere                     │"));
+    println!("{}", Color::BRIGHT_CYAN.bold("  │              Klyron - Universal Polyglot Runtime             │"));
+    println!("{}", Color::BRIGHT_CYAN.bold("  │               Code Anything, Run Anywhere                    │"));
     println!("{}", Color::BRIGHT_CYAN.bold("  ╰──────────────────────────────────────────────────────────────╯"));
     println!();
 
@@ -290,7 +310,6 @@ pub fn show_splash() {
     cmd("compat next", "Check Next.js compatibility with klyron");
     cmd("compat astro", "Check Astro compatibility");
     cmd("compat nest", "Check NestJS compatibility");
-    cmd("compat prisma", "Check Prisma compatibility");
     println!();
 
     // ── Native Modules ───────────────────────────────────────────────────
@@ -374,6 +393,8 @@ pub fn show_splash() {
         Color::DIM.paint(format!("Documentation: https://klyron.dev  |  Version: {}  |  by AniipID", VERSION))
     );
     println!();
+
+    show_cursor();
 }
 
 fn section(name: &str) {
@@ -397,40 +418,64 @@ fn flag(name: &str, desc: &str) {
 }
 
 fn print_banner() {
+    let colors = [
+        (255, 56, 168),
+        (200, 40, 255),
+        (140, 80, 255),
+        (80, 120, 255),
+        (0, 200, 255),
+        (0, 230, 180),
+    ];
+
     for (i, line) in BANNER.trim_end_matches('\n').lines().enumerate() {
-        let color = match i % 6 {
-            0 => Color::MAGENTA,
-            1 => Color::BRIGHT_MAGENTA,
-            2 => Color::CYAN,
-            3 => Color::BRIGHT_CYAN,
-            4 => Color::BLUE,
-            _ => Color::BRIGHT_BLUE,
-        };
-        println!("{}", color.paint(line));
+        let (r, g, b) = colors[i % colors.len()];
+        println!("{}", rgb_paint(r, g, b, line));
     }
 }
 
 fn animate_loading(seconds: u64) {
-    use std::io::Write;
     use std::thread::sleep;
     use std::time::Duration;
 
-    let frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-    let steps = seconds * 20;
+    let steps = seconds * 25;
+    let bar_width = 20;
+
     for i in 0..steps {
-        let f = frames[(i as usize) % frames.len()];
-        let dots = ".".repeat(((i as usize) / 4 % 4) + 1);
-        print!("\r{} {} Initializing{}{}",
-            Color::CYAN.paint(f),
-            Color::DIM.paint("Klyron"),
-            dots,
-            Color::RESET.paint(" ")
-        );
+        let progress = i as f64 / steps as f64;
+        let filled = (progress * bar_width as f64) as usize;
+
+        let bar: String = (0..bar_width)
+            .map(|j| {
+                let t = j as f64 / bar_width as f64;
+                let r = (180.0 + (1.0 - t) * 75.0) as u8;
+                let g = (80.0 + t * 120.0) as u8;
+                let b = (255.0 - t * 80.0) as u8;
+                if j < filled {
+                    let pulse = (i as f64 * 0.3 + j as f64 * 0.5).sin() * 0.15 + 0.85;
+                    let (r2, g2, b2) = (
+                        (r as f64 * pulse) as u8,
+                        (g as f64 * pulse) as u8,
+                        (b as f64 * pulse) as u8,
+                    );
+                    rgb_paint(r2, g2, b2, "█")
+                } else {
+                    Color::DIM.paint("░")
+                }
+            })
+            .collect();
+
+        let pct = format!("{:>3}%", (progress * 100.0) as u8);
+        let label = Color::DIM.paint("Klyron starting");
+        print!("\r  {}  {}  {}", bar, rgb_paint(180, 30, 255, &pct), label);
         std::io::stdout().flush().ok();
-        sleep(Duration::from_millis(50));
+        sleep(Duration::from_millis(40));
     }
-    print!("\r\x1b[K");
-    std::io::stdout().flush().ok();
+
+    println!("\r  {}  {} {}",
+        Color::GREEN.paint("█".repeat(bar_width)),
+        Color::GREEN.paint("100%"),
+        Color::DIM.paint("ready  ")
+    );
 }
 
 pub fn show_version() {
