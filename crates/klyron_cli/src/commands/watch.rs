@@ -37,11 +37,10 @@ pub fn run_watch(args: WatchArgs) -> anyhow::Result<()> {
     eprintln!("  {} Ignoring: node_modules, .git, target, .klyron", crate::Color::DIM.paint("i"));
 
     let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
-    ctrlc::set_handler(move || {
-        r.store(false, Ordering::SeqCst);
-    })
-    .map_err(|e| anyhow::anyhow!("Failed to set Ctrl+C handler: {e}"))?;
+    let r_for_signal = running.clone();
+    crate::signal::SignalHandler::handle_sigint(Box::new(move || {
+        r_for_signal.store(false, Ordering::SeqCst);
+    }));
 
     let changed = Arc::new(AtomicBool::new(false));
 

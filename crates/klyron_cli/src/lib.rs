@@ -25,6 +25,7 @@ pub mod scaffold_inline;
 pub mod color;
 pub mod splash;
 pub mod anim;
+pub mod signal;
 
 pub(crate) use commands::helpers::*;
 pub(crate) use scaffold_inline::*;
@@ -618,6 +619,9 @@ pub fn run_cli() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .with_target(false)
         .init();
+
+    // Initialize signal handlers for graceful shutdown
+    signal::SignalHandler::setup();
 
     let cli = Cli::parse();
 

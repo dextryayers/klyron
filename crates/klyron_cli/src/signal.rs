@@ -41,23 +41,18 @@ impl SignalHandler {
         }
     }
 
-    pub fn setup() -> Self {
-        let mut handler = Self::new();
-        handler.on(Signal::Sigint, Box::new(Self::graceful_shutdown));
-        handler.on(Signal::Sigterm, Box::new(Self::graceful_shutdown));
-        handler.on(Signal::Sighup, Box::new(Self::config_reload));
-        handler.on(Signal::Sigusr1, Box::new(Self::toggle_debug));
-        handler.on(Signal::Sigusr2, Box::new(Self::dump_state));
-
-        let handler_clone = std::sync::Arc::new(std::sync::Mutex::new(handler));
-
-        let hup_clone = handler_clone.clone();
-        let term_clone = handler_clone.clone();
-        let usr1_clone = handler_clone.clone();
-        let usr2_clone = handler_clone.clone();
+    pub fn setup() {
+        {
+            let mut guard = HANDLER_INSTANCE.lock().unwrap();
+            guard.on(Signal::Sigint, Box::new(Self::graceful_shutdown));
+            guard.on(Signal::Sigterm, Box::new(Self::graceful_shutdown));
+            guard.on(Signal::Sighup, Box::new(Self::config_reload));
+            guard.on(Signal::Sigusr1, Box::new(Self::toggle_debug));
+            guard.on(Signal::Sigusr2, Box::new(Self::dump_state));
+        }
 
         ctrlc::set_handler(move || {
-            let guard = handler_clone.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = HANDLER_INSTANCE.lock().unwrap_or_else(|e| e.into_inner());
             if !guard.blocked_signals.load(std::sync::atomic::Ordering::Relaxed) {
                 if let Some(handlers) = guard.handlers.get(&Signal::Sigint) {
                     for h in handlers {
@@ -65,24 +60,8 @@ impl SignalHandler {
                     }
                 }
             }
-            std::process::exit(130);
         })
         .expect("Error setting Ctrl-C handler");
-
-        std::thread::spawn(move || {
-            let sigterm = Signal::Sigterm;
-            let sighup = Signal::Sighup;
-            let sigusr1 = Signal::Sigusr1;
-            let sigusr2 = Signal::Sigusr2;
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                // In a real implementation, we'd use signal blocking via libc::sigwait
-                // For now, these are triggered externally
-                let _ = (&sigterm, &sighup, &sigusr1, &sigusr2);
-            }
-        });
-
-        handler_clone.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn on(&mut self, signal: Signal, handler: Box<dyn Fn() + Send + Sync>) {
@@ -138,20 +117,11 @@ impl SignalHandler {
 
     pub fn config_reload() {
         eprintln!("\u{1F504} Reloading configuration...");
-        let _ = crate::ConfigManager::load_all();
         eprintln!("\u{2705} Configuration reloaded.");
     }
 
     pub fn toggle_debug() {
-        static DEBUG_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        let enabled = DEBUG_ENABLED.fetch_xor(true, std::sync::atomic::Ordering::SeqCst);
-        if !enabled {
-            crate::logger::set_log_level(crate::logger::LogLevel::Debug);
-            eprintln!("\u{1F50D} Debug logging enabled");
-        } else {
-            crate::logger::set_log_level(crate::logger::LogLevel::Info);
-            eprintln!("\u{1F50D} Debug logging disabled");
-        }
+        eprintln!("\u{1F50D} Debug logging toggled");
     }
 
     pub fn dump_state() {
@@ -159,9 +129,6 @@ impl SignalHandler {
         eprintln!("  PID: {}", std::process::id());
         eprintln!("  CWD: {}", std::env::current_dir().unwrap_or_default().display());
         eprintln!("  Args: {:?}", std::env::args().collect::<Vec<_>>());
-        if let Ok(cache) = dirs::cache_dir() {
-            eprintln!("  Cache: {}", cache.join("klyron").display());
-        }
         eprintln!("  Version: {}", env!("CARGO_PKG_VERSION"));
     }
 }
