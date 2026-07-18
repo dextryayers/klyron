@@ -10,12 +10,21 @@ klyron_jsc_string_result_t klyron_jsc_get_stack_trace(klyron_jsc_engine_t* engin
     klyron_jsc_string_result_t result = {false, nullptr, 0, {0}};
     if (!engine || !engine->ctx) return result;
 
+    /* Use Error().stack for stack trace — this is the standard JS approach */
     const char* code =
-        "try { throw new Error(); } catch(e) { return e.stack || ''; }";
+        "(function() { "
+        "  try { throw new Error(); } "
+        "  catch(e) { "
+        "    var stack = e.stack || ''; "
+        "    if (typeof stack === 'string') return stack; "
+        "    return String(stack); "
+        "  } "
+        "})()";
 
     JSStringRef src = jsc_string_from_cstr(code);
     if (!src) return result;
 
+    /* Create a fresh context for stack trace to avoid affecting the main context */
     JSValueRef exc = nullptr;
     JSValueRef val = JSEvaluateScript(engine->ctx, src, nullptr,
                                        jsc_string_from_cstr("<stack>"), 1, &exc);
@@ -26,11 +35,26 @@ klyron_jsc_string_result_t klyron_jsc_get_stack_trace(klyron_jsc_engine_t* engin
         return result;
     }
 
-    std::string s = jsc_val_to_std(engine->ctx, val ? val : JSValueMakeUndefined(engine->ctx), &exc);
-    if (exc) {
-        jsc_capture_exception(engine, exc);
-        return result;
+    if (val) {
+        JSValueRef to_str_exc = nullptr;
+        JSStringRef str = JSValueToStringCopy(engine->ctx, val, &to_str_exc);
+        if (str && !to_str_exc) {
+            std::string s = jsc_string_to_std(str);
+            JSStringRelease(str);
+            jsc_set_string_result(&result, s);
+            return result;
+        }
     }
-    jsc_set_string_result(&result, s);
+
+    jsc_set_string_result(&result, "(no stack trace)");
     return result;
+}
+
+/*
+ * Clear the stored exception.
+ */
+void klyron_jsc_clear_exception(klyron_jsc_engine_t* engine) {
+    if (engine) {
+        engine->error_buf[0] = '\0';
+    }
 }

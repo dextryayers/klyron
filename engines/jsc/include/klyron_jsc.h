@@ -133,7 +133,6 @@ klyron_jsc_value_t* klyron_jsc_value_new_undefined(klyron_jsc_engine_t* engine);
 klyron_jsc_value_t* klyron_jsc_value_new_object(klyron_jsc_engine_t* engine);
 klyron_jsc_value_t* klyron_jsc_value_new_array(klyron_jsc_engine_t* engine);
 klyron_jsc_value_t* klyron_jsc_value_new_symbol(klyron_jsc_engine_t* engine, const char* description);
-klyron_jsc_value_t* klyron_jsc_value_new_error(klyron_jsc_engine_t* engine, const char* message);
 
 /*
  * Value inspection
@@ -203,10 +202,36 @@ klyron_jsc_value_t* klyron_jsc_wasm_compile(klyron_jsc_engine_t* engine, const u
 klyron_jsc_value_t* klyron_jsc_wasm_instantiate(klyron_jsc_engine_t* engine, const unsigned char* wasm_bytes, size_t wasm_length, klyron_jsc_value_t* imports);
 
 /*
+ * Native function and constructor creation
+ */
+klyron_jsc_value_t* klyron_jsc_function_new(
+    klyron_jsc_engine_t* engine,
+    const char* name,
+    void* callback,
+    void* user_data
+);
+klyron_jsc_value_t* klyron_jsc_constructor_new(
+    klyron_jsc_engine_t* engine,
+    const char* name,
+    void* callback,
+    void* user_data
+);
+
+/*
+ * Error subclass creation
+ */
+klyron_jsc_value_t* klyron_jsc_value_new_error(klyron_jsc_engine_t* engine, const char* message);
+klyron_jsc_value_t* klyron_jsc_value_new_type_error(klyron_jsc_engine_t* engine, const char* message);
+klyron_jsc_value_t* klyron_jsc_value_new_range_error(klyron_jsc_engine_t* engine, const char* message);
+klyron_jsc_value_t* klyron_jsc_value_new_syntax_error(klyron_jsc_engine_t* engine, const char* message);
+klyron_jsc_value_t* klyron_jsc_value_new_reference_error(klyron_jsc_engine_t* engine, const char* message);
+
+/*
  * Error handling
  */
 const char* klyron_jsc_get_exception_message(klyron_jsc_engine_t* engine);
 klyron_jsc_string_result_t klyron_jsc_get_stack_trace(klyron_jsc_engine_t* engine);
+void klyron_jsc_clear_exception(klyron_jsc_engine_t* engine);
 
 /*
  * Utility

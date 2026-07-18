@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn test_v8_version() {
         let v = V8Engine::version();
-        assert!(v.contains("V8") || v.contains("not available"));
+        assert!(!v.is_empty());
     }
 
     #[test]

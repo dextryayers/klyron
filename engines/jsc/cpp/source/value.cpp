@@ -76,27 +76,6 @@ klyron_jsc_value_t* klyron_jsc_value_new_symbol(klyron_jsc_engine_t* engine,
     return v;
 }
 
-klyron_jsc_value_t* klyron_jsc_value_new_error(klyron_jsc_engine_t* engine,
-                                                 const char* message) {
-    if (!engine || !engine->ctx) return nullptr;
-    std::string code = "new Error(";
-    code += message ? "'" + std::string(message) + "'" : "'error'";
-    code += ")";
-    JSStringRef src = jsc_string_from_cstr(code.c_str());
-    if (!src) return nullptr;
-    JSValueRef exc = nullptr;
-    JSValueRef val = JSEvaluateScript(engine->ctx, src, nullptr,
-                                       jsc_string_from_cstr("<error>"), 1, &exc);
-    JSStringRelease(src);
-    if (exc || !val) {
-        jsc_capture_exception(engine, exc);
-        return nullptr;
-    }
-    auto v = new klyron_jsc_value_t(engine->ctx, val);
-    v->protect();
-    return v;
-}
-
 /* ─── Value inspection ────────────────────────────────────────── */
 
 klyron_jsc_type_result_t klyron_jsc_value_typeof(klyron_jsc_engine_t* engine,
@@ -104,31 +83,33 @@ klyron_jsc_type_result_t klyron_jsc_value_typeof(klyron_jsc_engine_t* engine,
     klyron_jsc_type_result_t result = {KLYRON_JSC_UNDEFINED, false, {0}};
     if (!engine || !value) return result;
 
-    JSValueRef val = value->value;
+    JSType jsType = JSValueGetType(engine->ctx, value->value);
     result.success = true;
 
-    if (JSValueIsUndefined(engine->ctx, val))       result.type = KLYRON_JSC_UNDEFINED;
-    else if (JSValueIsNull(engine->ctx, val))       result.type = KLYRON_JSC_NULL;
-    else if (JSValueIsBoolean(engine->ctx, val))    result.type = KLYRON_JSC_BOOLEAN;
-    else if (JSValueIsNumber(engine->ctx, val))     result.type = KLYRON_JSC_NUMBER;
-    else if (JSValueIsString(engine->ctx, val))     result.type = KLYRON_JSC_STRING;
-    else if (JSValueIsSymbol(engine->ctx, val))     result.type = KLYRON_JSC_SYMBOL;
-    else if (JSObjectIsFunction(engine->ctx, (JSObjectRef)val)) result.type = KLYRON_JSC_FUNCTION;
-    else if (JSValueIsArray(engine->ctx, val))      result.type = KLYRON_JSC_ARRAY;
-    else if (JSValueIsObject(engine->ctx, val)) {
-        JSStringRef err_str = jsc_string_from_cstr("Error");
-        JSValueRef error_ctor = JSObjectGetProperty(engine->ctx,
-            JSContextGetGlobalObject(engine->ctx), err_str, nullptr);
-        JSStringRelease(err_str);
-        bool is_err = false;
-        if (error_ctor && JSValueIsObject(engine->ctx, error_ctor)) {
-            JSValueRef instance_of = JSValueIsInstanceOf(engine->ctx, val,
-                (JSObjectRef)error_ctor, nullptr);
-            is_err = instance_of;
+    switch (jsType) {
+        case kJSTypeUndefined: result.type = KLYRON_JSC_UNDEFINED; break;
+        case kJSTypeNull:      result.type = KLYRON_JSC_NULL; break;
+        case kJSTypeBoolean:   result.type = KLYRON_JSC_BOOLEAN; break;
+        case kJSTypeNumber:    result.type = KLYRON_JSC_NUMBER; break;
+        case kJSTypeString:    result.type = KLYRON_JSC_STRING; break;
+        case kJSTypeSymbol:    result.type = KLYRON_JSC_SYMBOL; break;
+        case kJSTypeObject: {
+            JSValueRef val = value->value;
+            if (JSObjectIsFunction(engine->ctx, (JSObjectRef)val)) {
+                result.type = KLYRON_JSC_FUNCTION;
+            } else if (JSValueIsArray(engine->ctx, val)) {
+                result.type = KLYRON_JSC_ARRAY;
+            } else if (JSValueGetTypedArrayType(engine->ctx, val, nullptr) != kJSTypedArrayTypeNone) {
+                result.type = KLYRON_JSC_TYPED_ARRAY;
+            } else {
+                result.type = KLYRON_JSC_OBJECT;
+            }
+            break;
         }
-        result.type = is_err ? KLYRON_JSC_ERROR : KLYRON_JSC_OBJECT;
+        default:
+            result.type = KLYRON_JSC_OBJECT;
+            break;
     }
-    else                                             result.type = KLYRON_JSC_OBJECT;
 
     return result;
 }
@@ -201,8 +182,8 @@ bool klyron_jsc_value_is_error(klyron_jsc_engine_t* engine,
         JSContextGetGlobalObject(engine->ctx), err_str, nullptr);
     JSStringRelease(err_str);
     if (!error_ctor || !JSValueIsObject(engine->ctx, error_ctor)) return false;
-    return JSValueIsInstanceOf(engine->ctx, value->value,
-                               (JSObjectRef)error_ctor, nullptr);
+    return JSValueIsInstanceOfConstructor(engine->ctx, value->value,
+                                          (JSObjectRef)error_ctor, nullptr);
 }
 
 bool klyron_jsc_value_is_symbol(klyron_jsc_engine_t* engine,
@@ -219,20 +200,15 @@ bool klyron_jsc_value_is_promise(klyron_jsc_engine_t* engine,
         JSContextGetGlobalObject(engine->ctx), promise_str, nullptr);
     JSStringRelease(promise_str);
     if (!promise_ctor || !JSValueIsObject(engine->ctx, promise_ctor)) return false;
-    return JSValueIsInstanceOf(engine->ctx, value->value,
-                               (JSObjectRef)promise_ctor, nullptr);
+    return JSValueIsInstanceOfConstructor(engine->ctx, value->value,
+                                          (JSObjectRef)promise_ctor, nullptr);
 }
 
 bool klyron_jsc_value_is_typed_array(klyron_jsc_engine_t* engine,
                                       klyron_jsc_value_t* value) {
-    if (!engine || !value || !JSValueIsObject(engine->ctx, value->value)) return false;
-    JSStringRef ta_str = jsc_string_from_cstr("ArrayBuffer");
-    JSValueRef ta_ctor = JSObjectGetProperty(engine->ctx,
-        JSContextGetGlobalObject(engine->ctx), ta_str, nullptr);
-    JSStringRelease(ta_str);
-    if (!ta_ctor || !JSValueIsObject(engine->ctx, ta_ctor)) return false;
-    return JSValueIsInstanceOf(engine->ctx, value->value,
-                               (JSObjectRef)ta_ctor, nullptr);
+    if (!engine || !value) return false;
+    if (!JSValueIsObject(engine->ctx, value->value)) return false;
+    return JSValueGetTypedArrayType(engine->ctx, value->value, nullptr) != kJSTypedArrayTypeNone;
 }
 
 bool klyron_jsc_value_is_null(klyron_jsc_engine_t* engine,

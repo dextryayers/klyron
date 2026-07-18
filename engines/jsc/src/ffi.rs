@@ -92,7 +92,6 @@ unsafe extern "C" {
     fn klyron_jsc_value_new_object(engine: *mut JSCEngineHandle) -> *mut JSCValueHandle;
     fn klyron_jsc_value_new_array(engine: *mut JSCEngineHandle) -> *mut JSCValueHandle;
     fn klyron_jsc_value_new_symbol(engine: *mut JSCEngineHandle, description: *const c_char) -> *mut JSCValueHandle;
-    fn klyron_jsc_value_new_error(engine: *mut JSCEngineHandle, message: *const c_char) -> *mut JSCValueHandle;
 
     /* Value inspection */
     fn klyron_jsc_value_typeof(engine: *mut JSCEngineHandle, value: *mut JSCValueHandle) -> JSCTypeResult;
@@ -178,6 +177,30 @@ unsafe extern "C" {
     /* Error */
     fn klyron_jsc_get_exception_message(engine: *mut JSCEngineHandle) -> *const c_char;
     fn klyron_jsc_get_stack_trace(engine: *mut JSCEngineHandle) -> JSCStringResult;
+
+    /* Native function/constructor */
+    fn klyron_jsc_function_new(
+        engine: *mut JSCEngineHandle,
+        name: *const c_char,
+        callback: *mut std::ffi::c_void,
+        user_data: *mut std::ffi::c_void,
+    ) -> *mut JSCValueHandle;
+    fn klyron_jsc_constructor_new(
+        engine: *mut JSCEngineHandle,
+        name: *const c_char,
+        callback: *mut std::ffi::c_void,
+        user_data: *mut std::ffi::c_void,
+    ) -> *mut JSCValueHandle;
+
+    /* Error subclasses */
+    fn klyron_jsc_value_new_error(engine: *mut JSCEngineHandle, message: *const c_char) -> *mut JSCValueHandle;
+    fn klyron_jsc_value_new_type_error(engine: *mut JSCEngineHandle, message: *const c_char) -> *mut JSCValueHandle;
+    fn klyron_jsc_value_new_range_error(engine: *mut JSCEngineHandle, message: *const c_char) -> *mut JSCValueHandle;
+    fn klyron_jsc_value_new_syntax_error(engine: *mut JSCEngineHandle, message: *const c_char) -> *mut JSCValueHandle;
+    fn klyron_jsc_value_new_reference_error(engine: *mut JSCEngineHandle, message: *const c_char) -> *mut JSCValueHandle;
+
+    /* Clear exception */
+    fn klyron_jsc_clear_exception(engine: *mut JSCEngineHandle);
 
     /* Utility */
     fn klyron_jsc_version() -> *const c_char;
@@ -387,6 +410,43 @@ impl JSCEnginePtr {
         let c = Self::to_cstring(message)?;
         let ptr = unsafe { klyron_jsc_value_new_error(self.ptr, c.as_ptr()) };
         if ptr.is_null() { Err("value_new_error failed".into()) } else { Ok(ptr) }
+    }
+
+    pub fn value_new_type_error(&self, message: &str) -> Result<*mut JSCValueHandle, String> {
+        let c = Self::to_cstring(message)?;
+        let ptr = unsafe { klyron_jsc_value_new_type_error(self.ptr, c.as_ptr()) };
+        if ptr.is_null() { Err("value_new_type_error failed".into()) } else { Ok(ptr) }
+    }
+
+    pub fn value_new_range_error(&self, message: &str) -> Result<*mut JSCValueHandle, String> {
+        let c = Self::to_cstring(message)?;
+        let ptr = unsafe { klyron_jsc_value_new_range_error(self.ptr, c.as_ptr()) };
+        if ptr.is_null() { Err("value_new_range_error failed".into()) } else { Ok(ptr) }
+    }
+
+    pub fn value_new_syntax_error(&self, message: &str) -> Result<*mut JSCValueHandle, String> {
+        let c = Self::to_cstring(message)?;
+        let ptr = unsafe { klyron_jsc_value_new_syntax_error(self.ptr, c.as_ptr()) };
+        if ptr.is_null() { Err("value_new_syntax_error failed".into()) } else { Ok(ptr) }
+    }
+
+    pub fn value_new_reference_error(&self, message: &str) -> Result<*mut JSCValueHandle, String> {
+        let c = Self::to_cstring(message)?;
+        let ptr = unsafe { klyron_jsc_value_new_reference_error(self.ptr, c.as_ptr()) };
+        if ptr.is_null() { Err("value_new_reference_error failed".into()) } else { Ok(ptr) }
+    }
+
+    pub fn function_new(&self, name: Option<&str>, user_data: *mut std::ffi::c_void) -> Result<*mut JSCValueHandle, String> {
+        let c = name.map(|n| Self::to_cstring(n)).transpose()?;
+        let ptr = unsafe {
+            klyron_jsc_function_new(self.ptr, c.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
+                                     std::ptr::null_mut(), user_data)
+        };
+        if ptr.is_null() { Err("function_new failed".into()) } else { Ok(ptr) }
+    }
+
+    pub fn clear_exception(&self) {
+        unsafe { klyron_jsc_clear_exception(self.ptr) }
     }
 
     pub fn value_typeof(&self, v: *mut JSCValueHandle) -> JSCTypeResult {

@@ -251,6 +251,72 @@ int  klyron_v8_inspector_dispatch(int session_id, const char* message, char* out
 bool klyron_v8_inspector_is_active(void);
 
 /*
+ * Native function callback type
+ */
+typedef void (*KlyronV8FunctionCallback)(
+    klyron_v8_context_t* ctx,
+    int argc,
+    klyron_v8_value_t** argv,
+    void* user_data,
+    klyron_v8_value_t** result
+);
+
+/*
+ * Native function and constructor creation
+ */
+klyron_v8_value_t* klyron_v8_function_new(
+    klyron_v8_context_t* ctx,
+    const char* name,
+    KlyronV8FunctionCallback callback,
+    void* user_data
+);
+
+/*
+ * Object property access (any object, not just global)
+ */
+klyron_v8_result_t klyron_v8_object_set_property(
+    klyron_v8_context_t* ctx,
+    klyron_v8_value_t* object,
+    const char* name,
+    klyron_v8_value_t* value
+);
+klyron_v8_value_t* klyron_v8_object_get_property(
+    klyron_v8_context_t* ctx,
+    klyron_v8_value_t* object,
+    const char* name
+);
+
+/*
+ * Typed array support
+ */
+typedef enum {
+    KLYRON_V8_TYPED_ARRAY_NONE = 0,
+    KLYRON_V8_TYPED_ARRAY_INT8,
+    KLYRON_V8_TYPED_ARRAY_UINT8,
+    KLYRON_V8_TYPED_ARRAY_UINT8_CLAMPED,
+    KLYRON_V8_TYPED_ARRAY_INT16,
+    KLYRON_V8_TYPED_ARRAY_UINT16,
+    KLYRON_V8_TYPED_ARRAY_INT32,
+    KLYRON_V8_TYPED_ARRAY_UINT32,
+    KLYRON_V8_TYPED_ARRAY_FLOAT16,
+    KLYRON_V8_TYPED_ARRAY_FLOAT32,
+    KLYRON_V8_TYPED_ARRAY_FLOAT64,
+    KLYRON_V8_TYPED_ARRAY_BIGINT64,
+    KLYRON_V8_TYPED_ARRAY_BIGUINT64,
+} klyron_v8_typed_array_type_t;
+
+klyron_v8_typed_array_type_t klyron_v8_get_typed_array_type(
+    klyron_v8_context_t* ctx, klyron_v8_value_t* value);
+klyron_v8_value_t* klyron_v8_typed_array_new(
+    klyron_v8_context_t* ctx, const char* type, size_t length);
+size_t klyron_v8_typed_array_get_length(
+    klyron_v8_context_t* ctx, klyron_v8_value_t* value);
+klyron_v8_value_t* klyron_v8_typed_array_get_buffer(
+    klyron_v8_context_t* ctx, klyron_v8_value_t* value);
+klyron_v8_value_t* klyron_v8_array_buffer_new(
+    klyron_v8_context_t* ctx, const unsigned char* data, size_t length);
+
+/*
  * Utility
  */
 const char* klyron_v8_version(void);
@@ -258,6 +324,9 @@ int klyron_v8_major_version(void);
 int klyron_v8_minor_version(void);
 int klyron_v8_build_version(void);
 int klyron_v8_patch_version(void);
+
+void klyron_v8_free_string(char* s);
+void klyron_v8_free_buffer(unsigned char* buf);
 
 #ifdef __cplusplus
 }

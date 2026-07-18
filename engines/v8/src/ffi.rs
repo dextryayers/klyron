@@ -1,7 +1,7 @@
 #![cfg(feature = "native")]
 
 use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_double, c_int, c_uint, c_ulong, c_void, c_uchar};
+use std::os::raw::{c_char, c_double, c_int, c_uint, c_void, c_uchar};
 
 use crate::ffi_types::*;
 
@@ -91,6 +91,53 @@ unsafe extern "C" {
     fn klyron_v8_value_is_array(context: *mut V8ContextHandle, value: *mut V8ValueHandle) -> bool;
     fn klyron_v8_value_dispose(value: *mut V8ValueHandle);
 
+    /* Native function */
+    fn klyron_v8_function_new(
+        context: *mut V8ContextHandle,
+        name: *const c_char,
+        callback: Option<unsafe extern "C" fn(
+            *mut V8ContextHandle, c_int, *mut *mut V8ValueHandle,
+            *mut c_void, *mut *mut V8ValueHandle)>,
+        user_data: *mut c_void,
+    ) -> *mut V8ValueHandle;
+
+    /* Object property access */
+    fn klyron_v8_object_set_property(
+        context: *mut V8ContextHandle,
+        object: *mut V8ValueHandle,
+        name: *const c_char,
+        value: *mut V8ValueHandle,
+    ) -> V8Result;
+    fn klyron_v8_object_get_property(
+        context: *mut V8ContextHandle,
+        object: *mut V8ValueHandle,
+        name: *const c_char,
+    ) -> *mut V8ValueHandle;
+
+    /* Typed arrays */
+    fn klyron_v8_get_typed_array_type(
+        context: *mut V8ContextHandle,
+        value: *mut V8ValueHandle,
+    ) -> u32;
+    fn klyron_v8_typed_array_new(
+        context: *mut V8ContextHandle,
+        type_name: *const c_char,
+        length: usize,
+    ) -> *mut V8ValueHandle;
+    fn klyron_v8_typed_array_get_length(
+        context: *mut V8ContextHandle,
+        value: *mut V8ValueHandle,
+    ) -> usize;
+    fn klyron_v8_typed_array_get_buffer(
+        context: *mut V8ContextHandle,
+        value: *mut V8ValueHandle,
+    ) -> *mut V8ValueHandle;
+    fn klyron_v8_array_buffer_new(
+        context: *mut V8ContextHandle,
+        data: *const c_uchar,
+        length: usize,
+    ) -> *mut V8ValueHandle;
+
     /* Promise */
     fn klyron_v8_promise_new(context: *mut V8ContextHandle) -> *mut V8PromiseHandle;
     fn klyron_v8_promise_resolve(
@@ -163,7 +210,7 @@ impl V8EnginePtr {
             initial_heap_size_mb: 0,
             array_buffer_allocator_pool_size: 0,
             use_shared_memory: false,
-            expose_gc: false,
+            expose_gc: true,
             single_threaded: true,
         };
 
@@ -469,6 +516,43 @@ impl V8EnginePtr {
         Self::check(unsafe { klyron_v8_get_stack_trace(self.context) })
     }
 
+    /* ─── native function ────────────────────────────────────── */
+
+    pub fn function_new(&self, name: Option<&str>) -> Result<*mut V8ValueHandle, String> {
+        let c = name.map(|n| CString::new(n)).transpose().map_err(|e| e.to_string())?;
+        let ptr = unsafe {
+            klyron_v8_function_new(self.context, c.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
+                                    None, std::ptr::null_mut())
+        };
+        if ptr.is_null() { Err("function_new failed".into()) } else { Ok(ptr) }
+    }
+
+    /* ─── object property ────────────────────────────────────── */
+
+    pub fn object_set_property(&self, object: *mut V8ValueHandle, name: &str, value: *mut V8ValueHandle) -> Result<(), String> {
+        let c = CString::new(name).map_err(|e| e.to_string())?;
+        let r = unsafe { klyron_v8_object_set_property(self.context, object, c.as_ptr(), value) };
+        V8EnginePtr::check_void(r)
+    }
+
+    pub fn object_get_property(&self, object: *mut V8ValueHandle, name: &str) -> Result<*mut V8ValueHandle, String> {
+        let c = CString::new(name).map_err(|e| e.to_string())?;
+        let ptr = unsafe { klyron_v8_object_get_property(self.context, object, c.as_ptr()) };
+        if ptr.is_null() { Err("object_get_property failed".into()) } else { Ok(ptr) }
+    }
+
+    /* ─── typed array ────────────────────────────────────────── */
+
+    pub fn typed_array_new(&self, type_name: &str, length: usize) -> Result<*mut V8ValueHandle, String> {
+        let c = CString::new(type_name).map_err(|e| e.to_string())?;
+        let ptr = unsafe { klyron_v8_typed_array_new(self.context, c.as_ptr(), length) };
+        if ptr.is_null() { Err("typed_array_new failed".into()) } else { Ok(ptr) }
+    }
+
+    pub fn typed_array_get_length(&self, value: *mut V8ValueHandle) -> usize {
+        unsafe { klyron_v8_typed_array_get_length(self.context, value) }
+    }
+
     /* ─── version ───────────────────────────────────────────── */
 
     pub fn version() -> String {
@@ -495,9 +579,6 @@ impl Drop for V8EnginePtr {
             if !self.isolate.is_null() {
                 klyron_v8_isolate_dispose(self.isolate);
                 self.isolate = std::ptr::null_mut();
-            }
-            if self.init_done {
-                klyron_v8_shutdown();
             }
         }
     }

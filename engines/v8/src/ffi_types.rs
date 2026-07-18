@@ -62,9 +62,9 @@ impl V8HeapStats {
 pub struct V8Config {
     pub icu_data_path: *const c_char,
     pub snapshot_blob_path: *const c_char,
-    pub max_heap_size_mb: c_uint,
-    pub initial_heap_size_mb: c_uint,
-    pub array_buffer_allocator_pool_size: c_uint,
+    pub max_heap_size_mb: usize,
+    pub initial_heap_size_mb: usize,
+    pub array_buffer_allocator_pool_size: u32,
     pub use_shared_memory: bool,
     pub expose_gc: bool,
     pub single_threaded: bool,

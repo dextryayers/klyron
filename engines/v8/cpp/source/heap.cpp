@@ -34,9 +34,9 @@ void klyron_v8_low_memory_notification(klyron_v8_isolate_t* isolate) {
 }
 
 void klyron_v8_idle_notification(klyron_v8_isolate_t* isolate,
-                                 double deadline_in_seconds) {
+                                 double) {
     if (isolate && isolate->isolate) {
-        isolate->isolate->IdleNotificationDeadline(deadline_in_seconds);
+        isolate->isolate->SetIdle(true);
     }
 }
 
@@ -60,13 +60,15 @@ void klyron_v8_set_memory_pressure(klyron_v8_isolate_t* isolate,
 void klyron_v8_request_gc(klyron_v8_isolate_t* isolate) {
     if (isolate && isolate->isolate) {
         isolate->isolate->RequestGarbageCollectionForTesting(
-            v8::Isolate::kFullGCCallback);
+            v8::Isolate::kFullGarbageCollection);
     }
 }
 
 size_t klyron_v8_get_malloced_memory(klyron_v8_isolate_t* isolate) {
     if (!isolate || !isolate->isolate) return 0;
-    return isolate->isolate->GetMallocedMemory();
+    v8::HeapStatistics hs;
+    isolate->isolate->GetHeapStatistics(&hs);
+    return hs.malloced_memory();
 }
 
 size_t klyron_v8_adjust_external_memory(klyron_v8_isolate_t* isolate,

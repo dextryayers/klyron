@@ -425,10 +425,54 @@ mod tests {
     #[test]
     fn test_jsc_value_checks() {
         if let Ok(engine) = JSCEngine::new() {
-            assert_eq!(engine.eval("typeof 42").unwrap(), "\"number\"");
-            assert_eq!(engine.eval("typeof 'hi'").unwrap(), "\"string\"");
+            assert_eq!(engine.eval("typeof 42").unwrap(), "number");
+            assert_eq!(engine.eval("typeof 'hi'").unwrap(), "string");
             let r = engine.eval("undefined");
             assert!(r.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_jsc_native_promise() {
+        if let Ok(engine) = JSCEngine::new() {
+            let r = engine.eval("new Promise((res,rej)=>res(42))");
+            assert!(r.is_ok());
+            let r = engine.eval("Promise.resolve(42)");
+            assert!(r.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_jsc_native_error_subtypes() {
+        if let Ok(engine) = JSCEngine::new() {
+            let r = engine.eval("new Error('test')");
+            assert!(r.is_ok());
+            let r = engine.eval("new TypeError('test')");
+            assert!(r.is_ok());
+            let r = engine.eval("new RangeError('test')");
+            assert!(r.is_ok());
+            let r = engine.eval("new SyntaxError('test')");
+            assert!(r.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_jsc_native_typed_array() {
+        if let Ok(engine) = JSCEngine::new() {
+            let r = engine.eval("new Uint8Array([1,2,3]).length");
+            assert_eq!(r.unwrap(), "3");
+            let r = engine.eval("new Int32Array(10).length");
+            assert_eq!(r.unwrap(), "10");
+            let r = engine.eval("new Float64Array([3.14]).length");
+            assert_eq!(r.unwrap(), "1");
+        }
+    }
+
+    #[test]
+    fn test_jsc_native_function() {
+        if let Ok(engine) = JSCEngine::new() {
+            let r = engine.eval("(function(a,b){return a+b;})(3,4)");
+            assert_eq!(r.unwrap(), "7");
         }
     }
 

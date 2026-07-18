@@ -2,8 +2,8 @@
 #include "cpp/impl/internal.h"
 
 /*
- * JSC C API supports ArrayBuffer via JSObjectMakeArrayBufferWithBytesNoCopy
- * and typed arrays. This implementation wraps those APIs.
+ * JSC native ArrayBuffer and TypedArray support via C API.
+ * Uses JSObjectMakeArrayBufferWithBytesNoCopy, JSObjectMakeTypedArray, etc.
  */
 
 klyron_jsc_value_t* klyron_jsc_array_buffer_new(klyron_jsc_engine_t* engine,
@@ -39,27 +39,29 @@ unsigned char* klyron_jsc_array_buffer_get_data(klyron_jsc_engine_t* engine,
     if (!JSValueIsObject(engine->ctx, value->value)) return nullptr;
 
     JSObjectRef obj = (JSObjectRef)value->value;
-    JSTypedArrayType type = JSValueGetTypedArrayType(engine->ctx, obj, nullptr);
-    if (type == kJSTypedArrayTypeNone) {
-        /* Try as ArrayBuffer directly */
-        size_t length = JSObjectGetArrayBufferByteLength(engine->ctx, obj, nullptr);
-        if (length == 0) return nullptr;
-        void* ptr = JSObjectGetArrayBufferBytesPtr(engine->ctx, obj, nullptr);
-        if (!ptr) return nullptr;
+    JSValueRef exc = nullptr;
+
+    /* Check if it's an ArrayBuffer directly */
+    if (JSValueGetTypedArrayType(engine->ctx, obj, &exc) == kJSTypedArrayTypeArrayBuffer ||
+        JSValueGetTypedArrayType(engine->ctx, obj, &exc) == kJSTypedArrayTypeNone) {
+        size_t length = JSObjectGetArrayBufferByteLength(engine->ctx, obj, &exc);
+        if (exc || length == 0) return nullptr;
+        void* ptr = JSObjectGetArrayBufferBytesPtr(engine->ctx, obj, &exc);
+        if (exc || !ptr) return nullptr;
         *out_length = length;
         unsigned char* result = (unsigned char*)std::malloc(length);
         if (result) std::memcpy(result, ptr, length);
         return result;
     }
 
-    /* Get the ArrayBuffer from the typed array */
-    JSValueRef buf = JSObjectGetTypedArrayBuffer(engine->ctx, obj, nullptr);
-    if (!buf) return nullptr;
-    JSObjectRef buf_obj = (JSObjectRef)buf;
-    size_t length = JSObjectGetArrayBufferByteLength(engine->ctx, buf_obj, nullptr);
-    if (length == 0) return nullptr;
-    void* ptr = JSObjectGetArrayBufferBytesPtr(engine->ctx, buf_obj, nullptr);
-    if (!ptr) return nullptr;
+    /* It's a TypedArray — get its backing buffer */
+    JSObjectRef buf = JSObjectGetTypedArrayBuffer(engine->ctx, obj, &exc);
+    if (exc || !buf) return nullptr;
+
+    size_t length = JSObjectGetArrayBufferByteLength(engine->ctx, buf, &exc);
+    if (exc || length == 0) return nullptr;
+    void* ptr = JSObjectGetArrayBufferBytesPtr(engine->ctx, buf, &exc);
+    if (exc || !ptr) return nullptr;
     *out_length = length;
     unsigned char* result = (unsigned char*)std::malloc(length);
     if (result) std::memcpy(result, ptr, length);
@@ -71,18 +73,37 @@ klyron_jsc_value_t* klyron_jsc_typed_array_new(klyron_jsc_engine_t* engine,
                                                  size_t length) {
     if (!engine || !engine->ctx || !type) return nullptr;
 
-    std::string code = "new ";
-    code += type;
-    code += "(" + std::to_string(length) + ")";
+    /* Map type name to JSTypedArrayType */
+    struct TypeMap { const char* name; JSTypedArrayType type; };
+    static const TypeMap type_map[] = {
+        {"Int8Array",         kJSTypedArrayTypeInt8Array},
+        {"Int16Array",        kJSTypedArrayTypeInt16Array},
+        {"Int32Array",        kJSTypedArrayTypeInt32Array},
+        {"Uint8Array",        kJSTypedArrayTypeUint8Array},
+        {"Uint8ClampedArray", kJSTypedArrayTypeUint8ClampedArray},
+        {"Uint16Array",       kJSTypedArrayTypeUint16Array},
+        {"Uint32Array",       kJSTypedArrayTypeUint32Array},
+        {"Float32Array",      kJSTypedArrayTypeFloat32Array},
+        {"Float64Array",      kJSTypedArrayTypeFloat64Array},
+        {"BigInt64Array",     kJSTypedArrayTypeBigInt64Array},
+        {"BigUint64Array",    kJSTypedArrayTypeBigUint64Array},
+    };
 
-    JSStringRef src = jsc_string_from_cstr(code.c_str());
-    if (!src) return nullptr;
+    JSTypedArrayType arrayType = kJSTypedArrayTypeNone;
+    for (const auto& m : type_map) {
+        if (std::strcmp(type, m.name) == 0) {
+            arrayType = m.type;
+            break;
+        }
+    }
+
+    if (arrayType == kJSTypedArrayTypeNone || arrayType == kJSTypedArrayTypeArrayBuffer) {
+        jsc_set_error(engine, std::string("unknown TypedArray type: ") + type);
+        return nullptr;
+    }
 
     JSValueRef exc = nullptr;
-    JSValueRef val = JSEvaluateScript(engine->ctx, src, nullptr,
-                                       jsc_string_from_cstr("<typedarray>"), 1, &exc);
-    JSStringRelease(src);
-
+    JSObjectRef val = JSObjectMakeTypedArray(engine->ctx, arrayType, length, &exc);
     if (exc || !val) {
         jsc_capture_exception(engine, exc);
         return nullptr;
@@ -99,10 +120,10 @@ size_t klyron_jsc_typed_array_get_length(klyron_jsc_engine_t* engine,
     if (!JSValueIsObject(engine->ctx, value->value)) return 0;
 
     JSObjectRef obj = (JSObjectRef)value->value;
-    JSTypedArrayType type = JSValueGetTypedArrayType(engine->ctx, obj, nullptr);
-    if (type == kJSTypedArrayTypeNone) return 0;
-
-    return JSObjectGetTypedArrayByteLength(engine->ctx, obj, nullptr);
+    JSValueRef exc = nullptr;
+    size_t len = JSObjectGetTypedArrayLength(engine->ctx, obj, &exc);
+    if (exc) jsc_capture_exception(engine, exc);
+    return len;
 }
 
 klyron_jsc_value_t* klyron_jsc_typed_array_get_buffer(klyron_jsc_engine_t* engine,
@@ -111,11 +132,12 @@ klyron_jsc_value_t* klyron_jsc_typed_array_get_buffer(klyron_jsc_engine_t* engin
     if (!JSValueIsObject(engine->ctx, value->value)) return nullptr;
 
     JSObjectRef obj = (JSObjectRef)value->value;
-    JSTypedArrayType type = JSValueGetTypedArrayType(engine->ctx, obj, nullptr);
-    if (type == kJSTypedArrayTypeNone) return nullptr;
-
-    JSValueRef buf = JSObjectGetTypedArrayBuffer(engine->ctx, obj, nullptr);
-    if (!buf) return nullptr;
+    JSValueRef exc = nullptr;
+    JSObjectRef buf = JSObjectGetTypedArrayBuffer(engine->ctx, obj, &exc);
+    if (exc || !buf) {
+        jsc_capture_exception(engine, exc);
+        return nullptr;
+    }
 
     auto v = new klyron_jsc_value_t(engine->ctx, buf);
     v->protect();

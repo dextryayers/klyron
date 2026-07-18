@@ -32,6 +32,7 @@ struct klyron_v8_context {
     klyron_v8_context(v8::Isolate* iso, klyron_v8_isolate* p)
         : context(new v8::Global<v8::Context>()), parent(p)
     {
+        v8::HandleScope scope(iso);
         auto local = v8::Context::New(iso);
         context->Reset(iso, local);
     }
@@ -39,6 +40,7 @@ struct klyron_v8_context {
     klyron_v8_context(v8::Isolate* iso, klyron_v8_isolate* p, v8::Local<v8::Context> local)
         : context(new v8::Global<v8::Context>()), parent(p)
     {
+        v8::HandleScope scope(iso);
         context->Reset(iso, local);
     }
 

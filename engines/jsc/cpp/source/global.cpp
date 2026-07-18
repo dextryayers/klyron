@@ -1,5 +1,6 @@
 #include "klyron_jsc.h"
 #include "cpp/impl/internal.h"
+#include <vector>
 
 /* ─── Global object access ────────────────────────────────────── */
 

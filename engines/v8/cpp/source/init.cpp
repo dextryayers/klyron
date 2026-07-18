@@ -19,11 +19,12 @@ static void init_config(const klyron_v8_config_t* config) {
 }
 
 static void init_platform(void) {
-    v8::V8::InitializeICUDefaultLocation(
-        g_config.icu_data_path ? g_config.icu_data_path : "");
-    v8::V8::InitializeExternalStartupData(
-        g_config.snapshot_blob_path ? g_config.snapshot_blob_path : "");
-
+    if (g_config.icu_data_path) {
+        v8::V8::InitializeICUDefaultLocation(g_config.icu_data_path);
+    }
+    if (g_config.expose_gc) {
+        v8::V8::SetFlagsFromString("--expose_gc");
+    }
     g_platform = v8::platform::NewDefaultPlatform(
         g_config.single_threaded ? 0 : 1,
         v8::platform::IdleTaskSupport::kDisabled,

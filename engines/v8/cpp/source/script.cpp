@@ -27,7 +27,7 @@ klyron_v8_script_t* klyron_v8_compile(klyron_v8_context_t* ctx,
         : v8::String::NewFromUtf8(iso, "<eval>", v8::NewStringType::kNormal)
               .ToLocalChecked();
 
-    v8::ScriptOrigin origin(iso, origin_str);
+    v8::ScriptOrigin origin(origin_str);
     auto compiled = v8::Script::Compile(context, source_str, &origin);
 
     if (compiled.IsEmpty()) {

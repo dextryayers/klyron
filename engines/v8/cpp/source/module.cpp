@@ -25,7 +25,7 @@ klyron_v8_module_t* klyron_v8_module_compile(klyron_v8_context_t* ctx,
         : v8::String::NewFromUtf8(iso, "<module>", v8::NewStringType::kNormal)
               .ToLocalChecked();
 
-    v8::ScriptOrigin script_origin(iso, name);
+    v8::ScriptOrigin script_origin(name);
     v8::ScriptCompiler::Source script_source(src, script_origin);
 
     auto module = v8::ScriptCompiler::CompileModule(iso, &script_source);

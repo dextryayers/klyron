@@ -14,9 +14,11 @@ klyron_v8_isolate_t* klyron_v8_isolate_new(void) {
     }
 
     auto alloc = get_global_array_buffer_allocator();
-    if (alloc) {
-        params.array_buffer_allocator = alloc;
+    if (!alloc) {
+        /* V8 13.6 requires a non-null array_buffer_allocator */
+        alloc = v8::ArrayBuffer::Allocator::NewDefaultAllocator();
     }
+    params.array_buffer_allocator = alloc;
 
     auto isolate = v8::Isolate::New(params);
     if (!isolate) return nullptr;

@@ -41,7 +41,7 @@ fn main() {
             .include(&v8_include)
             .include("include")
             .include(".")
-            .flag("-std=c++17")
+            .flag("-std=c++20")
             .flag_if_supported("-Wno-deprecated-declarations")
             .flag_if_supported("-Wno-unused-parameter")
             .flag_if_supported("-Wno-unknown-pragmas");
