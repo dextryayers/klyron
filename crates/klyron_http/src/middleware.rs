@@ -22,7 +22,7 @@ impl RateLimiter {
 pub async fn rate_limit_layer(
     state: Arc<RateLimiter>,
     req: Request<axum::body::Body>,
-    next: Next<axum::body::Body>,
+    next: Next,
 ) -> Result<Response, axum::response::Response> {
     let _permit = state
         .semaphore

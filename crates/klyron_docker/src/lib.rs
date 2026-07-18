@@ -12,7 +12,7 @@ use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
 use tokio::net::UnixStream;
 
-pub use compose::ComposeConfig;
+pub use compose::{ComposeConfig, DockerManager};
 pub use container::*;
 pub use image::*;
 

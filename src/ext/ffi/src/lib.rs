@@ -19,6 +19,7 @@ fn with_libs<F: FnOnce(&mut LibMap)>(f: F) {
 
 #[cfg(target_os = "linux")]
 #[link(name = "dl")]
+#[allow(dead_code)]
 unsafe extern "C" {
     fn dlopen(filename: *const std::ffi::c_char, flag: std::ffi::c_int) -> *mut std::ffi::c_void;
     fn dlsym(handle: *mut std::ffi::c_void, symbol: *const std::ffi::c_char) -> *mut std::ffi::c_void;
@@ -27,6 +28,7 @@ unsafe extern "C" {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
 unsafe extern "C" {
     fn dlopen(filename: *const std::ffi::c_char, flag: std::ffi::c_int) -> *mut std::ffi::c_void;
     fn dlsym(handle: *mut std::ffi::c_void, symbol: *const std::ffi::c_char) -> *mut std::ffi::c_void;

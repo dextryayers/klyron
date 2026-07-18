@@ -1,7 +1,5 @@
-use std::collections::HashMap;
 use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};

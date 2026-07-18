@@ -73,8 +73,8 @@ pub fn validate_schema(config: &KlyronConfig) -> ConfigValidation {
             if port == 0 {
                 result.errors.push("server.port must not be 0".into());
             }
-            if port > 65535 {
-                result.errors.push("server.port must be <= 65535".into());
+            if port == 0 {
+                result.errors.push("server.port must be >= 1".into());
             }
         }
         if let Some(ref host) = server.host {

@@ -22,14 +22,16 @@ impl HttpClient {
             builder = builder.pool_max_idle_per_host(pool_size);
         }
         if let Some(headers) = config.default_headers {
+            let mut header_map = reqwest::header::HeaderMap::new();
             for (k, v) in headers {
                 if let (Ok(name), Ok(val)) = (
                     reqwest::header::HeaderName::from_bytes(k.as_bytes()),
                     reqwest::header::HeaderValue::from_str(&v),
                 ) {
-                    builder = builder.default_header(name, val);
+                    header_map.insert(name, val);
                 }
             }
+            builder = builder.default_headers(header_map);
         }
         if config.http2_only {
             builder = builder.http2_prior_knowledge();

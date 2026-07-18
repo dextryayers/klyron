@@ -1,6 +1,8 @@
 pub mod pipe;
 pub mod spawn;
 
+pub use spawn::ChildProcess;
+
 use std::process::Output;
 
 #[derive(Debug, Clone)]

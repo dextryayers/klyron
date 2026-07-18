@@ -128,7 +128,7 @@ pub fn find_conflicts(
     let mut seen: HashMap<String, (String, String)> = HashMap::new();
     for (name, versions) in packages {
         if let Some(latest) = versions.first() {
-            if let Some((prev_pkg, prev_ver)) = seen.get(name) {
+            if let Some((_prev_pkg, prev_ver)) = seen.get(name) {
                 if prev_ver != latest {
                     conflicts.push((
                         name.clone(),

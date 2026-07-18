@@ -8,6 +8,7 @@ use quick_xml::Writer;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::{TestBackend, TestCategory, TestResult, TestSuiteResult};
+use crate::coverage;
 
 #[derive(Debug, Clone)]
 pub struct TestRunnerConfig {
@@ -439,6 +440,11 @@ impl TestRunner {
                 .last()
                 .and_then(|s| s.parse().ok())
         })
+    }
+
+    pub fn run_coverage(dir: &Path) -> Result<crate::CoverageReport> {
+        let backend = Self::detect(dir);
+        coverage::run_coverage(dir, backend)
     }
 
     pub fn run_watch(dir: &Path) -> Result<()> {

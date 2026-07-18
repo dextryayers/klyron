@@ -141,7 +141,7 @@ impl Migrator {
             let content = std::fs::read_to_string(entry.path())
                 .map_err(|e| MySqlError::Migration(format!("read {fname_str}: {e}")))?;
             let mut up = content;
-            let down = None;
+            let down: Option<String> = None;
             if let Some(idx) = up.find("-- DOWN") {
                 let rest = up.split_off(idx);
                 up = up.trim().to_string();

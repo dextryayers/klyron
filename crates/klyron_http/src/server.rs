@@ -8,7 +8,6 @@ use axum::Router;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
-use crate::pool::PoolManager;
 use crate::types::*;
 
 #[derive(Clone)]
@@ -314,6 +313,7 @@ impl PoolManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn test_server_new() {

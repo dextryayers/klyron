@@ -177,7 +177,7 @@ fn op_crypto_decrypt(#[string] algorithm: String, #[serde] data: Vec<u8>, #[stri
   op_crypto_decrypt_impl(algorithm, data, key_hex, iv_hex)
 }
 
-fn pkcs7_unpad(data: &[u8]) -> Result<&[u8], aes::cipher::block_padding::UnpadError> {
+pub fn pkcs7_unpad(data: &[u8]) -> Result<&[u8], aes::cipher::block_padding::UnpadError> {
   if data.is_empty() { return Err(aes::cipher::block_padding::UnpadError); }
   let pad_len = data[data.len() - 1] as usize;
   if pad_len == 0 || pad_len > data.len() { return Err(aes::cipher::block_padding::UnpadError); }

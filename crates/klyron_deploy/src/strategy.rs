@@ -111,7 +111,7 @@ impl StrategyEngine {
         let mut phases = Vec::new();
         info!("Starting blue-green deployment");
 
-        let green_phase = DeployPhase {
+        let _green_phase = DeployPhase {
             name: "green-deploy".into(),
             instance_count: 1,
             duration: Duration::default(),
@@ -362,7 +362,7 @@ impl StrategyEngine {
 
     fn deploy_to_platform(
         config: &DeployConfig,
-        service: &ServiceConfig,
+        _service: &ServiceConfig,
         dir: &Path,
         _label: &str,
     ) -> Result<()> {

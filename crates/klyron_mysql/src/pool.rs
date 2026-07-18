@@ -1,4 +1,5 @@
 use sqlx::mysql::{MySqlPool, MySqlPoolOptions};
+use sqlx::{Column, Row as SqlxRow};
 
 use crate::error::Result;
 use crate::row::{mysql_row_to_row, Row};
@@ -69,7 +70,7 @@ impl MySqlDb {
         }).collect())
     }
 
-    pub async fn execute_with_params(&self, sql: &str, params: &[&(dyn sqlx::Encode<'_, sqlx::MySql> + sqlx::Type<sqlx::MySql>)]) -> Result<u64> {
+    pub async fn execute_with_params(&self, sql: &str, params: &[&str]) -> Result<u64> {
         let mut q = sqlx::query(sql);
         for p in params {
             q = q.bind(p);

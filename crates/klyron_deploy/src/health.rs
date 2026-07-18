@@ -122,7 +122,7 @@ impl HealthChecker {
     }
 
     pub fn check_endpoint(url: &str, timeout_secs: u64) -> Result<HealthCheckResult> {
-        let checker = Self {
+        let _checker = Self {
             endpoint: "/".into(),
             timeout_secs,
             expected_status: 200,

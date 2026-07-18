@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
@@ -18,6 +17,7 @@ pub enum ConfigEvent {
 
 pub struct ConfigWatcher {
     config_path: Option<PathBuf>,
+    #[allow(dead_code)]
     watcher_tx: Option<Sender<ConfigEvent>>,
     handle: Option<std::thread::JoinHandle<()>>,
 }

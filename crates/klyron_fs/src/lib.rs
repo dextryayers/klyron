@@ -377,6 +377,7 @@ fn perm_string(_perm: &std::fs::Permissions) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::r#virtual::VirtualFileSystem;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
 

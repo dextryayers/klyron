@@ -23,16 +23,18 @@ impl Http2Client {
         }
     }
 
-    pub fn with_header(mut self, key: &str, value: &str) -> Self {
+    pub fn with_header(self, key: &str, value: &str) -> Self {
         let inner = self.inner.clone();
+        let key = key.to_string();
+        let value = value.to_string();
         tokio::spawn(async move {
             let mut inner = inner.lock().await;
-            inner.headers.insert(key.to_string(), value.to_string());
+            inner.headers.insert(key, value);
         });
         self
     }
 
-    pub fn with_timeout(mut self, secs: u64) -> Self {
+    pub fn with_timeout(self, secs: u64) -> Self {
         let inner = self.inner.clone();
         tokio::spawn(async move {
             let mut inner = inner.lock().await;

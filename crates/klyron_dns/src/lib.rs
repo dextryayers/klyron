@@ -39,6 +39,7 @@ pub fn reverse_lookup(addr: IpAddr) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cache::DnsCache;
 
     #[test]
     fn test_resolve_localhost() {

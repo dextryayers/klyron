@@ -70,7 +70,8 @@ pub fn run_test(args: TestArgs) -> anyhow::Result<()> {
     }
     if args.coverage {
         println!("Running tests with coverage...");
-        return TestRunner::run_coverage(dir);
+        let _ = TestRunner::run_coverage(dir)?;
+        return Ok(());
     }
 
     let config = TestRunnerConfig {
