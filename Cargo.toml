@@ -167,4 +167,4 @@ urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
 wasmtime = "28"
-wasmtime-wasi = "28"
+wasmtime-wasi = "46"
