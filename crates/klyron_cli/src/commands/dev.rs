@@ -77,20 +77,30 @@ pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
         "node" => {
             let has_vite = dir.join("vite.config.ts").exists() || dir.join("vite.config.js").exists() || dir.join("vite.config.mjs").exists();
             let has_next = dir.join("next.config.ts").exists() || dir.join("next.config.mjs").exists() || dir.join("next.config.js").exists();
+            let local_bin = |name: &str| -> String {
+                let path = dir.join("node_modules").join(".bin").join(name);
+                if path.exists() { path.to_string_lossy().to_string() } else { name.to_string() }
+            };
             if has_next {
+                let next_bin = local_bin("next");
                 if hmr_enabled {
-                    watch_dev("npx", &["next", "dev", "-p", &port.to_string()], &dir)
+                    watch_dev(&next_bin, &["dev", "-p", &port.to_string()], &dir)
                 } else {
-                    crate::run_cmd("npx", &["next", "dev", "-p", &port.to_string()], &dir)
+                    crate::run_cmd(&next_bin, &["dev", "-p", &port.to_string()], &dir)
                 }
             } else if has_vite {
                 let port_str = port.to_string();
-                let mut args_vite = vec!["vite", "--port", &port_str, "--host", &host];
-                if hmr_enabled { args_vite.push("--hmr"); }
+                let host_str = host.clone();
+                let vite_bin = local_bin("vite");
+                let args_vite: Vec<&str> = {
+                    let mut v = vec!["--port", &port_str, "--host", &host_str];
+                    if hmr_enabled { v.push("--hmr"); }
+                    v
+                };
                 if hmr_enabled {
-                    watch_dev("npx", &args_vite, &dir)
+                    watch_dev(&vite_bin, &args_vite, &dir)
                 } else {
-                    crate::run_cmd("npx", &args_vite, &dir)
+                    crate::run_cmd(&vite_bin, &args_vite, &dir)
                 }
             } else if dir.join("package.json").exists() {
                 // Fallback: try npm run dev if package.json has a dev script
@@ -413,34 +423,56 @@ fn watch_dev(program: &str, args: &[&str], dir: &Path) -> anyhow::Result<()> {
         }
     });
 
-    loop {
-        let mut child = StdCommand::new(program)
+    let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        r.store(false, std::sync::atomic::Ordering::SeqCst);
+    }).ok();
+
+    while running.load(std::sync::atomic::Ordering::SeqCst) {
+        let mut child = match StdCommand::new(program)
             .args(args)
             .current_dir(&dir)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
             .spawn()
-            .map_err(|e| anyhow::anyhow!("Failed to start dev server: {e}"))?;
+        {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to start dev server: {e}");
+                break;
+            }
+        };
 
         loop {
+            if !running.load(std::sync::atomic::Ordering::SeqCst) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(());
+            }
             match child.try_wait() {
                 Ok(Some(status)) => {
                     if !status.success() {
-                        anyhow::bail!("Dev server exited with code {}", status);
+                        eprintln!("Dev server exited with code {}", status);
                     }
                     break;
                 }
                 Ok(None) => {
                     if rx.try_recv().is_ok() {
-                        crate::log_info(format!("\n{} File change detected. Restarting...", crate::Color::YELLOW.paint("\u{1F504}")));
+                        crate::log_info(format!("\n{} File change detected. Restarting...",
+                            crate::Color::YELLOW.paint("\u{1F504}")));
                         let _ = child.kill();
                         let _ = child.wait();
                         break;
                     }
                     std::thread::sleep(Duration::from_millis(100));
                 }
-                Err(e) => anyhow::bail!("Failed to wait for dev server: {e}"),
+                Err(e) => {
+                    eprintln!("Failed to wait: {e}");
+                    break;
+                }
             }
         }
     }
+    Ok(())
 }

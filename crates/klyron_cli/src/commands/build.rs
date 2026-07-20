@@ -3,8 +3,8 @@ use clap::Args;
 
 #[derive(Args)]
 pub struct BuildArgs {
-    #[arg(long, value_parser = ["web", "wasm", "napi", "binary"], required = true)]
-    pub target: String,
+    #[arg(long, value_parser = ["web", "wasm", "napi", "binary"])]
+    pub target: Option<String>,
     #[arg(long, default_value = "dist")]
     pub out_dir: PathBuf,
     #[arg(long)]
@@ -17,21 +17,73 @@ pub struct BuildArgs {
     pub entry: PathBuf,
 }
 
+fn auto_detect_target(dir: &Path) -> Option<&'static str> {
+    if dir.join("Cargo.toml").exists() { return Some("binary"); }
+    if dir.join("go.mod").exists() { return Some("binary"); }
+    if dir.join("build.zig").exists() { return Some("binary"); }
+    None
+}
+
+fn run_npm_build(dir: &Path) -> anyhow::Result<()> {
+    let runner = crate::detect_package_runner(dir);
+    let status = std::process::Command::new(runner)
+        .args(["run", "build"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .map_err(|e| anyhow::anyhow!("Failed to run {} run build: {e}", runner))?;
+    if !status.success() {
+        anyhow::bail!("{} run build exited with code {}", runner, status.code().unwrap_or(-1));
+    }
+    Ok(())
+}
+
 pub fn run_build(args: BuildArgs) -> anyhow::Result<()> {
+    let dir = std::env::current_dir()?;
+
+    // If no target specified, try auto-detect or fallback to npm run build
+    let target_str = match &args.target {
+        Some(t) => t.clone(),
+        None => {
+            match auto_detect_target(&dir) {
+                Some(t) => {
+                    crate::log_info(format!("Auto-detected target: {}", t));
+                    t.to_string()
+                }
+                None => {
+                    // Check if package.json has a build script
+                    let pkg_path = dir.join("package.json");
+                    if pkg_path.exists() {
+                        if let Ok(content) = std::fs::read_to_string(&pkg_path) {
+                            if content.contains("\"build\"") || content.contains("'build'") {
+                                crate::anim::cmd_header("build", "Delegating to package manager");
+                                let mut bar = crate::anim::GradientBar::new(60, "Running build script...");
+                                let r = run_npm_build(&dir);
+                                bar.finish_with("Build complete");
+                                return r;
+                            }
+                        }
+                    }
+                    anyhow::bail!("No --target specified and unable to auto-detect. Use: --target web|wasm|napi|binary")
+                }
+            }
+        }
+    };
+
     let out_dir = &args.out_dir;
     std::fs::create_dir_all(out_dir)?;
 
-    let target_str = args.target.as_str();
     crate::anim::cmd_header("build", &format!("Building for target: {}", target_str));
 
     let mut bar = crate::anim::GradientBar::new(100, &format!("Building {}...", target_str));
 
-    let result = match target_str {
+    let result = match target_str.as_str() {
         "web" => build_web(&args),
         "wasm" => build_wasm(&args),
         "napi" => build_napi(&args),
         "binary" => build_binary(&args),
-        _ => anyhow::bail!("Unknown target: {}", args.target),
+        _ => anyhow::bail!("Unknown target: {}", target_str),
     };
 
     if result.is_ok() {

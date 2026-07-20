@@ -67,9 +67,9 @@ pub enum DistTagAction {
 }
 
 fn detect_package_manager(dir: &Path) -> &str {
-    if dir.join("pnpm-lock.yaml").exists() { "pnpm" }
+    if dir.join("bun.lock").exists() || dir.join("bun.lockb").exists() { "bun" }
+    else if dir.join("pnpm-lock.yaml").exists() { "pnpm" }
     else if dir.join("yarn.lock").exists() { "yarn" }
-    else if dir.join("bun.lock").exists() || dir.join("bun.lockb").exists() { "bun" }
     else { "npm" }
 }
 
@@ -331,16 +331,27 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
 
         let lock_path = dir.join("klyron.lock");
         if !lock_path.exists() {
-            let lock = serde_json::json!({
-                "name": dir.file_name().and_then(|n| n.to_str()).unwrap_or("my-app"),
-                "framework": framework,
-                "frameworkVersion": version,
-                "installTime": chrono_now_iso(),
-                "packageManager": crate::detect_package_runner(&dir),
-                "nodeModulesCount": count_node_modules(&dir),
-            });
-            if let Ok(content) = serde_json::to_string_pretty(&lock) {
-                let _ = std::fs::write(&lock_path, content);
+            let mut klyron_lock = klyron_pm::KlyronLockfile::new();
+            klyron_lock.packages.insert(
+                "root".to_string(),
+                klyron_pm::lockfile::LockfilePackage {
+                    name: String::new(),
+                    version: version_display.to_string(),
+                    resolved: String::new(),
+                    integrity: String::new(),
+                    integrity_hashes: Vec::new(),
+                    signature: None,
+                    signer: None,
+                    dependencies: std::collections::HashMap::new(),
+                    optional_dependencies: std::collections::HashMap::new(),
+                    peer_dependencies: std::collections::HashMap::new(),
+                    bin: None,
+                    has_node_modules: false,
+                    install_time_ms: 0,
+                },
+            );
+            if let Ok(bytes) = klyron_lock.to_bytes() {
+                let _ = std::fs::write(&lock_path, &bytes);
                 crate::log_info(format!(
                     "{} {}",
                     crate::Color::GREEN.paint("\u{2713}"),
@@ -361,7 +372,7 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
                 success_banner("Install complete");
                 return Ok(());
             }
-    let pm = detect_package_manager(&dir);
+    let pm = crate::detect_package_runner(&dir);
             let mut args = vec!["install"];
             if frozen {
                 match pm {
@@ -427,7 +438,13 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
             success_banner("Install complete");
             r
         }
-        "rust" => Ok(()),
+        "rust" => {
+            let mut bar = crate::anim::GradientBar::new(60, "Building Rust project...");
+            let r = crate::run_cmd("cargo", &["build"], &dir);
+            bar.finish_with("Rust project built");
+            success_banner("Install complete");
+            r
+        }
         "go" => {
             let mut bar = crate::anim::GradientBar::new(15, "Downloading Go modules...");
             let r = crate::run_cmd("go", &["mod", "download"], &dir);
@@ -824,55 +841,6 @@ pub fn run_why(package_name: &str) -> anyhow::Result<()> {
 }
 
 // ── Framework detection helpers ──────────────────────────────────────────
-
-fn chrono_now_iso() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = duration.as_secs();
-    let millis = duration.subsec_millis();
-    let secs_per_day = 86400;
-    let days = secs / secs_per_day;
-    let time_secs = secs % secs_per_day;
-    let hours = time_secs / 3600;
-    let minutes = (time_secs % 3600) / 60;
-    let seconds = time_secs % 60;
-
-    let mut year = 1970i64;
-    let mut remaining_days = days as i64;
-    loop {
-        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
-        if remaining_days < days_in_year {
-            break;
-        }
-        remaining_days -= days_in_year;
-        year += 1;
-    }
-    let month_days = if is_leap_year(year) {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-    let mut month = 1;
-    for &md in &month_days {
-        if remaining_days < md {
-            break;
-        }
-        remaining_days -= md;
-        month += 1;
-    }
-    let day = remaining_days + 1;
-
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-        year, month, day, hours, minutes, seconds, millis
-    )
-}
-
-fn is_leap_year(year: i64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
 
 fn count_node_modules(dir: &std::path::Path) -> usize {
     let nm = dir.join("node_modules");
