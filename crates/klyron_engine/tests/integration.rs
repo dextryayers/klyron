@@ -1,0 +1,20 @@
+use klyron_engine::JsEngineKind;
+
+#[test]
+fn test_engine_kind_all() {
+    let kinds = JsEngineKind::all();
+    assert!(!kinds.is_empty(), "At least one engine should be available");
+    assert!(kinds.contains(&JsEngineKind::Boa), "Boa should always be available");
+}
+
+#[test]
+fn test_engine_kind_display() {
+    assert_eq!(JsEngineKind::Boa.to_string(), "boa");
+    assert_eq!(JsEngineKind::QuickJS.to_string(), "quickjs");
+}
+
+#[test]
+fn test_engine_detect_best() {
+    let best = klyron_engine::detect_best_engine();
+    assert!(best == JsEngineKind::Boa || best == JsEngineKind::QuickJS);
+}

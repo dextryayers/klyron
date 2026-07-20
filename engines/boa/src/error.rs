@@ -22,6 +22,7 @@ pub enum BoaError {
     CacheError(String),
     JsError(String),
     StackTrace(String),
+    SanitizeError(String),
 }
 
 impl BoaError {
@@ -57,6 +58,7 @@ impl BoaError {
             Self::ModuleNotFound(msg) => CommonErrorKind::ModuleNotFound(msg.clone()),
             Self::EngineBusy => CommonErrorKind::ExecutionFailed("engine is busy".into()),
             Self::EnginePoolExhausted => CommonErrorKind::ExecutionFailed("engine pool exhausted".into()),
+            Self::SanitizeError(msg) => CommonErrorKind::ExecutionFailed(format!("sanitize error: {}", msg)),
             Self::SnapshotError(msg) => CommonErrorKind::ExecutionFailed(format!("snapshot error: {}", msg)),
             Self::CacheError(msg) => CommonErrorKind::ExecutionFailed(format!("cache error: {}", msg)),
             Self::StackTrace(msg) => CommonErrorKind::ExecutionFailed(msg.clone()),
@@ -82,6 +84,7 @@ impl fmt::Display for BoaError {
             Self::EngineBusy => write!(f, "Engine is busy"),
             Self::EnginePoolExhausted => write!(f, "Engine pool exhausted"),
             Self::SnapshotError(msg) => write!(f, "Snapshot error: {msg}"),
+            Self::SanitizeError(msg) => write!(f, "Sanitize error: {msg}"),
             Self::CacheError(msg) => write!(f, "Cache error: {msg}"),
             Self::JsError(msg) => write!(f, "{msg}"),
             Self::StackTrace(msg) => write!(f, "{msg}"),

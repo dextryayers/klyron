@@ -86,18 +86,31 @@ impl EnginePool {
     }
 
     pub fn acquire(&self) -> Result<EnginePoolEntry, String> {
-        let pool = self.pool.lock();
-        for entry in pool.values() {
-            let mut in_use = entry.in_use.lock();
-            if !*in_use {
-                *in_use = true;
-                entry.stats.lock().acquires += 1;
-                return Ok(entry.clone());
+        {
+            let pool = self.pool.lock();
+            for entry in pool.values() {
+                let mut in_use = entry.in_use.lock();
+                if !*in_use {
+                    *in_use = true;
+                    entry.stats.lock().acquires += 1;
+                    return Ok(entry.clone());
+                }
             }
         }
-        drop(pool);
 
         let mut size = self.current_size.lock();
+        {
+            let pool = self.pool.lock();
+            for entry in pool.values() {
+                let mut in_use = entry.in_use.lock();
+                if !*in_use {
+                    *in_use = true;
+                    entry.stats.lock().acquires += 1;
+                    return Ok(entry.clone());
+                }
+            }
+        }
+
         if *size < self.max_size {
             let entry = EnginePoolEntry::new(self.kind)?;
             *entry.in_use.lock() = true;
@@ -118,14 +131,17 @@ impl EnginePool {
         let mut results = Vec::new();
         let mut size = self.current_size.lock();
         let to_add = count.min(self.max_size.saturating_sub(*size));
-        for _ in 0..to_add {
-            match EnginePoolEntry::new(self.kind) {
-                Ok(entry) => {
-                    self.pool.lock().insert(entry.id.clone(), entry.clone());
-                    *size += 1;
-                    results.push(Ok(entry));
+        if to_add > 0 {
+            let mut pool = self.pool.lock();
+            for _ in 0..to_add {
+                match EnginePoolEntry::new(self.kind) {
+                    Ok(entry) => {
+                        pool.insert(entry.id.clone(), entry.clone());
+                        *size += 1;
+                        results.push(Ok(entry));
+                    }
+                    Err(e) => results.push(Err(e)),
                 }
-                Err(e) => results.push(Err(e)),
             }
         }
         results
@@ -141,10 +157,11 @@ impl EnginePool {
     }
 
     pub fn auto_scale(&self) {
-        let pool = self.pool.lock();
-        let total = pool.len();
-        let in_use_count = pool.values().filter(|e| *e.in_use.lock()).count();
-        drop(pool);
+        let mut size = self.current_size.lock();
+        let (total, in_use_count) = {
+            let pool = self.pool.lock();
+            (pool.len(), pool.values().filter(|e| *e.in_use.lock()).count())
+        };
 
         let usage_ratio = if total > 0 {
             in_use_count as f64 / total as f64
@@ -152,7 +169,6 @@ impl EnginePool {
             0.0
         };
 
-        let mut size = self.current_size.lock();
         if usage_ratio > self.scale_up_threshold && *size < self.max_size {
             let to_add = ((*size as f64) * 0.25).ceil() as usize;
             let to_add = to_add.min(self.max_size.saturating_sub(*size));

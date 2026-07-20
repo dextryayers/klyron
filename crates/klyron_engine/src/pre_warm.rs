@@ -17,6 +17,7 @@ const COMMON_POLYFILLS: &[(&str, &str)] = &[
 
 pub struct EnginePreWarmer {
     ready: Arc<AtomicBool>,
+    stopped: Arc<AtomicBool>,
     pool: Arc<Mutex<Option<EnginePool>>>,
     engine_kind: JsEngineKind,
 }
@@ -25,20 +26,35 @@ impl EnginePreWarmer {
     pub fn new(engine_kind: JsEngineKind) -> Self {
         Self {
             ready: Arc::new(AtomicBool::new(false)),
+            stopped: Arc::new(AtomicBool::new(false)),
             pool: Arc::new(Mutex::new(None)),
             engine_kind,
         }
     }
 
+    pub fn stop(&self) {
+        self.stopped.store(true, Ordering::Relaxed);
+    }
+
     pub fn start_background(&self, pool_size: usize) {
         let ready = self.ready.clone();
+        let stopped = self.stopped.clone();
         let pool_arc = self.pool.clone();
         let kind = self.engine_kind;
 
         thread::spawn(move || {
+            if stopped.load(Ordering::Relaxed) {
+                return;
+            }
             let pool = EnginePool::new(kind, pool_size, pool_size.saturating_mul(2));
             pool.warmup(pool_size);
+            if stopped.load(Ordering::Relaxed) {
+                return;
+            }
             pool.pre_compile_scripts(COMMON_POLYFILLS);
+            if stopped.load(Ordering::Relaxed) {
+                return;
+            }
             *pool_arc.lock() = Some(pool);
             ready.store(true, Ordering::SeqCst);
         });
@@ -70,6 +86,12 @@ impl EnginePreWarmer {
             thread::sleep(std::time::Duration::from_millis(10));
         }
         true
+    }
+}
+
+impl Drop for EnginePreWarmer {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 

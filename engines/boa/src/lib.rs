@@ -42,6 +42,7 @@ use boa_engine::{Context, JsValue, NativeFunction, js_string};
 pub struct EngineConfig {
     pub max_execution_time: Option<Duration>,
     pub max_stack_depth: Option<usize>,
+    pub max_memory_bytes: Option<u64>,
     pub enable_console: bool,
     pub enable_timers: bool,
 }
@@ -51,6 +52,7 @@ impl Default for EngineConfig {
         Self {
             max_execution_time: Some(Duration::from_secs(5)),
             max_stack_depth: Some(512),
+            max_memory_bytes: None,
             enable_console: true,
             enable_timers: false,
         }
@@ -61,39 +63,69 @@ pub struct BoaEngine {
     runtime: BoaRuntime,
     config: EngineConfig,
     start_time: Option<Instant>,
+    #[allow(dead_code)]
+    memory_usage: u64,
 }
 
 impl BoaEngine {
     pub fn new() -> Self {
         let config = EngineConfig::default();
         let runtime = BoaRuntime::new_with_limits(config.max_stack_depth, None, None);
-        Self { runtime, config, start_time: None }
+        Self { runtime, config, start_time: None, memory_usage: 0 }
     }
 
     pub fn new_with_config(config: EngineConfig) -> Self {
         let runtime = BoaRuntime::new_with_limits(config.max_stack_depth, None, None);
-        Self { runtime, config, start_time: None }
+        Self { runtime, config, start_time: None, memory_usage: 0 }
+    }
+
+    fn check_timeout(&self) -> Result<(), BoaError> {
+        if let Some(max_time) = self.config.max_execution_time {
+            if let Some(start) = self.start_time {
+                if start.elapsed() > max_time {
+                    return Err(BoaError::Timeout);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn check_memory(&mut self) -> Result<(), BoaError> {
+        // boa_engine 0.19 does not expose runtime memory stats via public API.
+        // Memory enforcement relies on the runtime limits system (stack, recursion,
+        // loop iteration limits) configured during context creation.
+        // The `memory_usage` field is reserved for future use when boa exposes
+        // heap metrics (e.g. via context.runtime().metrics().allocated_bytes()).
+        Ok(())
     }
 
     pub fn eval(&mut self, code: &str) -> Result<String, BoaError> {
         self.start_time = Some(Instant::now());
-        let result = self.runtime.eval(code)?;
+        let sanitized = klyron_engine_common::sanitize::sanitize_js_input(code)
+            .map_err(|e| BoaError::SanitizeError(e.to_string()))?;
+        let result = self.runtime.eval(&sanitized);
+        self.check_timeout()?;
+        self.check_memory()?;
         self.start_time = None;
-        Ok(result)
+        result
     }
 
     pub fn execute_script(&mut self, filename: &str, source: &str) -> Result<String, BoaError> {
         self.start_time = Some(Instant::now());
-        let result = self.runtime.execute_script(filename, source)?;
+        let result = self.runtime.execute_script(filename, source);
+        self.check_timeout()?;
+        self.check_memory()?;
         self.start_time = None;
-        Ok(result)
+        result
     }
 
     pub fn execute_module(&mut self, filename: &str, source: &str) -> Result<String, BoaError> {
         self.start_time = Some(Instant::now());
-        let result = self.runtime.execute_module(filename, source)?;
+        let result = self.runtime.execute_module(filename, source);
+        self.check_timeout()?;
+        self.check_memory()?;
         self.start_time = None;
-        Ok(result)
+        result
     }
 
     pub fn compile(&mut self, _source: &str) -> Result<usize, BoaError> {
@@ -218,7 +250,7 @@ mod tests {
     #[test] fn test_eval_for_of() { assert_eq!(eng().eval("(function(){let s=0;for(const v of[1,2,3,4]){s+=v}return s;})()").unwrap(), "10"); }
     #[test] fn test_eval_for_in() { assert_eq!(eng().eval("(function(){const o={a:1,b:2};let k='';for(const p in o){k+=p}return k;})()").unwrap(), "ab"); }
     #[test] fn test_eval_version() { let v = BoaEngine::version(); assert!(!v.is_empty()); }
-    #[test] fn test_eval_configured() { let c = EngineConfig { max_execution_time: Some(Duration::from_secs(10)), max_stack_depth: Some(1024), enable_console: true, enable_timers: true }; let mut e = BoaEngine::new_with_config(c); assert_eq!(e.eval("1+1").unwrap(), "2"); }
+    #[test] fn test_eval_configured() { let c = EngineConfig { max_execution_time: Some(Duration::from_secs(10)), max_stack_depth: Some(1024), max_memory_bytes: None, enable_console: true, enable_timers: true }; let mut e = BoaEngine::new_with_config(c); assert_eq!(e.eval("1+1").unwrap(), "2"); }
     #[test] fn test_eval_stack_trace() { let mut e = eng(); let _ = e.eval("function a(){b()}function b(){c()}function c(){throw new Error('trace')}"); let s = e.stack_trace(); assert!(!s.is_empty()); }
     #[test] fn test_eval_global_get_set() { let mut e = eng(); let _ = e.eval("var globalVar=99"); assert!(e.get_global("globalVar").is_ok()); }
     #[test] fn test_eval_empty() { assert!(eng().eval("").is_ok()); }

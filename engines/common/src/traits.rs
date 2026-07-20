@@ -1,5 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+/// Re-exported for convenient use in engine implementations.
+pub type JsValue = serde_json::Value;
+pub type JsError = String;
+
+pub trait JsEngine {
+    fn eval(&self, code: &str) -> Result<JsValue, JsError>;
+    fn execute_script(&self, filename: &str, source: &str) -> Result<JsValue, JsError>;
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineCapabilities {
     pub supports_modules: bool,
@@ -93,6 +102,8 @@ pub struct EngineConfig {
     pub cache_enabled: bool,
     pub cache_ttl_secs: u64,
     pub cache_max_size_mb: u64,
+    pub max_memory_bytes: Option<u64>,
+    pub max_execution_time_ms: Option<u64>,
 }
 
 impl Default for EngineConfig {
@@ -108,6 +119,8 @@ impl Default for EngineConfig {
             cache_enabled: true,
             cache_ttl_secs: 3600,
             cache_max_size_mb: 512,
+            max_memory_bytes: None,
+            max_execution_time_ms: None,
         }
     }
 }

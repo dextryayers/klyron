@@ -36,7 +36,42 @@ impl std::fmt::Display for JsEngineKind {
 }
 
 pub type JsValue = serde_json::Value;
-pub type JsError = String;
+
+#[derive(thiserror::Error, Debug)]
+pub enum EngineError {
+    #[error("Engine {0} not available (feature not enabled)")]
+    NotAvailable(String),
+    #[error("Engine initialization failed: {0}")]
+    InitFailed(String),
+    #[error("Evaluation failed: {0}")]
+    EvalFailed(String),
+    #[error("Script execution failed: {0}")]
+    ScriptFailed(String),
+    #[error("Lock error: {0}")]
+    LockError(String),
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("No JavaScript engine available")]
+    NoEngineAvailable,
+    #[error("Engine pool exhausted")]
+    PoolExhausted,
+    #[error("Module not found: {0}")]
+    ModuleNotFound(String),
+    #[error("Engine is busy")]
+    EngineBusy,
+    #[error("Timeout")]
+    Timeout,
+}
+
+impl From<String> for EngineError {
+    fn from(s: String) -> Self {
+        EngineError::EvalFailed(s)
+    }
+}
+
+pub type JsError = EngineError;
 
 pub trait JsEngine {
     fn eval(&self, code: &str) -> Result<JsValue, JsError>;

@@ -1,5 +1,10 @@
-[build]
-jobs = 4
+# Klyron workspace Cargo configuration
+[alias]
+test-all = "test --workspace --no-fail-fast"
+check-all = "check --workspace"
+build-all = "build --workspace"
+fix-all = "fix --workspace"
 
-[env]
-CARGO_PROFILE_RELEASE_LTO = "fat"
+[profile.release]
+lto = "thin"
+codegen-units = 1
