@@ -77,7 +77,7 @@ impl LazyCompiler {
     pub fn eval_if_compiled(&self, _path: &str, code: &str) -> Result<String, String> {
         let engine = self.engine.lock().map_err(|e| e.to_string())?;
         match *engine {
-            Some(ref eng) => eng.eval(code),
+            Some(ref eng) => eng.eval(code).map_err(|e| e.to_string()),
             None => Err("No engine available".to_string()),
         }
     }

@@ -45,7 +45,7 @@ pub mod polyglot;
 
 pub use process::{EngineProcess, EngineInput, EngineOutput, FileEntry, find_engine_path};
 pub use traits::EngineTrait;
-pub use engine::{JsEngineKind, EngineRuntime, JsEngine, JsValue, JsError, BenchResult, benchmark_all_engines, detect_best_engine};
+pub use engine::{JsEngineKind, EngineRuntime, JsEngine, JsValue, JsError, EngineError, BenchResult, benchmark_all_engines, detect_best_engine};
 pub use warmup_cache::WarmupCache;
 pub use memory_limits::MemoryLimits;
 pub use sandbox::{SandboxPool, SandboxContext};
@@ -105,7 +105,7 @@ pub fn get_hot_paths(threshold: u64) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub fn profile_engine(kind: JsEngineKind, iterations: u64) -> Result<EngineProfile, String> {
+pub fn profile_engine(kind: JsEngineKind, iterations: u64) -> Result<EngineProfile, EngineError> {
     let engine = EngineRuntime::new(kind)?;
     let test_code = "1 + 2 + 3";
     let complex_code = r#"
@@ -268,8 +268,8 @@ impl BytecodeCacheV2 {
     pub fn get_or_compile(
         &self,
         key: &str,
-        compiler: impl FnOnce() -> Result<Vec<u8>, String>,
-    ) -> Result<Vec<u8>, String> {
+        compiler: impl FnOnce() -> Result<Vec<u8>, EngineError>,
+    ) -> Result<Vec<u8>, EngineError> {
         if let Some(entry) = self.inner.get(key) {
             self.profiler.record_cache_hit();
             return Ok(entry.value);
@@ -317,9 +317,9 @@ impl NanoProcessIsolator {
         }
     }
 
-    pub fn execute(&self, code: &str) -> Result<EngineOutput, String> {
+    pub fn execute(&self, code: &str) -> Result<EngineOutput, EngineError> {
         let mut process = EngineProcess::spawn(&self.engine_path, &["--eval"])
-            .map_err(|e| format!("Failed to spawn process: {}", e))?;
+            .map_err(|e| EngineError::InitFailed(format!("Failed to spawn process: {}", e)))?;
 
         let input = EngineInput {
             action: "eval".to_string(),
@@ -331,7 +331,7 @@ impl NanoProcessIsolator {
         };
 
         process.communicate_with_timeout(&input, self.timeout)
-            .map_err(|e| format!("Process execution failed: {}", e))
+            .map_err(|e| EngineError::EvalFailed(format!("Process execution failed: {}", e)))
     }
 
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
@@ -347,7 +347,7 @@ pub struct StreamingCompiler {
 }
 
 impl StreamingCompiler {
-    pub fn new(kind: JsEngineKind) -> Result<Self, String> {
+    pub fn new(kind: JsEngineKind) -> Result<Self, EngineError> {
         Ok(Self {
             chunks: Mutex::new(Vec::new()),
             compiled: Mutex::new(false),
@@ -361,7 +361,7 @@ impl StreamingCompiler {
         *self.compiled.lock().unwrap() = false;
     }
 
-    pub fn compile(&self) -> Result<String, String> {
+    pub fn compile(&self) -> Result<String, EngineError> {
         let chunks = self.chunks.lock().unwrap();
         let full_code = chunks.join("\n");
         let engine = self.engine.lock().unwrap();
@@ -370,7 +370,7 @@ impl StreamingCompiler {
             *self.compiled.lock().unwrap() = true;
             Ok(result)
         } else {
-            Err("Engine not available".to_string())
+            Err(EngineError::NoEngineAvailable)
         }
     }
 
@@ -401,21 +401,21 @@ impl MmapFileCache {
         }
     }
 
-    pub fn load_file(&self, path: &str) -> Result<Vec<u8>, String> {
+    pub fn load_file(&self, path: &str) -> Result<Vec<u8>, EngineError> {
         {
-            let cache = self.cache.lock().map_err(|e| e.to_string())?;
+            let cache = self.cache.lock().map_err(|e| EngineError::LockError(e.to_string()))?;
             if let Some(data) = cache.get(path) {
                 return Ok(data.clone());
             }
         }
 
-        let data = std::fs::read(path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
+        let data = std::fs::read(path).map_err(|e| EngineError::IoError(e))?;
 
         if data.len() >= self.mmap_threshold {
             tracing::debug!("mmap-cached {} ({} bytes)", path, data.len());
         }
 
-        let mut cache = self.cache.lock().map_err(|e| e.to_string())?;
+        let mut cache = self.cache.lock().map_err(|e| EngineError::LockError(e.to_string()))?;
         cache.insert(path.to_string(), data.clone());
         Ok(data)
     }

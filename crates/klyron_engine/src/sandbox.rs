@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use uuid::Uuid;
 
-use crate::engine::{JsEngineKind, EngineRuntime};
+use crate::engine::{JsEngineKind, EngineRuntime, EngineError};
 use crate::memory_limits::MemoryLimits;
 
 #[derive(Debug, Clone)]
@@ -70,7 +70,7 @@ impl SandboxPool {
         Ok(ctx)
     }
 
-    pub fn create_engine(&self, kind: JsEngineKind) -> Result<(SandboxContext, EngineRuntime), String> {
+    pub fn create_engine(&self, kind: JsEngineKind) -> Result<(SandboxContext, EngineRuntime), EngineError> {
         let ctx = self.create_context(kind)?;
         let engine = EngineRuntime::new(kind)?;
         Ok((ctx, engine))

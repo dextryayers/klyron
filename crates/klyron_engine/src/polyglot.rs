@@ -62,20 +62,29 @@ pub struct EngineMetadata {
 }
 
 /// Polyglot engine error
-#[derive(Debug, Clone)]
-pub struct EngineError(pub String);
-
-impl std::fmt::Display for EngineError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum EngineError {
+    #[error("{0}")]
+    EvalFailed(String),
+    #[error("WASM engine error: {0}")]
+    WasmError(String),
+    #[error("Subprocess error: {0}")]
+    SubprocessError(String),
+    #[error("Protocol error: {0}")]
+    ProtocolError(String),
+    #[error("Health check failed: {0}")]
+    HealthCheckFailed(String),
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
+    #[error("Module not found: {0}")]
+    ModuleNotFound(String),
+    #[error("Invalid response: {0}")]
+    InvalidResponse(String),
 }
-
-impl std::error::Error for EngineError {}
 
 impl From<String> for EngineError {
     fn from(s: String) -> Self {
-        Self(s)
+        Self::EvalFailed(s)
     }
 }
 
@@ -98,18 +107,18 @@ pub struct WasmEngine {
 }
 
 impl WasmEngine {
-    pub fn new(wasm_bytes: &[u8], language: &'static str) -> Result<Self, String> {
+    pub fn new(wasm_bytes: &[u8], language: &'static str) -> Result<Self, EngineError> {
         let engine = wasmtime::Engine::default();
         let module = wasmtime::Module::new(&engine, wasm_bytes)
-            .map_err(|e| format!("Failed to compile WASM module: {e}"))?;
+            .map_err(|e| EngineError::WasmError(format!("Failed to compile WASM module: {e}")))?;
         let store = wasmtime::Store::new(&engine, ());
         let linker = wasmtime::Linker::new(&engine);
         Ok(Self { module, store, linker, language_name: language })
     }
 
-    pub fn from_file(path: &Path, language: &'static str) -> Result<Self, String> {
+    pub fn from_file(path: &Path, language: &'static str) -> Result<Self, EngineError> {
         let wasm_bytes = std::fs::read(path)
-            .map_err(|e| format!("Failed to read WASM file: {e}"))?;
+            .map_err(|e| EngineError::WasmError(format!("Failed to read WASM file: {e}")))?;
         Self::new(&wasm_bytes, language)
     }
 }
@@ -121,7 +130,7 @@ impl PolyglotEngine for WasmEngine {
     }
 
     async fn eval(&self, _code: &str) -> Result<String, EngineError> {
-        Err(EngineError("WASM eval not yet implemented".to_string()))
+        Err(EngineError::NotImplemented("WASM eval not yet implemented".to_string()))
     }
 
     async fn health_check(&self) -> Result<(), EngineError> {
@@ -160,13 +169,13 @@ impl JsonProtocol {
         }).to_string()
     }
 
-    pub fn decode_response(&self, data: &str) -> Result<String, String> {
+    pub fn decode_response(&self, data: &str) -> Result<String, EngineError> {
         let parsed: serde_json::Value = serde_json::from_str(data)
-            .map_err(|e| format!("Invalid response JSON: {e}"))?;
+            .map_err(|e| EngineError::ProtocolError(format!("Invalid response JSON: {e}")))?;
         parsed["output"].as_str()
             .map(|s| s.to_string())
             .or_else(|| parsed["error"].as_str().map(|s| s.to_string()))
-            .ok_or_else(|| "Missing output field in response".to_string())
+            .ok_or_else(|| EngineError::InvalidResponse("Missing output field in response".to_string()))
     }
 }
 
@@ -190,23 +199,22 @@ impl SubprocessEngine {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| EngineError(format!("Failed to spawn {}: {e}", self.language_name)))?;
+            .map_err(|e| EngineError::SubprocessError(format!("Failed to spawn {}: {e}", self.language_name)))?;
 
         if let Some(ref mut stdin) = child.stdin {
             stdin.write_all(request.as_bytes())
-                .map_err(|e| EngineError(format!("Failed to write to stdin: {e}")))?;
+                .map_err(|e| EngineError::SubprocessError(format!("Failed to write to stdin: {e}")))?;
         }
 
         let output = child.wait_with_output()
-            .map_err(|e| EngineError(format!("Failed to wait for process: {e}")))?;
+            .map_err(|e| EngineError::SubprocessError(format!("Failed to wait for process: {e}")))?;
 
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             self.protocol.decode_response(&stdout)
-                .map_err(|e| EngineError(format!("Protocol error: {e}")))
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            Err(EngineError(format!("Process failed ({}): {stderr}", output.status)))
+            Err(EngineError::SubprocessError(format!("Process failed ({}): {stderr}", output.status)))
         }
     }
 }
@@ -226,7 +234,7 @@ impl PolyglotEngine for SubprocessEngine {
         Command::new(&self.binary_path)
             .arg("--version")
             .output()
-            .map_err(|e| EngineError(format!("Health check failed: {e}")))?;
+            .map_err(|e| EngineError::HealthCheckFailed(e.to_string()))?;
         Ok(())
     }
 
@@ -338,7 +346,7 @@ impl ModuleResolver {
     }
 
     /// Resolve a specifier to a module path and engine
-    pub fn resolve(&self, specifier: &str, referrer: &str) -> Result<ResolvedModule, String> {
+    pub fn resolve(&self, specifier: &str, referrer: &str) -> Result<ResolvedModule, EngineError> {
         let path = self.resolve_path(specifier, referrer)?;
         let ext = path.extension()
             .and_then(|e| e.to_str())
@@ -350,11 +358,11 @@ impl ModuleResolver {
         Ok(ResolvedModule { path, engine })
     }
 
-    fn resolve_path(&self, specifier: &str, referrer: &str) -> Result<PathBuf, String> {
+    fn resolve_path(&self, specifier: &str, referrer: &str) -> Result<PathBuf, EngineError> {
         // Check if it's a relative path
         if specifier.starts_with("./") || specifier.starts_with("../") {
             let referrer_dir = Path::new(referrer).parent()
-                .ok_or_else(|| "Invalid referrer path".to_string())?;
+                .ok_or_else(|| EngineError::ModuleNotFound("Invalid referrer path".to_string()))?;
             let candidate = referrer_dir.join(specifier);
 
             // Try with common extensions
@@ -397,7 +405,7 @@ impl ModuleResolver {
             return Ok(index_ts);
         }
 
-        Err(format!("Cannot resolve module: {specifier} from {referrer}"))
+        Err(EngineError::ModuleNotFound(format!("Cannot resolve module: {specifier} from {referrer}")))
     }
 
     /// Register a new extension-to-engine mapping

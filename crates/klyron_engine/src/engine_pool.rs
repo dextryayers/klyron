@@ -5,7 +5,7 @@ use std::time::Instant;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::engine::{EngineRuntime, JsEngineKind};
+use crate::engine::{EngineRuntime, JsEngineKind, EngineError};
 
 #[derive(Debug, Clone)]
 pub struct PoolEntryStats {
@@ -29,7 +29,7 @@ pub struct EnginePoolEntry {
 }
 
 impl EnginePoolEntry {
-    pub fn new(kind: JsEngineKind) -> Result<Self, String> {
+    pub fn new(kind: JsEngineKind) -> Result<Self, EngineError> {
         let engine = EngineRuntime::new(kind)?;
         Ok(Self {
             id: Uuid::new_v4().to_string(),
@@ -44,11 +44,11 @@ impl EnginePoolEntry {
         })
     }
 
-    pub fn eval(&self, code: &str) -> Result<String, String> {
+    pub fn eval(&self, code: &str) -> Result<String, EngineError> {
         self.engine.lock().0.eval(code)
     }
 
-    pub fn execute_script(&self, filename: &str, source: &str) -> Result<String, String> {
+    pub fn execute_script(&self, filename: &str, source: &str) -> Result<String, EngineError> {
         self.engine.lock().0.execute_script(filename, source)
     }
 }
@@ -85,7 +85,7 @@ impl EnginePool {
         }
     }
 
-    pub fn acquire(&self) -> Result<EnginePoolEntry, String> {
+    pub fn acquire(&self) -> Result<EnginePoolEntry, EngineError> {
         {
             let pool = self.pool.lock();
             for entry in pool.values() {
@@ -119,7 +119,7 @@ impl EnginePool {
             entry.stats.lock().acquires += 1;
             Ok(entry)
         } else {
-            Err("Engine pool exhausted, all engines in use".to_string())
+            Err(EngineError::PoolExhausted)
         }
     }
 
@@ -127,7 +127,7 @@ impl EnginePool {
         *entry.in_use.lock() = false;
     }
 
-    pub fn warmup(&self, count: usize) -> Vec<Result<EnginePoolEntry, String>> {
+    pub fn warmup(&self, count: usize) -> Vec<Result<EnginePoolEntry, EngineError>> {
         let mut results = Vec::new();
         let mut size = self.current_size.lock();
         let to_add = count.min(self.max_size.saturating_sub(*size));

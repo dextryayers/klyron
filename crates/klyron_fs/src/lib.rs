@@ -12,6 +12,30 @@ use std::time::SystemTime;
 use memmap2::Mmap;
 use tokio::sync::Semaphore;
 
+#[derive(thiserror::Error, Debug)]
+pub enum FsError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Path not found: {0}")]
+    NotFound(String),
+    #[error("Path already exists: {0}")]
+    AlreadyExists(String),
+    #[error("Invalid path: {0}")]
+    InvalidPath(String),
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
+    #[error("UTF-8 error: {0}")]
+    Utf8Error(#[from] std::string::FromUtf8Error),
+    #[error("{0}")]
+    Other(String),
+}
+
+impl From<String> for FsError {
+    fn from(s: String) -> Self {
+        FsError::Other(s)
+    }
+}
+
 pub use crate::glob::{Glob, GlobBuilder, GlobPattern};
 pub use crate::temp::{TempDir, TempFile};
 pub use crate::r#virtual::InMemoryFS;

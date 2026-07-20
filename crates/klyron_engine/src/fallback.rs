@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::engine::{JsEngineKind, EngineRuntime};
+use crate::engine::{JsEngineKind, EngineRuntime, EngineError};
 
 #[derive(Debug, Clone)]
 pub enum FallbackStrategy {
@@ -34,7 +34,7 @@ impl FallbackChain {
         }
     }
 
-    pub fn resolve(&mut self) -> Result<EngineRuntime, String> {
+    pub fn resolve(&mut self) -> Result<EngineRuntime, EngineError> {
         if let Some(kind) = self.last_successful {
             if self.is_available(kind) {
                 match EngineRuntime::new(kind) {
@@ -62,15 +62,15 @@ impl FallbackChain {
             }
         }
 
-        Err("No JavaScript engine available after fallback chain".to_string())
+        Err(EngineError::NoEngineAvailable)
     }
 
-    pub fn resolve_with_timeout(&mut self, timeout: std::time::Duration) -> Result<EngineRuntime, String> {
+    pub fn resolve_with_timeout(&mut self, timeout: std::time::Duration) -> Result<EngineRuntime, EngineError> {
         let start = Instant::now();
         let candidates = self.candidates();
         for kind in candidates {
             if start.elapsed() > timeout {
-                return Err("Fallback chain timed out".to_string());
+                return Err(EngineError::Timeout);
             }
             if self.blacklist.contains(&kind) {
                 continue;
@@ -87,10 +87,10 @@ impl FallbackChain {
                 }
             }
         }
-        Err("No JavaScript engine available".to_string())
+        Err(EngineError::NoEngineAvailable)
     }
 
-    pub fn benchmark_and_select(&mut self) -> Result<JsEngineKind, String> {
+    pub fn benchmark_and_select(&mut self) -> Result<JsEngineKind, EngineError> {
         use crate::engine::benchmark_all_engines;
 
         let results = benchmark_all_engines();
@@ -105,7 +105,7 @@ impl FallbackChain {
                 self.last_successful = Some(kind);
                 Ok(kind)
             }
-            None => Err("No engine available for benchmarking".to_string()),
+            None => Err(EngineError::NoEngineAvailable),
         }
     }
 

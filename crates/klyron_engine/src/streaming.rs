@@ -55,7 +55,7 @@ impl StreamProcessor {
             Err(e) => Ok(ChunkResult {
                 success: false,
                 output: None,
-                error: Some(e),
+                error: Some(e.to_string()),
                 is_final: true,
             }),
         }

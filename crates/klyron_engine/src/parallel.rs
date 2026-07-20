@@ -48,7 +48,7 @@ pub fn execute_parallel(scripts: &[ScriptJob]) -> Vec<ScriptResult> {
                         id: job.id.clone(),
                         success: false,
                         output: None,
-                        error: Some(e),
+                        error: Some(e.to_string()),
                         duration_ms,
                     },
                 }

@@ -91,7 +91,7 @@ pub struct EngineRuntime {
 }
 
 impl EngineRuntime {
-    pub fn new(kind: JsEngineKind) -> Result<Self, String> {
+    pub fn new(kind: JsEngineKind) -> Result<Self, EngineError> {
         if kind == JsEngineKind::V8 {
             #[cfg(feature = "v8")]
             { return Ok(Self { kind, inner: Box::new(V8Adapter::new()?) }); }
@@ -108,10 +108,10 @@ impl EngineRuntime {
             #[cfg(feature = "jsc")]
             { return Ok(Self { kind, inner: Box::new(JSCAdapter::new()?) }); }
         }
-        Err(format!("Engine {} not available (feature not enabled)", kind))
+        Err(EngineError::NotAvailable(kind.to_string()))
     }
 
-    pub fn with_fallback() -> Result<Self, String> {
+    pub fn with_fallback() -> Result<Self, EngineError> {
         for kind in JsEngineKind::all() {
             match Self::new(kind) {
                 Ok(engine) => {
@@ -124,23 +124,23 @@ impl EngineRuntime {
                 }
             }
         }
-        Err("No JavaScript engine available".to_string())
+        Err(EngineError::NoEngineAvailable)
     }
 
     pub fn kind(&self) -> JsEngineKind {
         self.kind
     }
 
-    pub fn eval(&self, code: &str) -> Result<String, String> {
+    pub fn eval(&self, code: &str) -> Result<String, EngineError> {
         let result = self.inner.eval(code)?;
         Ok(serde_json::to_string(&result).unwrap_or_else(|_| result.to_string()))
     }
 
-    pub fn eval_json(&self, code: &str) -> Result<JsValue, String> {
+    pub fn eval_json(&self, code: &str) -> Result<JsValue, EngineError> {
         self.inner.eval(code)
     }
 
-    pub fn execute_script(&self, filename: &str, source: &str) -> Result<String, String> {
+    pub fn execute_script(&self, filename: &str, source: &str) -> Result<String, EngineError> {
         let result = self.inner.execute_script(filename, source)?;
         Ok(serde_json::to_string(&result).unwrap_or_else(|_| result.to_string()))
     }
@@ -158,7 +158,7 @@ pub fn benchmark_all_engines() -> HashMap<JsEngineKind, BenchResult> {
                 let elapsed = start.elapsed();
                 let (success, error) = match result {
                     Ok(_) => (true, None),
-                    Err(e) => (false, Some(e)),
+                    Err(e) => (false, Some(e.to_string())),
                 };
                 results.insert(kind, BenchResult { eval_time: elapsed, success, error });
             }
@@ -166,7 +166,7 @@ pub fn benchmark_all_engines() -> HashMap<JsEngineKind, BenchResult> {
                 results.insert(kind, BenchResult {
                     eval_time: std::time::Duration::default(),
                     success: false,
-                    error: Some(e),
+                    error: Some(e.to_string()),
                 });
             }
         }
@@ -202,8 +202,8 @@ impl<E> Adapter<E> {
 
 #[allow(dead_code)]
 trait JsEngineInternal {
-    fn eval_inner(&mut self, code: &str) -> Result<String, String>;
-    fn execute_script_inner(&mut self, filename: &str, source: &str) -> Result<String, String>;
+    fn eval_inner(&mut self, code: &str) -> Result<String, EngineError>;
+    fn execute_script_inner(&mut self, filename: &str, source: &str) -> Result<String, EngineError>;
 }
 
 impl<E> JsEngine for Adapter<E>
@@ -211,13 +211,13 @@ where
     E: JsEngineInternal + 'static,
 {
     fn eval(&self, code: &str) -> Result<JsValue, JsError> {
-        let mut engine = self.engine.lock().map_err(|e| e.to_string())?;
+        let mut engine = self.engine.lock().map_err(|e| EngineError::LockError(e.to_string()))?;
         let result = engine.eval_inner(code)?;
         Ok(serde_json::Value::String(result))
     }
 
     fn execute_script(&self, filename: &str, source: &str) -> Result<JsValue, JsError> {
-        let mut engine = self.engine.lock().map_err(|e| e.to_string())?;
+        let mut engine = self.engine.lock().map_err(|e| EngineError::LockError(e.to_string()))?;
         let result = engine.execute_script_inner(filename, source)?;
         Ok(serde_json::Value::String(result))
     }
@@ -228,12 +228,13 @@ struct V8EngineWrapper(std::sync::Mutex<klyron_core::Runtime>);
 
 #[cfg(feature = "v8")]
 impl JsEngineInternal for V8EngineWrapper {
-    fn eval_inner(&mut self, code: &str) -> Result<String, String> {
-        self.0.lock().map_err(|e| e.to_string())?.eval(code).map_err(|e| e.to_string())
+    fn eval_inner(&mut self, code: &str) -> Result<String, EngineError> {
+        self.0.lock().map_err(|e| EngineError::LockError(e.to_string()))?
+            .eval(code).map_err(|e| EngineError::EvalFailed(e.to_string()))
     }
-    fn execute_script_inner(&mut self, filename: &str, source: &str) -> Result<String, String> {
-        self.0.lock().map_err(|e| e.to_string())?
-            .execute_script(filename, source).map_err(|e| e.to_string())
+    fn execute_script_inner(&mut self, filename: &str, source: &str) -> Result<String, EngineError> {
+        self.0.lock().map_err(|e| EngineError::LockError(e.to_string()))?
+            .execute_script(filename, source).map_err(|e| EngineError::ScriptFailed(e.to_string()))
     }
 }
 
@@ -242,8 +243,10 @@ type V8Adapter = Adapter<V8EngineWrapper>;
 
 #[cfg(feature = "v8")]
 impl V8Adapter {
-    fn new() -> Result<Self, String> {
-        let runtime = klyron_core::Runtime::builder().build().map_err(|e| e.to_string())?;
+    fn new() -> Result<Self, EngineError> {
+        let runtime = klyron_core::Runtime::builder()
+            .build()
+            .map_err(|e| EngineError::InitFailed(e.to_string()))?;
         Ok(Adapter::wrap(V8EngineWrapper(std::sync::Mutex::new(runtime))))
     }
 }
@@ -253,11 +256,11 @@ struct BoaEngineWrapper(klyron_engine_boa::BoaEngine);
 
 #[cfg(feature = "boa")]
 impl JsEngineInternal for BoaEngineWrapper {
-    fn eval_inner(&mut self, code: &str) -> Result<String, String> {
-        self.0.eval(code).map_err(|e| e.to_string())
+    fn eval_inner(&mut self, code: &str) -> Result<String, EngineError> {
+        self.0.eval(code).map_err(|e| EngineError::EvalFailed(e.to_string()))
     }
-    fn execute_script_inner(&mut self, filename: &str, source: &str) -> Result<String, String> {
-        self.0.execute_script(filename, source).map_err(|e| e.to_string())
+    fn execute_script_inner(&mut self, filename: &str, source: &str) -> Result<String, EngineError> {
+        self.0.execute_script(filename, source).map_err(|e| EngineError::ScriptFailed(e.to_string()))
     }
 }
 
@@ -266,7 +269,7 @@ type BoaAdapter = Adapter<BoaEngineWrapper>;
 
 #[cfg(feature = "boa")]
 impl BoaAdapter {
-    fn new() -> Result<Self, String> {
+    fn new() -> Result<Self, EngineError> {
         Ok(Adapter::wrap(BoaEngineWrapper(klyron_engine_boa::BoaEngine::new())))
     }
 }
@@ -276,11 +279,11 @@ struct QuickJSEngineWrapper(klyron_engine_quickjs::QuickJSEngine);
 
 #[cfg(feature = "quickjs")]
 impl JsEngineInternal for QuickJSEngineWrapper {
-    fn eval_inner(&mut self, code: &str) -> Result<String, String> {
-        self.0.eval(code).map_err(|e| e.to_string())
+    fn eval_inner(&mut self, code: &str) -> Result<String, EngineError> {
+        self.0.eval(code).map_err(|e| EngineError::EvalFailed(e.to_string()))
     }
-    fn execute_script_inner(&mut self, filename: &str, source: &str) -> Result<String, String> {
-        self.0.execute_script(filename, source).map_err(|e| e.to_string())
+    fn execute_script_inner(&mut self, filename: &str, source: &str) -> Result<String, EngineError> {
+        self.0.execute_script(filename, source).map_err(|e| EngineError::ScriptFailed(e.to_string()))
     }
 }
 
@@ -289,8 +292,11 @@ type QuickJSAdapter = Adapter<QuickJSEngineWrapper>;
 
 #[cfg(feature = "quickjs")]
 impl QuickJSAdapter {
-    fn new() -> Result<Self, String> {
-        klyron_engine_quickjs::QuickJSEngine::new().map(QuickJSEngineWrapper).map(Adapter::wrap).map_err(|e| e.to_string())
+    fn new() -> Result<Self, EngineError> {
+        klyron_engine_quickjs::QuickJSEngine::new()
+            .map(QuickJSEngineWrapper)
+            .map(Adapter::wrap)
+            .map_err(|e| EngineError::InitFailed(e.to_string()))
     }
 }
 
@@ -299,11 +305,11 @@ struct JSCEngineWrapper(klyron_engine_jsc::JSCEngine);
 
 #[cfg(feature = "jsc")]
 impl JsEngineInternal for JSCEngineWrapper {
-    fn eval_inner(&mut self, code: &str) -> Result<String, String> {
-        self.0.eval(code).map_err(|e| e.to_string())
+    fn eval_inner(&mut self, code: &str) -> Result<String, EngineError> {
+        self.0.eval(code).map_err(|e| EngineError::EvalFailed(e.to_string()))
     }
-    fn execute_script_inner(&mut self, filename: &str, source: &str) -> Result<String, String> {
-        self.0.execute_script(filename, source).map_err(|e| e.to_string())
+    fn execute_script_inner(&mut self, filename: &str, source: &str) -> Result<String, EngineError> {
+        self.0.execute_script(filename, source).map_err(|e| EngineError::ScriptFailed(e.to_string()))
     }
 }
 
@@ -312,8 +318,11 @@ type JSCAdapter = Adapter<JSCEngineWrapper>;
 
 #[cfg(feature = "jsc")]
 impl JSCAdapter {
-    fn new() -> Result<Self, String> {
-        klyron_engine_jsc::JSCEngine::new().map(JSCEngineWrapper).map(Adapter::wrap).map_err(|e| e.to_string())
+    fn new() -> Result<Self, EngineError> {
+        klyron_engine_jsc::JSCEngine::new()
+            .map(JSCEngineWrapper)
+            .map(Adapter::wrap)
+            .map_err(|e| EngineError::InitFailed(e.to_string()))
     }
 }
 

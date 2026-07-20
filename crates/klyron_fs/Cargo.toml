@@ -16,3 +16,4 @@ walkdir.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 memmap2 = "0.9"
+thiserror = "2"
