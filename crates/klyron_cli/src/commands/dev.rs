@@ -82,9 +82,9 @@ pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
             let has_vite = !has_astro && (dir.join("vite.config.ts").exists() || dir.join("vite.config.js").exists() || dir.join("vite.config.mjs").exists());
             let has_next = dir.join("next.config.ts").exists() || dir.join("next.config.mjs").exists() || dir.join("next.config.js").exists();
             let pm = crate::detect_package_runner(&dir);
-            let local_bin = |name: &str| -> String {
+            let local_bin = |name: &str| -> Option<String> {
                 let path = dir.join("node_modules").join(".bin").join(name);
-                if path.exists() { path.to_string_lossy().to_string() } else { name.to_string() }
+                if path.exists() { Some(path.to_string_lossy().to_string()) } else { None }
             };
             let run_dev = |bin: &str, args: &[&str]| {
                 if hmr_enabled {
@@ -93,19 +93,28 @@ pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
                     crate::run_cmd(bin, args, &dir)
                 }
             };
+            let fallback_to_pm_run_dev = || {
+                crate::log_info(format!("Running {} run dev ...", pm));
+                crate::run_cmd(pm, &["run", "dev"], &dir)
+            };
+            let run_with_local_bin_or_fallback = |name: &str, args: &[&str]| {
+                match local_bin(name) {
+                    Some(bin) => run_dev(&bin, args),
+                    None => fallback_to_pm_run_dev(),
+                }
+            };
             if has_next {
-                run_dev(&local_bin("next"), &["dev", "-p", &port.to_string()])
+                run_with_local_bin_or_fallback("next", &["dev", "-p", &port.to_string()])
             } else if has_astro {
-                run_dev(&local_bin("astro"), &["dev", "--port", &port.to_string(), "--host", &host])
+                run_with_local_bin_or_fallback("astro", &["dev", "--port", &port.to_string(), "--host", &host])
             } else if has_vite {
                 let port_str = port.to_string();
                 let args_vite: Vec<&str> = vec!["--port", &port_str, "--host", &host];
-                run_dev(&local_bin("vite"), &args_vite)
+                run_with_local_bin_or_fallback("vite", &args_vite)
             } else if dir.join("package.json").exists() {
                 let pkg = std::fs::read_to_string(dir.join("package.json")).unwrap_or_default();
                 if pkg.contains("\"dev\"") || pkg.contains("'dev'") {
-                    crate::log_info(format!("Running {} run dev ...", pm));
-                    crate::run_cmd(pm, &["run", "dev"], &dir)
+                    fallback_to_pm_run_dev()
                 } else if hmr_enabled {
                     run_klyron_hmr_server(&dir, port, host)
                 } else {

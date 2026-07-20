@@ -92,24 +92,36 @@ impl GradientBar {
                 if j < filled {
                     let t = j as f64 / self.width.max(1) as f64;
                     let (r, g, b) = gradient_color(t);
-                    let pulse = (elapsed * 2.0 + j as f64 * 0.3).sin() * 0.1 + 0.9;
+                    let pulse = ((elapsed * 3.0 + j as f64 * 0.3).sin() * 0.15 + 0.85)
+                        * (1.0 - (j as f64 / self.width.max(1) as f64) * 0.3);
                     let (r2, g2, b2) = (
                         (r as f64 * pulse) as u8,
                         (g as f64 * pulse) as u8,
                         (b as f64 * pulse) as u8,
                     );
-                    rgb(r2, g2, b2, "█")
+                    let blocks = ["█", "▓", "▒"];
+                    let block = blocks[(j + (elapsed * 4.0) as usize) % 3];
+                    rgb(r2, g2, b2, block)
                 } else {
-                    rgb(60, 60, 80, "░")
+                    let trail = if j < filled + 3 && j >= filled {
+                        let dist = j - filled;
+                        let brightness = 40 + (20 - dist as u8 * 5).max(0).min(20);
+                        rgb(brightness, brightness, brightness + 10, "░")
+                    } else {
+                        rgb(60, 60, 80, "░")
+                    };
+                    trail
                 }
             })
             .collect();
 
         let pct = format!("{:>3}%", (progress * 100.0) as u8);
         let pct_colored = rgb(140, 80, 255, &pct);
+        let elapsed_str = format!("{:.1}s", elapsed);
+        let elapsed_colored = rgb(100, 100, 120, &elapsed_str);
         let msg = rgb(180, 180, 200, &self.message);
 
-        let _ = write!(std::io::stderr(), "\r  {}  {}  {}  {:.1}s", bar, pct_colored, msg, elapsed);
+        let _ = write!(std::io::stderr(), "\r  {}  {}  {}  {}", bar, pct_colored, msg, elapsed_colored);
         let _ = std::io::stderr().flush();
     }
 }
@@ -163,7 +175,10 @@ impl PulseSpinner {
         let elapsed = self.start.elapsed().as_secs_f64();
         let phase = (elapsed * 3.0).sin() * 0.5 + 0.5;
         let (r, g, b) = gradient_color(phase);
-        let dot = rgb(r, g, b, "●");
+
+        let dots = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let dot_idx = (elapsed * 8.0) as usize % dots.len();
+        let dot = rgb(r, g, b, dots[dot_idx]);
         let msg = rgb(180, 180, 200, &self.message);
         let _ = write!(std::io::stderr(), "\r  {}  {}  {:.1}s", dot, msg, elapsed);
         let _ = std::io::stderr().flush();
@@ -254,10 +269,12 @@ pub fn success_banner(msg: &str) {
 }
 
 pub fn cmd_header(cmd: &str, desc: &str) {
-    let (r, g, b) = gradient_color(0.0);
+    let (r, g, b) = gradient_color(0.8);
     let cmd_colored = rgb(r, g, b, cmd);
     let desc_colored = rgb(180, 180, 200, desc);
-    let _ = writeln!(std::io::stderr(), "\n  {}  {}", cmd_colored, desc_colored);
+    let dashes = "─".repeat(4);
+    let sep = rgb(60, 60, 80, &dashes);
+    let _ = writeln!(std::io::stderr(), "\n  {} {} {} {}", cmd_colored, sep, desc_colored, sep);
 }
 
 #[cfg(test)]

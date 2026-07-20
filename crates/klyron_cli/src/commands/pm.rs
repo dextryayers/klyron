@@ -2,6 +2,10 @@ use clap::Args;
 use std::path::{Path, PathBuf};
 use crate::anim::{GradientBar, PulseSpinner, cmd_header, success_banner};
 
+fn spinner_dot() -> String {
+    crate::Color::CYAN.paint("\u{25CB}")
+}
+
 #[derive(Args)]
 pub struct AddArgs {
     pub packages: Vec<String>,
@@ -253,7 +257,6 @@ fn ensure_gitignore_has_klyron_lock(dir: &std::path::Path) -> anyhow::Result<()>
 pub fn run_install(frozen: bool) -> anyhow::Result<()> {
     cmd_header("install", "Installing project dependencies");
     let mut spinner = PulseSpinner::new("Analyzing project...");
-    spinner.tick();
 
     let dir = std::env::current_dir()?;
     let project = crate::detect_project_type(&dir);
@@ -263,12 +266,10 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
     if project == "node" {
         let (framework, version) = crate::detect_framework_from_pkg(&dir);
         let version_display = version.as_deref().unwrap_or("");
-        crate::log_info(format!(
-            "{} {} {}",
-            crate::Color::MAGENTA.paint("\u{2699}"),
-            crate::Color::BOLD.paint("Detected framework:"),
-            crate::Color::CYAN.paint(format!("{} {}", framework, version_display))
-        ));
+        let fw_label = if version_display.is_empty() { framework.clone() } else { format!("{} {}", framework, version_display) };
+        let fw_colored = crate::Color::CYAN.paint(&fw_label);
+        let gear = crate::Color::MAGENTA.paint("\u{2699}");
+        crate::log_info(format!("  {} {}  {}", spinner_dot(), crate::Color::BOLD.paint("Framework:"), fw_colored));
 
         let config_path = dir.join("klyron.json");
         if !config_path.exists() {
@@ -322,79 +323,19 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
             });
             let content = serde_json::to_string_pretty(&config)?;
             std::fs::write(&config_path, content)?;
-            crate::log_info(format!(
-                "{} {}",
-                crate::Color::GREEN.paint("\u{2713}"),
-                format!("Generated {} ({framework} config)", config_path.display())
-            ));
+            let check = crate::Color::GREEN.paint("\u{2713}");
+            crate::log_info(format!("  {}  {}  ({framework} config)", check, config_path.display()));
         }
 
-        let lock_path = dir.join("klyron.lock");
-        if !lock_path.exists() {
-            let mut klyron_lock = klyron_pm::KlyronLockfile::new();
-            klyron_lock.packages.insert(
-                "root".to_string(),
-                klyron_pm::lockfile::LockfilePackage {
-                    name: String::new(),
-                    version: version_display.to_string(),
-                    resolved: String::new(),
-                    integrity: String::new(),
-                    integrity_hashes: Vec::new(),
-                    signature: None,
-                    signer: None,
-                    dependencies: std::collections::HashMap::new(),
-                    optional_dependencies: std::collections::HashMap::new(),
-                    peer_dependencies: std::collections::HashMap::new(),
-                    bin: None,
-                    has_node_modules: false,
-                    install_time_ms: 0,
-                },
-            );
-            if let Ok(bytes) = klyron_lock.to_bytes() {
-                let _ = std::fs::write(&lock_path, &bytes);
-                crate::log_info(format!(
-                    "{} {}",
-                    crate::Color::GREEN.paint("\u{2713}"),
-                    format!("Generated {}", lock_path.display())
-                ));
-            }
-        }
     }
 
     match project {
         "node" => {
-            let lockfile_path = dir.join("klyron.lock");
-            let use_lockfile = if lockfile_path.exists() {
-                let data = std::fs::read(&lockfile_path).unwrap_or_default();
-                if data.len() >= 4 && &data[..4] == b"KLYR" {
-                    true
-                } else {
-                    let _ = std::fs::remove_file(&lockfile_path);
-                    false
-                }
-            } else {
-                false
-            };
-            if use_lockfile {
-                spinner.done("Project analyzed");
-                let mut bar = GradientBar::new(100, "Installing dependencies...");
-                match klyron_pm::install_with_lockfile(&dir, frozen) {
-                    Ok(()) => {
-                        bar.finish_with("Dependencies installed");
-                        success_banner("Install complete");
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        crate::log_info(format!(
-                            "{} {}",
-                            crate::Color::YELLOW.paint("\u{26A0}"),
-                            format!("klyron resolver failed ({}), falling back to native PM...", e)
-                        ));
-                        let _ = std::fs::remove_file(&lockfile_path);
-                    }
-                }
-            }
+            spinner.done("Project analyzed");
     let pm = crate::detect_package_runner(&dir);
+            crate::log_info(format!("  {} {} {}", crate::Color::BLUE.paint("\u{25B6}"), crate::Color::BOLD.paint("Package manager:"), crate::Color::CYAN.paint(pm)));
+            let mut bar = GradientBar::new(100, &format!("Running {} install...", pm));
+
             let mut args = vec!["install"];
             if frozen {
                 match pm {
@@ -405,8 +346,12 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
                 };
             }
             if let Err(e) = crate::run_cmd(pm, &args, &dir) {
+                bar.finish_with("Install failed");
                 anyhow::bail!("{} install failed: {e}", pm);
             }
+            bar.finish_with("Dependencies installed");
+            success_banner("Install complete");
+
             let _ = generate_klyron_lock_after_install(&dir);
 
             // Auto-link workspace members
