@@ -215,10 +215,8 @@ pub fn show_splash() {
     // ── Template ──────────────────────────────────────────────────────────
     section("Template");
     cmd("template list", "List all available templates from adapters directory");
-    cmd("template list --category backend", "Filter templates by category (backend|frontend|laravel)");
-    cmd("template show <name>", "Show detailed info about a template");
-    cmd("template create <name> <project>", "Create a new project from a template");
-    cmd("template create <name> <project> --version <ver>", "Create with a specific version");
+    cmd("template show <template>", "Show detailed info about a template");
+    cmd("template create <template> <project>", "Create project with interactive version picker (↑↓)");
     println!();
 
     // ── Database ─────────────────────────────────────────────────────────
@@ -382,7 +380,7 @@ pub fn show_splash() {
     cmd("lint", "Lint the codebase");
     cmd("format", "Format the codebase");
     cmd("template list", "List available project templates");
-    cmd("template create <name> <project>", "Create a project from a template");
+    cmd("template create <template> <project>", "Create project with version picker");
     cmd("deploy vercel", "Deploy to Vercel");
     println!();
 

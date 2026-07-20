@@ -1,10 +1,25 @@
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::Path;
+
+use dialoguer::{Select, theme::ColorfulTheme, console::Term};
 
 use crate::anim::{StepAnim, success_banner};
 use crate::color::Color;
 
 // ── Adapter directory scanner ─────────────────────────────────────────────
+
+// ── Public API ─────────────────────────────────────────────────────────────
+
+pub fn template_exists(name: &str) -> bool {
+  scan_adapters().iter().any(|t| t.name == name)
+}
+
+pub fn find_template(name: &str) -> Option<TemplateInfo> {
+  scan_adapters().into_iter().find(|t| t.name == name)
+}
+
+// ── Internal types ─────────────────────────────────────────────────────────
 
 #[derive(Debug)]
 pub struct TemplateInfo {
@@ -17,22 +32,60 @@ pub struct TemplateInfo {
 }
 
 fn adapters_dir() -> std::path::PathBuf {
+  // 1. Explicit env var
+  if let Ok(dir) = std::env::var("KLYRON_ADAPTERS_DIR") {
+    let p = std::path::PathBuf::from(&dir);
+    if has_adapters(&p) { return p; }
+  }
+
+  // 2. Compile-time path (works when running from klyron source tree)
+  let src_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+    .parent().and_then(|p| p.parent())
+    .map(|p| p.join("adapters"));
+  if let Some(p) = src_root {
+    if has_adapters(&p) { return p; }
+  }
+
+  // 3. Walk up from CWD looking for adapters/
   let cwd = std::env::current_dir().unwrap_or_default();
-  let candidates = [
-    cwd.join("adapters"),
-    cwd.join("../../adapters"),
-    std::env::current_exe()
-      .ok()
-      .and_then(|p| p.parent().map(|d| d.join("../adapters")))
-      .unwrap_or_default(),
-  ];
-  for candidate in &candidates {
-    if candidate.join("backend").exists() || candidate.join("frontend").exists() {
-      return candidate.clone();
+  let mut current = Some(cwd.as_path());
+  while let Some(dir) = current {
+    let candidate = dir.join("adapters");
+    if has_adapters(&candidate) {
+      return candidate;
+    }
+    current = dir.parent();
+  }
+
+  // 4. Relative to the binary, walking up (handles global installs)
+  if let Ok(exe) = std::env::current_exe() {
+    let mut current = exe.parent();
+    while let Some(dir) = current {
+      let candidate = dir.join("adapters");
+      if has_adapters(&candidate) {
+        return candidate;
+      }
+      let share = dir.join("share").join("klyron").join("adapters");
+      if has_adapters(&share) {
+        return share;
+      }
+      current = dir.parent();
     }
   }
-  let env_dir = std::env::var("KLYRON_ADAPTERS_DIR").ok();
-  env_dir.map(std::path::PathBuf::from).unwrap_or(cwd.join("adapters"))
+
+  // 5. User home data directory
+  if let Some(home) = dirs::data_dir() {
+    let candidate = home.join("klyron").join("adapters");
+    if has_adapters(&candidate) {
+      return candidate;
+    }
+  }
+
+  cwd.join("adapters") // fallback — will fail with a clear error downstream
+}
+
+fn has_adapters(dir: &std::path::Path) -> bool {
+  dir.join("backend").exists() || dir.join("frontend").exists() || dir.join("laravel").exists()
 }
 
 fn scan_adapters() -> Vec<TemplateInfo> {
@@ -117,24 +170,125 @@ fn nat_sort(a: &str, b: &str) -> std::cmp::Ordering {
   a.len().cmp(&b.len())
 }
 
-fn read_description(dir: &Path) -> String {
-  let readme = dir.join("README.md");
-  if readme.exists() {
-    if let Ok(content) = std::fs::read_to_string(&readme) {
-      for line in content.lines() {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('#') {
-          return trimmed.to_string();
+fn clean_text(s: &str) -> String {
+  let s = s.trim();
+  // Strip HTML tags
+  let s = strip_html(s);
+  // Replace markdown links [text](url) → text
+  let s = replace_md_links(&s);
+
+  // Strip remaining markdown formatting
+  let s = s.replace("```", "").replace('`', "");
+  let s = s.replace("**", "").replace("__", "");
+  let s = s.replace('*', "").replace('_', "");
+  // Collapse whitespace
+  let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+  s.trim().to_string()
+}
+
+fn strip_html(s: &str) -> String {
+  let mut out = String::with_capacity(s.len());
+  let mut in_tag = false;
+  for ch in s.chars() {
+    match ch {
+      '<' => in_tag = true,
+      '>' => in_tag = false,
+      _ if !in_tag => out.push(ch),
+      _ => {}
+    }
+  }
+  out
+}
+
+fn replace_md_links(s: &str) -> String {
+  // Replace [text](url) with just text — handles nested parens
+  let mut out = String::with_capacity(s.len());
+  let chars: Vec<char> = s.chars().collect();
+  let mut i = 0;
+  while i < chars.len() {
+    if chars[i] == '[' {
+      // Find matching ]
+      let mut depth = 1;
+      let mut text_end = None;
+      for j in (i + 1)..chars.len() {
+        if chars[j] == ']' { text_end = Some(j); break; }
+        if chars[j] == '[' { depth += 1; }
+      }
+      if let Some(end) = text_end {
+        if end + 1 < chars.len() && chars[end + 1] == '(' {
+          // Find matching ) handling nested parens
+          let mut paren_depth = 1;
+          let mut url_end = None;
+          for j in (end + 2)..chars.len() {
+            if chars[j] == ')' && paren_depth == 1 { url_end = Some(j); break; }
+            if chars[j] == '(' { paren_depth += 1; }
+            if chars[j] == ')' { paren_depth -= 1; }
+          }
+          if let Some(url_e) = url_end {
+            // Output just the text, trim spaces
+            let text: String = chars[i + 1..end].iter().collect();
+            out.push_str(text.trim());
+            i = url_e + 1;
+            continue;
+          }
         }
       }
     }
+    out.push(chars[i]);
+    i += 1;
   }
+  out
+}
+
+fn is_bad_line(s: &str) -> bool {
+  let s = s.trim();
+  s.is_empty()
+    || s.starts_with('#')
+    || s.starts_with("```")
+    || s.starts_with('[') // reference-style links
+    || s.starts_with("npm")
+    || s.starts_with("pnpm")
+    || s.starts_with("yarn")
+    || s.starts_with("bun")
+    || s.starts_with('$')
+    || s.starts_with("<!--")
+    || s.starts_with("<img")
+    || s.starts_with("<a ")
+    || s.starts_with("<p ")
+    || s.starts_with("<div")
+    || s.starts_with("<center")
+    || s.contains("://img.")
+    || s.contains("badge")
+    || s.contains("circleci")
+    || s.contains("http") && s.len() < 20
+    || s.len() > 200
+}
+
+fn read_description(dir: &Path) -> String {
+  // Try package.json first — cleanest source
   let pkg = dir.join("package.json");
   if pkg.exists() {
     if let Ok(content) = std::fs::read_to_string(&pkg) {
       if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
         if let Some(desc) = json.get("description").and_then(|d| d.as_str()) {
-          return desc.to_string();
+          let cleaned = clean_text(desc);
+          if !cleaned.is_empty() && cleaned.len() < 120 && !is_bad_line(&cleaned) {
+            return cleaned;
+          }
+        }
+      }
+    }
+  }
+  // Fallback: README.md — first good paragraph
+  let readme = dir.join("README.md");
+  if readme.exists() {
+    if let Ok(content) = std::fs::read_to_string(&readme) {
+      for line in content.lines() {
+        let trimmed = line.trim();
+        if is_bad_line(trimmed) { continue; }
+        let cleaned = clean_text(trimmed);
+        if !cleaned.is_empty() && cleaned.len() < 120 && !is_bad_line(&cleaned) {
+          return cleaned;
         }
       }
     }
@@ -201,11 +355,22 @@ pub fn list_templates_with_filter(category_filter: Option<&str>) {
         Color::WHITE.paint(versions_str),
       );
       if !t.description.is_empty() {
-        println!("    {:>2}  {:<24}{}",
-          "",
-          "",
-          Color::DIM.paint(&t.description),
-        );
+        let desc = &t.description;
+        if desc.len() > 80 {
+          // truncate with ellipsis
+          let truncated: String = desc.chars().take(77).collect();
+          println!("    {:>2}  {:<24}{}",
+            "",
+            "",
+            Color::DIM.paint(format!("{}...", truncated)),
+          );
+        } else {
+          println!("    {:>2}  {:<24}{}",
+            "",
+            "",
+            Color::DIM.paint(desc),
+          );
+        }
       }
     }
     println!();
@@ -214,23 +379,13 @@ pub fn list_templates_with_filter(category_filter: Option<&str>) {
   println!("  {}", Color::BRIGHT_YELLOW.bold("Usage"));
   println!("    {}  {}{}",
     Color::GREEN.paint("▶"),
-    Color::BRIGHT_CYAN.paint(format!("{:<24}", "template list")),
-    Color::WHITE.paint("List all available templates"),
-  );
-  println!("    {}  {}{}",
-    Color::GREEN.paint("▶"),
-    Color::BRIGHT_CYAN.paint(format!("{:<24}", "template show <name>")),
+    Color::BRIGHT_CYAN.paint(format!("{:<24}", "template show <template>")),
     Color::WHITE.paint("Show template details & versions"),
   );
   println!("    {}  {}{}",
     Color::GREEN.paint("▶"),
-    Color::BRIGHT_CYAN.paint(format!("{:<24}", "template create <name> <project>")),
-    Color::WHITE.paint("Create project from template"),
-  );
-  println!("    {}  {}{}",
-    Color::GREEN.paint("▶"),
-    Color::BRIGHT_CYAN.paint(format!("{:<24}", "template create <name> <project> --version <ver>")),
-    Color::WHITE.paint("Create with specific version"),
+    Color::BRIGHT_CYAN.paint(format!("{:<24}", "template create <template> <project>")),
+    Color::WHITE.paint("Create project with interactive version picker (↑↓)"),
   );
 }
 
@@ -307,16 +462,34 @@ pub fn show_template(name: &str) {
   println!("    {}  {:<24}{}",
     Color::GREEN.paint("▶"),
     Color::BRIGHT_CYAN.paint(format!("template create {} <project>", name)),
-    Color::WHITE.paint(format!("Uses default version ({})", t.default_version)),
-  );
-  println!("    {}  {:<24}{}",
-    Color::GREEN.paint("▶"),
-    Color::BRIGHT_CYAN.paint(format!("template create {} <project> --version <ver>", name)),
-    Color::WHITE.paint("Use a specific version"),
+    Color::WHITE.paint("Create project (interactive version picker)"),
   );
 }
 
-// ── Create Command ────────────────────────────────────────────────────────
+// ── Version helpers ───────────────────────────────────────────────────────
+
+fn scan_versions(framework_dir: &Path) -> Vec<String> {
+  let entries = std::fs::read_dir(framework_dir).ok();
+  let mut vers: Vec<String> = entries
+    .into_iter()
+    .flatten()
+    .flatten()
+    .filter(|e| e.path().is_dir())
+    .filter_map(|e| {
+      let v = e.file_name().to_string_lossy().to_string();
+      if v.starts_with('v') || v.chars().next().map_or(false, |c| c.is_numeric()) {
+        Some(v)
+      } else {
+        None
+      }
+    })
+    .collect();
+  vers.sort_by(|a, b| nat_sort(
+    a.trim_start_matches('v'),
+    b.trim_start_matches('v'),
+  ));
+  vers
+}
 
 fn resolve_version_dir(framework_dir: &Path, version: &str) -> Option<std::path::PathBuf> {
   let direct = framework_dir.join(version);
@@ -329,6 +502,31 @@ fn resolve_version_dir(framework_dir: &Path, version: &str) -> Option<std::path:
   }
   None
 }
+
+fn pick_version_interactive(versions: &[String], default: &str) -> dialoguer::Result<String> {
+  let term = Term::stderr();
+  let _ = term.write_line("");
+  let _ = term.write_str(&format!("  {} {}\n", Color::BRIGHT_YELLOW.bold("Select version"), Color::DIM.paint("(↑↓ arrows, Enter to confirm)")));
+
+  let default_idx = versions.iter().position(|v| v == default).unwrap_or(versions.len().saturating_sub(1));
+
+  let styled_items: Vec<String> = versions.iter().map(|v| {
+    if v == default {
+      format!("{}  {}", v, Color::GREEN.paint("● default"))
+    } else {
+      v.clone()
+    }
+  }).collect();
+
+  let selection = Select::with_theme(&ColorfulTheme::default())
+    .items(&styled_items)
+    .default(default_idx)
+    .interact_on_opt(&Term::stderr())?;
+
+  Ok(selection.map(|i| versions[i].clone()).unwrap_or_else(|| default.to_string()))
+}
+
+// ── Create Command ────────────────────────────────────────────────────────
 
 pub fn create_template(name: &str, project_name: &str, version: Option<&str>, dir: Option<&Path>) -> anyhow::Result<()> {
   let mut steps = StepAnim::new(vec![
@@ -358,30 +556,24 @@ pub fn create_template(name: &str, project_name: &str, version: Option<&str>, di
     }
   };
 
-  // Determine version
+  // Determine version — interactive picker if not specified
+  let versions = scan_versions(&framework_dir);
   let version = match version {
     Some(v) => v.to_string(),
+    None if versions.is_empty() => "latest".to_string(),
     None => {
-      let entries = std::fs::read_dir(&framework_dir).ok();
-      let mut vers: Vec<String> = entries
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.path().is_dir())
-        .filter_map(|e| {
-          let v = e.file_name().to_string_lossy().to_string();
-          if v.starts_with('v') || v.chars().next().map_or(false, |c| c.is_numeric()) {
-            Some(v)
-          } else {
-            None
+      let default = versions.last().cloned().unwrap_or_else(|| "latest".to_string());
+      if versions.len() == 1 {
+        default
+      } else {
+        match pick_version_interactive(&versions, &default) {
+          Ok(v) => v,
+          Err(_) => {
+            steps.step_fail("Version selection cancelled");
+            anyhow::bail!("Version selection cancelled")
           }
-        })
-        .collect();
-      vers.sort_by(|a, b| nat_sort(
-        a.trim_start_matches('v'),
-        b.trim_start_matches('v'),
-      ));
-      vers.last().cloned().unwrap_or_else(|| "latest".to_string())
+        }
+      }
     }
   };
 
@@ -393,11 +585,10 @@ pub fn create_template(name: &str, project_name: &str, version: Option<&str>, di
 
   steps.step_done();
 
-  // Determine the target directory
-  let target_dir = match dir {
-    Some(d) => d.to_path_buf(),
-    None => std::env::current_dir()?.join(project_name),
-  };
+  // Determine the target directory: dir is the parent, project_name is the subfolder
+  let cwd = std::env::current_dir().unwrap_or_default();
+  let parent = dir.unwrap_or(&cwd);
+  let target_dir = parent.join(project_name);
 
   steps.step_begin("Copying template files");
   copy_template_dir(&version_dir, &target_dir)?;

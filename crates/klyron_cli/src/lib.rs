@@ -493,8 +493,8 @@ pub enum TemplateAction {
     List { #[arg(short, long)] category: Option<String> },
     #[command(about = "Show detailed info about a template")]
     Show { name: String },
-    #[command(about = "Create a new project from a template")]
-    Create { name: String, project_name: String, #[arg(long)] version: Option<String>, #[arg(short, long)] dir: Option<PathBuf> },
+    #[command(about = "Create a new project from a template with interactive version picker")]
+    Create { name: String, project_name: String, #[arg(short, long)] dir: Option<PathBuf> },
 }
 
 // ── Info handler ──────────────────────────────────────────────────────────
@@ -583,13 +583,26 @@ fn list_frameworks() {
 fn handle_create(args: CreateArgs) -> anyhow::Result<()> {
     if args.list {
         list_frameworks();
+        commands::template::list_templates();
         return Ok(());
     }
 
     let framework = args.framework.as_deref().unwrap_or("");
     if framework.is_empty() {
         list_frameworks();
+        println!();
+        commands::template::list_templates();
         return Ok(());
+    }
+
+    let name = args.name.as_deref().unwrap_or("");
+
+    // Check adapters/ directory first (filesystem templates)
+    if commands::template::template_exists(framework) {
+        if name.is_empty() {
+            anyhow::bail!("Missing project name. Usage: klyron create <template> <project-name>");
+        }
+        return commands::template::create_template(framework, name, args.version.as_deref(), Some(&args.dir));
     }
 
     if args.versions {
@@ -604,7 +617,6 @@ fn handle_create(args: CreateArgs) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let name = args.name.as_deref().unwrap_or("");
     if name.is_empty() {
         anyhow::bail!("Missing project name. Usage: klyron create <framework> <name> [options]");
     }
@@ -941,8 +953,8 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>, json_outpu
                 commands::template::show_template(&name);
                 Ok(())
             }
-            TemplateAction::Create { name, project_name, version, dir } => {
-                commands::template::create_template(&name, &project_name, version.as_deref(), dir.as_deref())
+            TemplateAction::Create { name, project_name, dir } => {
+                commands::template::create_template(&name, &project_name, None, dir.as_deref())
             }
         },
         Commands::Completions { shell } => {
