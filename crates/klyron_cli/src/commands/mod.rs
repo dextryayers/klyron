@@ -27,3 +27,4 @@ pub mod laravel;
 pub mod coverage;
 pub mod watch;
 pub mod config;
+pub mod template;

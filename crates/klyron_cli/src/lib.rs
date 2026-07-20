@@ -483,6 +483,18 @@ pub enum Commands {
     Serve { #[arg(long, default_value = "localhost")] host: String, #[arg(long, default_value_t = 3000)] port: u16, #[arg(long)] dir: Option<PathBuf>, #[arg(long)] watch: bool },
     #[command(about = "Generate shell completion scripts for bash, zsh, fish, and powershell")]
     Completions { shell: clap_complete::Shell },
+    #[command(about = "Manage project templates from adapters directory")]
+    Template { #[command(subcommand)] action: TemplateAction },
+}
+
+#[derive(Subcommand)]
+pub enum TemplateAction {
+    #[command(about = "List all available templates")]
+    List,
+    #[command(about = "Show detailed info about a template")]
+    Show { name: String },
+    #[command(about = "Create a new project from a template")]
+    Create { name: String, project_name: String, #[arg(long)] version: Option<String>, #[arg(short, long)] dir: Option<PathBuf> },
 }
 
 // ── Info handler ──────────────────────────────────────────────────────────
@@ -920,6 +932,19 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>, json_outpu
                 no_hmr_inject: false,
             })
         }
+        Commands::Template { action } => match action {
+            TemplateAction::List => {
+                commands::template::list_templates();
+                Ok(())
+            }
+            TemplateAction::Show { name } => {
+                commands::template::show_template(&name);
+                Ok(())
+            }
+            TemplateAction::Create { name, project_name, version, dir } => {
+                commands::template::create_template(&name, &project_name, version.as_deref(), dir.as_deref())
+            }
+        },
         Commands::Completions { shell } => {
             let mut cmd = <Cli as CommandFactory>::command();
             let name = cmd.get_name().to_string();
