@@ -715,3 +715,37 @@ pub fn get_lifecycle_scripts(scripts: &HashMap<String, String>) -> LifecycleHook
 pub fn get_lifecycle_order(name: &str) -> [String; 3] {
     [format!("pre{name}"), name.to_string(), format!("post{name}")]
 }
+
+pub fn run_postinstall_scripts(node_modules: &Path) -> anyhow::Result<()> {
+    if !node_modules.exists() {
+        return Ok(());
+    }
+
+    for entry in std::fs::read_dir(node_modules)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() { continue; }
+
+        let package_json = path.join("package.json");
+        if !package_json.exists() { continue; }
+
+        let content = std::fs::read_to_string(&package_json)?;
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else { continue };
+
+        if let Some(scripts) = json.get("scripts").and_then(|s| s.as_object()) {
+            if let Some(postinstall) = scripts.get("postinstall").and_then(|s| s.as_str()) {
+                let package_name = json.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                eprintln!("  Running postinstall for {package_name}: {postinstall}");
+                let status = std::process::Command::new("sh")
+                    .args(["-c", postinstall])
+                    .current_dir(&path)
+                    .status()
+                    .map_err(|e| anyhow::anyhow!("Failed to run postinstall for {package_name}: {e}"))?;
+                if !status.success() {
+                    eprintln!("  Warning: postinstall for {package_name} failed (exit: {})", status);
+                }
+            }
+        }
+    }
+    Ok(())
+}

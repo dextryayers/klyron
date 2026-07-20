@@ -1,3 +1,35 @@
+use std::path::PathBuf;
+
+fn find_v8() -> (PathBuf, PathBuf) {
+    // Try pkg-config first
+    if let Ok(lib) = pkg_config::Config::new().probe("v8") {
+        let lib_dir = PathBuf::from(lib.link_paths[0].to_str().unwrap_or(""));
+        let include_dir = lib.include_paths[0].clone();
+        return (lib_dir, include_dir);
+    }
+    // Fallback to known paths
+    let v8_dir = std::env::var("V8_DIR").ok();
+    let v8_include = if let Some(ref dir) = v8_dir {
+        format!("{}/include", dir)
+    } else {
+        "/usr/include/nodejs/deps/v8/include".to_string()
+    };
+
+    let v8_lib = if let Some(ref dir) = v8_dir {
+        format!("{}/lib", dir)
+    } else if std::path::Path::new("/usr/lib/x86_64-linux-gnu/libv8.so").exists() {
+        "/usr/lib/x86_64-linux-gnu".to_string()
+    } else {
+        let candidates = vec!["/usr/lib", "/usr/local/lib", "/opt/v8/lib"];
+        candidates
+            .iter()
+            .find(|d| std::path::Path::new(d).join("libv8.so").exists())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "/usr/lib".to_string())
+    };
+    (PathBuf::from(v8_lib), PathBuf::from(v8_include))
+}
+
 fn main() {
     #[cfg(feature = "native")]
     {
@@ -15,25 +47,7 @@ fn main() {
             }
         }
 
-        let v8_dir = std::env::var("V8_DIR").ok();
-        let v8_include = if let Some(ref dir) = v8_dir {
-            format!("{}/include", dir)
-        } else {
-            "/usr/include/nodejs/deps/v8/include".to_string()
-        };
-
-        let v8_lib = if let Some(ref dir) = v8_dir {
-            format!("{}/lib", dir)
-        } else if std::path::Path::new("/usr/lib/x86_64-linux-gnu/libv8.so").exists() {
-            "/usr/lib/x86_64-linux-gnu".to_string()
-        } else {
-            let candidates = vec!["/usr/lib", "/usr/local/lib", "/opt/v8/lib"];
-            candidates
-                .iter()
-                .find(|d| std::path::Path::new(d).join("libv8.so").exists())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "/usr/lib".to_string())
-        };
+        let (v8_lib, v8_include) = find_v8();
 
         let mut builder = cc::Build::new();
         builder
@@ -66,13 +80,19 @@ fn main() {
 
         builder.compile("libklyron_v8.a");
 
-        println!("cargo:rustc-link-search=native={}", v8_lib);
+        println!("cargo:rustc-link-search=native={}", v8_lib.display());
         println!("cargo:rustc-link-lib=v8");
         println!("cargo:rustc-link-lib=v8_libplatform");
         println!("cargo:rustc-link-lib=v8_libbase");
 
-        let icu = format!("{}/libicui18n.so", v8_lib);
-        if std::path::Path::new(&icu).exists() {
+        // Try to find ICU libraries with versioned .so files
+        let v8_lib_dir = &v8_lib;
+        let icu_libs = ["libicui18n.so", "libicui18n.so.78", "libicui18n.so.72", "libicui18n.so.70"];
+        let has_icu = icu_libs.iter().any(|name| {
+            let path = v8_lib_dir.join(name);
+            path.exists()
+        });
+        if has_icu {
             println!("cargo:rustc-link-lib=icui18n");
             println!("cargo:rustc-link-lib=icuuc");
             println!("cargo:rustc-link-lib=icudata");

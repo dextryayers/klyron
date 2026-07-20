@@ -4,12 +4,39 @@ pub mod types;
 pub use bindings::*;
 pub use types::*;
 
+use std::path::{Path, PathBuf};
+
+pub fn load_native_addon(path: &Path) -> anyhow::Result<*mut libc::c_void> {
+    let path_str = path.to_string_lossy();
+    let handle = unsafe {
+        libc::dlopen(
+            path_str.as_ptr() as *const libc::c_char,
+            libc::RTLD_NOW | libc::RTLD_LOCAL,
+        )
+    };
+    if handle.is_null() {
+        let err = unsafe { std::ffi::CStr::from_ptr(libc::dlerror()) };
+        anyhow::bail!("Failed to load native addon {}: {}", path.display(), err.to_string_lossy());
+    }
+    Ok(handle)
+}
+
+pub fn find_napi_addon(name: &str, dir: &Path) -> Option<PathBuf> {
+    let candidates = [
+        dir.join("node_modules").join(name).join(format!("{}.node", name)),
+        dir.join("node_modules").join(name).join("build").join("Release").join(format!("{}.node", name)),
+        dir.join("node_modules").join(name).join("build").join("Debug").join(format!("{}.node", name)),
+        dir.join("node_modules").join(name).join("prebuilds").join(format!("{}.node", name)),
+    ];
+    candidates.into_iter().find(|p| p.exists())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::path::Path;
-    use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
     #[test]
     fn test_napi_loader_new() {

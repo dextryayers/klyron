@@ -1,4 +1,4 @@
-import { op_process_info, op_process_args, op_process_env, op_process_exit, op_process_cwd, op_process_hrtime } from "ext:core/ops";
+import { op_process_info, op_process_args, op_process_env, op_process_exit, op_process_cwd, op_process_hrtime, op_process_memory_usage, op_process_uptime, op_process_cpu_usage } from "ext:core/ops";
 
 const _args = JSON.parse(op_process_args());
 const _env = JSON.parse(op_process_env());
@@ -22,13 +22,17 @@ const process = {
     if (prev) return [t[0] - prev[0], t[1] - prev[1]];
     return t;
   },
-  memoryUsage() { return { rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0 }; },
-  uptime() { return 0; },
+  memoryUsage() { return JSON.parse(op_process_memory_usage()); },
+  cpuUsage() { return JSON.parse(op_process_cpu_usage()); },
+  uptime() { return op_process_uptime(); },
   nextTick(cb, ...args) { queueMicrotask(() => cb(...args)); },
   stdout: { write(s) { console.log(s); }, writable: true },
   stderr: { write(s) { console.error(s); }, writable: true },
   stdin: { readable: false },
   exitCode: 0,
 };
+
+globalThis.setImmediate = (fn, ...args) => setTimeout(fn, 0, ...args);
+globalThis.clearImmediate = clearTimeout;
 
 export default process;

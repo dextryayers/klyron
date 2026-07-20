@@ -1,6 +1,7 @@
 import {
   op_crypto_random_uuid, op_crypto_random_values, op_crypto_sha256,
-  op_crypto_hex_encode, op_crypto_digest, op_crypto_encrypt, op_crypto_decrypt
+  op_crypto_hex_encode, op_crypto_digest, op_crypto_encrypt, op_crypto_decrypt,
+  op_crypto_sha512, op_crypto_hmac
 } from "ext:core/ops";
 
 export function randomUUID() { return op_crypto_random_uuid(); }

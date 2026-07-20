@@ -8,6 +8,9 @@ extension!(
   ops = [
     op_process_info, op_process_args, op_process_env, op_process_exit,
     op_process_cwd, op_process_hrtime, op_process_spawn, op_process_exec,
+    op_process_memory_usage, op_process_uptime, op_process_cpu_usage,
+    op_os_totalmem, op_os_freemem, op_os_cpus, op_os_uptime,
+    op_os_network_interfaces, op_os_loadavg,
   ],
   esm_entry_point = "ext:klyron_node/index.js",
   esm = [dir "js", "index.js", "assert.js", "buffer.js", "child_process.js", "crypto.js", "events.js", "fs.js", "net.js", "os.js", "path.js", "process.js", "querystring.js", "stream.js", "url.js", "util.js", "http.js", "https.js"],
@@ -62,6 +65,205 @@ fn op_process_hrtime() -> String {
     .duration_since(std::time::UNIX_EPOCH)
     .unwrap_or_default();
   serde_json::json!([dur.as_secs(), dur.subsec_nanos()]).to_string()
+}
+
+#[op2]
+#[string]
+fn op_process_memory_usage() -> String {
+    let rss = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("VmRSS:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(|kb| kb * 1024)
+        })
+        .unwrap_or(0);
+    let heap_total = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("VmSize:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(|kb| kb * 1024)
+        })
+        .unwrap_or(0);
+    let heap_used = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("VmData:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(|kb| kb * 1024)
+        })
+        .unwrap_or(0);
+    serde_json::json!({
+        "rss": rss,
+        "heapTotal": heap_total,
+        "heapUsed": heap_used,
+        "external": 0,
+        "arrayBuffers": 0,
+    }).to_string()
+}
+
+#[op2(fast)]
+fn op_process_uptime() -> f64 {
+    std::fs::read_to_string("/proc/uptime")
+        .ok()
+        .and_then(|s| s.split_whitespace().next()?.parse::<f64>().ok())
+        .unwrap_or(0.0)
+}
+
+#[op2]
+#[string]
+fn op_process_cpu_usage() -> String {
+    let ticks = std::fs::read_to_string("/proc/self/stat")
+        .ok()
+        .and_then(|s| {
+            let parts: Vec<&str> = s.split_whitespace().collect();
+            if parts.len() > 15 {
+                let utime = parts[13].parse::<u64>().ok().unwrap_or(0);
+                let stime = parts[14].parse::<u64>().ok().unwrap_or(0);
+                let clk_tck = 100u64;
+                Some((utime * 1_000_000 / clk_tck, stime * 1_000_000 / clk_tck))
+            } else {
+                None
+            }
+        })
+        .unwrap_or((0, 0));
+    serde_json::json!({
+        "user": ticks.0,
+        "system": ticks.1,
+    }).to_string()
+}
+
+#[op2(fast)]
+fn op_os_totalmem() -> f64 {
+    std::fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("MemTotal:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|v| v.parse::<f64>().ok())
+                .map(|kb| kb * 1024.0)
+        })
+        .unwrap_or(0.0)
+}
+
+#[op2(fast)]
+fn op_os_freemem() -> f64 {
+    std::fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("MemFree:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|v| v.parse::<f64>().ok())
+                .map(|kb| kb * 1024.0)
+        })
+        .unwrap_or(0.0)
+}
+
+#[op2(fast)]
+fn op_os_uptime() -> f64 {
+    std::fs::read_to_string("/proc/uptime")
+        .ok()
+        .and_then(|s| s.split_whitespace().next()?.parse::<f64>().ok())
+        .unwrap_or(0.0)
+}
+
+#[op2]
+#[string]
+fn op_os_loadavg() -> String {
+    let content = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
+    let parts: Vec<&str> = content.split_whitespace().collect();
+    let one = parts.first().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+    let five = parts.get(1).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+    let fifteen = parts.get(2).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+    serde_json::json!([one, five, fifteen]).to_string()
+}
+
+#[op2]
+#[string]
+fn op_os_cpus() -> String {
+    let content = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    let mut cpus = Vec::new();
+    let mut model = String::from("unknown");
+    let mut speed = 0.0;
+    for line in content.lines() {
+        if let Some(val) = line.strip_prefix("model name\t: ") {
+            model = val.trim().to_string();
+        } else if let Some(val) = line.strip_prefix("cpu MHz\t\t: ") {
+            speed = val.trim().parse::<f64>().unwrap_or(0.0);
+        } else if line.trim().is_empty() || line.starts_with("processor") {
+            if !model.is_empty() {
+                cpus.push(serde_json::json!({
+                    "model": model,
+                    "speed": speed,
+                    "times": { "user": 0, "nice": 0, "sys": 0, "idle": 0, "irq": 0 },
+                }));
+                model = String::new();
+                speed = 0.0;
+            }
+        }
+    }
+    if !model.is_empty() {
+        cpus.push(serde_json::json!({
+            "model": model,
+            "speed": speed,
+            "times": { "user": 0, "nice": 0, "sys": 0, "idle": 0, "irq": 0 },
+        }));
+    }
+    if cpus.is_empty() {
+        cpus.push(serde_json::json!({
+            "model": "Klyron Virtual CPU",
+            "speed": 2000,
+            "times": { "user": 0, "nice": 0, "sys": 0, "idle": 0, "irq": 0 },
+        }));
+    }
+    serde_json::to_string(&cpus).unwrap_or_else(|_| "[]".to_string())
+}
+
+#[op2]
+#[string]
+fn op_os_network_interfaces() -> String {
+    let dev_content = std::fs::read_to_string("/proc/net/dev").unwrap_or_default();
+    let mut interfaces = serde_json::Map::new();
+    for line in dev_content.lines().skip(2) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 10 { continue; }
+        let name = parts[0].trim_end_matches(':');
+        if name == "lo" { continue; }
+        let _rx_bytes = parts[1].parse::<u64>().unwrap_or(0);
+        let _tx_bytes = parts[9].parse::<u64>().unwrap_or(0);
+
+        let mut addrs = Vec::new();
+        let sys_net = format!("/sys/class/net/{}", name);
+        if let Ok(address) = std::fs::read_to_string(format!("{}/address", sys_net)) {
+            let mac = address.trim().to_uppercase();
+            if mac != "00:00:00:00:00:00" {
+                addrs.push(serde_json::json!({
+                    "address": mac,
+                    "netmask": "ff:ff:ff:ff:ff:ff",
+                    "family": "IPv4",
+                    "mac": true,
+                    "internal": false,
+                }));
+            }
+        }
+        interfaces.insert(name.to_string(), serde_json::json!([{
+            "address": "0.0.0.0",
+            "netmask": "255.0.0.0",
+            "family": "IPv4",
+            "mac": addrs.first().and_then(|a| a.get("address")).and_then(|a| a.as_str()).unwrap_or("00:00:00:00:00:00"),
+            "internal": false,
+        }]));
+    }
+    serde_json::to_string(&interfaces).unwrap_or_else(|_| "{}".to_string())
 }
 
 #[op2]

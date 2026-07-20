@@ -194,9 +194,25 @@ impl NodeGlobals {
         let exports = json!({});
         let require_fn = RequireFn::new(entry_file);
 
+        let process = Process::new();
+
+        let proc_data = json!({
+            "pid": process.pid,
+            "ppid": process.ppid,
+            "platform": process.platform,
+            "arch": process.arch,
+            "version": process.version,
+            "versions": process.versions,
+            "argv": process.argv,
+            "env": process.env,
+            "memoryUsage": { "rss": 0, "heapTotal": 0, "heapUsed": 0, "external": 0, "arrayBuffers": 0 },
+            "uptime": process.uptime(),
+            "cwd": process.cwd().to_string_lossy().to_string(),
+        });
+
         let mut globals = Self {
             global: json!({}),
-            process: Process::new(),
+            process,
             buffer: Buffer::alloc(0),
             __dirname: dirname,
             __filename: entry_file.to_path_buf(),
@@ -206,15 +222,15 @@ impl NodeGlobals {
         };
 
         globals.set_global("global", json!(null));
-        globals.set_global("process", json!("[Process]"));
-        globals.set_global("Buffer", json!("[Buffer]"));
-        globals.set_global("console", json!("[Console]"));
-        globals.set_global("setTimeout", json!("[Function]"));
-        globals.set_global("clearTimeout", json!("[Function]"));
-        globals.set_global("setInterval", json!("[Function]"));
-        globals.set_global("clearInterval", json!("[Function]"));
-        globals.set_global("setImmediate", json!("[Function]"));
-        globals.set_global("clearImmediate", json!("[Function]"));
+        globals.set_global("process", proc_data);
+        globals.set_global("Buffer", json!({}));
+        globals.set_global("console", json!({}));
+        globals.set_global("setTimeout", json!("[Function: setTimeout]"));
+        globals.set_global("clearTimeout", json!("[Function: clearTimeout]"));
+        globals.set_global("setInterval", json!("[Function: setInterval]"));
+        globals.set_global("clearInterval", json!("[Function: clearInterval]"));
+        globals.set_global("setImmediate", json!("[Function: setImmediate]"));
+        globals.set_global("clearImmediate", json!("[Function: clearImmediate]"));
 
         globals
     }

@@ -707,6 +707,7 @@ pub fn install_with_lockfile(dir: &Path, frozen: bool) -> Result<(), PmError> {
                 }
             }
         }
+        let _ = scripts::run_postinstall_scripts(&nm);
         return Ok(());
     }
 
@@ -749,6 +750,7 @@ pub fn install_with_lockfile(dir: &Path, frozen: bool) -> Result<(), PmError> {
             std::fs::write(&lockfile_path, &bytes)
                 .map_err(|e| PmError::IoError(e.to_string()))?;
             tracing::info!("Resolved {} packages and wrote klyron.lock", lock.packages.len());
+            let _ = scripts::run_postinstall_scripts(&nm);
             Ok(())
         }
         Err(e) => Err(PmError::IoError(format!(

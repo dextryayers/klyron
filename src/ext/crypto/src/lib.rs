@@ -2,7 +2,9 @@ use deno_core::{extension, op2, Extension};
 use deno_error::JsErrorBox;
 use hex::FromHex;
 use hmac::{Hmac, Mac};
-use sha2::{Digest, Sha256, Sha384, Sha512};
+use sha1::Sha1;
+use sha2::{Digest, Sha224, Sha256, Sha384, Sha512};
+use md5::Md5;
 
 type HmacSha256 = Hmac<Sha256>;
 type HmacSha384 = Hmac<Sha384>;
@@ -88,6 +90,18 @@ fn op_crypto_hex_encode(#[serde] data: Vec<u8>) -> String {
 
 fn op_crypto_digest_impl(algorithm: String, data: Vec<u8>) -> Result<String, JsErrorBox> {
   match algorithm.to_uppercase().as_str() {
+    "MD5" => {
+      let hash = Md5::digest(&data);
+      Ok(hex::encode(hash))
+    }
+    "SHA-1" | "SHA1" => {
+      let hash = Sha1::digest(&data);
+      Ok(hex::encode(hash))
+    }
+    "SHA-224" | "SHA224" => {
+      let hash = Sha224::digest(&data);
+      Ok(hex::encode(hash))
+    }
     "SHA-256" | "SHA256" => {
       let hash = Sha256::digest(&data);
       Ok(hex::encode(hash))

@@ -28,7 +28,7 @@ wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
 
 [features]
-v8 = ["dep:klyron-core"]
+v8 = ["dep:klyron-core", "dep:klyron-engine-v8", "klyron-engine-v8/native"]
 boa = ["dep:klyron-engine-boa"]
 quickjs = ["dep:klyron-engine-quickjs"]
 jsc = ["dep:klyron-engine-jsc"]
@@ -39,6 +39,10 @@ default = []
 [dependencies.klyron-core]
 optional = true
 path = "../../src/core"
+
+[dependencies.klyron-engine-v8]
+optional = true
+path = "../../engines/v8"
 
 [dependencies.klyron-engine-boa]
 optional = true
