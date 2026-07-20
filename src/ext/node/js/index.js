@@ -13,4 +13,7 @@ export * as child_process from "./child_process.js";
 export * as net from "./net.js";
 export * as http from "./http.js";
 export * as https from "./https.js";
+export * as dns from "./dns.js";
+export * as worker_threads from "./worker_threads.js";
+export * as zlib from "./zlib.js";
 export * as assert from "./assert.js";

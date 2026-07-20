@@ -427,9 +427,23 @@ fn print_banner() {
         (0, 230, 180),
     ];
 
-    for (i, line) in BANNER.trim_end_matches('\n').lines().enumerate() {
+    let lines: Vec<&str> = BANNER.trim_end_matches('\n').lines().collect();
+    let total_lines = lines.len();
+
+    for (i, line) in lines.iter().enumerate() {
         let (r, g, b) = colors[i % colors.len()];
-        println!("{}", rgb_paint(r, g, b, line));
+        // Per-character gradient within each line
+        let gradient: String = line.chars().enumerate().map(|(j, c)| {
+            let t = j as f64 / line.len().max(1) as f64;
+            let next_i = (i + 1) % colors.len();
+            let (r1, g1, b1) = colors[i % colors.len()];
+            let (r2, g2, b2) = colors[next_i];
+            let r = (r1 as f64 + (r2 as f64 - r1 as f64) * t) as u8;
+            let g = (g1 as f64 + (g2 as f64 - g1 as f64) * t) as u8;
+            let b = (b1 as f64 + (b2 as f64 - b1 as f64) * t) as u8;
+            rgb_paint(r, g, b, &c.to_string())
+        }).collect();
+        println!("{}", gradient);
     }
 }
 
@@ -438,8 +452,22 @@ fn animate_loading(seconds: u64) {
     use std::time::Duration;
 
     let steps = seconds * 25;
-    let bar_width = 20;
+    let bar_width = 28;
 
+    // Phase 1: Particle burst
+    let particles = ['·', '∙', '•', '●', '○', '◌', '◍', '◎', '●'];
+    for i in 0..8 {
+        let phase = i as f64 / 8.0;
+        let (r, g, b) = (200, 80 + (phase * 100.0) as u8, 255);
+        let dot = rgb_paint(r, g, b, &particles[i as usize].to_string());
+        let label = Color::DIM.paint("klyron");
+        let dots = ".".repeat(i as usize + 1);
+        print!("\r  {}  {}{}", dot, label, Color::DIM.paint(&dots));
+        std::io::stdout().flush().ok();
+        sleep(Duration::from_millis(30));
+    }
+
+    // Phase 2: Gradient scan bar with glow
     for i in 0..steps {
         let progress = i as f64 / steps as f64;
         let filled = (progress * bar_width as f64) as usize;
@@ -447,34 +475,57 @@ fn animate_loading(seconds: u64) {
         let bar: String = (0..bar_width)
             .map(|j| {
                 let t = j as f64 / bar_width as f64;
-                let r = (180.0 + (1.0 - t) * 75.0) as u8;
-                let g = (80.0 + t * 120.0) as u8;
-                let b = (255.0 - t * 80.0) as u8;
+                let (r_base, g_base, b_base) = (
+                    (180.0 + (1.0 - t) * 75.0) as u8,
+                    (80.0 + t * 120.0) as u8,
+                    (255.0 - t * 80.0) as u8,
+                );
                 if j < filled {
-                    let pulse = (i as f64 * 0.3 + j as f64 * 0.5).sin() * 0.15 + 0.85;
+                    let pulse = (i as f64 * 0.4 + j as f64 * 0.6).sin() * 0.2 + 0.8;
+                    let glow = if j == filled.saturating_sub(1) { 1.3 } else { 1.0 };
                     let (r2, g2, b2) = (
-                        (r as f64 * pulse) as u8,
-                        (g as f64 * pulse) as u8,
-                        (b as f64 * pulse) as u8,
+                        ((r_base as f64 * pulse * glow).min(255.0)) as u8,
+                        ((g_base as f64 * pulse * glow).min(255.0)) as u8,
+                        ((b_base as f64 * pulse * glow).min(255.0)) as u8,
                     );
                     rgb_paint(r2, g2, b2, "█")
                 } else {
-                    Color::DIM.paint("░")
+                    rgb_paint(40, 40, 60, "░")
                 }
             })
             .collect();
 
         let pct = format!("{:>3}%", (progress * 100.0) as u8);
-        let label = Color::DIM.paint("Klyron starting");
-        print!("\r  {}  {}  {}", bar, rgb_paint(180, 30, 255, &pct), label);
+        let pct_color = rgb_paint(
+            (200.0 - progress * 100.0) as u8,
+            (80.0 + progress * 150.0) as u8,
+            255,
+            &pct,
+        );
+        let glow_r = (120.0 + progress * 120.0) as u8;
+        let glow_g = (40.0 + progress * 80.0) as u8;
+        let label = Color::DIM.paint("starting");
+        print!("\r  {}  {}  {}", bar, pct_color, label);
         std::io::stdout().flush().ok();
         sleep(Duration::from_millis(40));
     }
 
-    println!("\r  {}  {} {}",
-        Color::GREEN.paint("█".repeat(bar_width)),
-        Color::GREEN.paint("100%"),
-        Color::DIM.paint("ready  ")
+    // Phase 3: Completion flash
+    let full_bar: String = (0..bar_width)
+        .map(|j| {
+            let t = j as f64 / bar_width as f64;
+            let (r, g, b) = (
+                (180.0 + (1.0 - t) * 75.0) as u8,
+                (80.0 + t * 150.0) as u8,
+                (255.0 - t * 120.0) as u8,
+            );
+            rgb_paint(r, g, b, "█")
+        })
+        .collect();
+    println!("\r  {}  {}  {}",
+        full_bar,
+        rgb_paint(0, 230, 180, "100%"),
+        rgb_paint(0, 230, 180, "ready  ")
     );
 }
 
