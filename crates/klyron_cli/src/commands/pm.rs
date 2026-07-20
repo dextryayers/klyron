@@ -363,14 +363,36 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
 
     match project {
         "node" => {
-            if dir.join("klyron.lock").exists() {
+            let lockfile_path = dir.join("klyron.lock");
+            let use_lockfile = if lockfile_path.exists() {
+                let data = std::fs::read(&lockfile_path).unwrap_or_default();
+                if data.len() >= 4 && &data[..4] == b"KLYR" {
+                    true
+                } else {
+                    let _ = std::fs::remove_file(&lockfile_path);
+                    false
+                }
+            } else {
+                false
+            };
+            if use_lockfile {
                 spinner.done("Project analyzed");
                 let mut bar = GradientBar::new(100, "Installing dependencies...");
-                klyron_pm::install_with_lockfile(&dir, frozen)
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
-                bar.finish_with("Dependencies installed");
-                success_banner("Install complete");
-                return Ok(());
+                match klyron_pm::install_with_lockfile(&dir, frozen) {
+                    Ok(()) => {
+                        bar.finish_with("Dependencies installed");
+                        success_banner("Install complete");
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        crate::log_info(format!(
+                            "{} {}",
+                            crate::Color::YELLOW.paint("\u{26A0}"),
+                            format!("klyron resolver failed ({}), falling back to native PM...", e)
+                        ));
+                        let _ = std::fs::remove_file(&lockfile_path);
+                    }
+                }
             }
     let pm = crate::detect_package_runner(&dir);
             let mut args = vec!["install"];
@@ -382,7 +404,9 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
                     _ => args.push("--no-save"),
                 };
             }
-            crate::run_cmd(pm, &args, &dir)?;
+            if let Err(e) = crate::run_cmd(pm, &args, &dir) {
+                anyhow::bail!("{} install failed: {e}", pm);
+            }
             let _ = generate_klyron_lock_after_install(&dir);
 
             // Auto-link workspace members
@@ -460,7 +484,17 @@ fn generate_klyron_lock_after_install(dir: &Path) -> anyhow::Result<()> {
     use klyron_pm::{PackageManager, InstallResult, generate_lockfile};
     let pm = PackageManager::new(dir);
     let opts = klyron_pm::InstallOptions::default();
-    let nodes = pm.install(&opts).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let nodes = match pm.install(&opts) {
+        Ok(n) => n,
+        Err(e) => {
+            crate::log_info(format!(
+                "{} {}",
+                crate::Color::YELLOW.paint("\u{26A0}"),
+                format!("klyron lock generation skipped: {e}")
+            ));
+            return Ok(());
+        }
+    };
     let now = std::time::SystemTime::now();
     let result = InstallResult {
         nodes,
@@ -468,7 +502,14 @@ fn generate_klyron_lock_after_install(dir: &Path) -> anyhow::Result<()> {
         end_time: now,
     };
     let lockfile_path = dir.join("klyron.lock");
-    generate_lockfile(&result, &lockfile_path).map_err(|e| anyhow::anyhow!("{e}"))
+    if let Err(e) = generate_lockfile(&result, &lockfile_path) {
+        crate::log_info(format!(
+            "{} {}",
+            crate::Color::YELLOW.paint("\u{26A0}"),
+            format!("klyron lock write skipped: {e}")
+        ));
+    }
+    Ok(())
 }
 
 pub fn run_remove(packages: &[String]) -> anyhow::Result<()> {

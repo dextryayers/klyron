@@ -3,12 +3,15 @@ use std::process::Command as StdCommand;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use clap::Args;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
+
+static CTRLC_INITIALIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[derive(Args)]
 pub struct DevArgs {
@@ -75,39 +78,34 @@ pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
 
     match project_type {
         "node" => {
-            let has_vite = dir.join("vite.config.ts").exists() || dir.join("vite.config.js").exists() || dir.join("vite.config.mjs").exists();
+            let has_astro = dir.join("astro.config.mjs").exists() || dir.join("astro.config.ts").exists() || dir.join("astro.config.js").exists();
+            let has_vite = !has_astro && (dir.join("vite.config.ts").exists() || dir.join("vite.config.js").exists() || dir.join("vite.config.mjs").exists());
             let has_next = dir.join("next.config.ts").exists() || dir.join("next.config.mjs").exists() || dir.join("next.config.js").exists();
+            let pm = crate::detect_package_runner(&dir);
             let local_bin = |name: &str| -> String {
                 let path = dir.join("node_modules").join(".bin").join(name);
                 if path.exists() { path.to_string_lossy().to_string() } else { name.to_string() }
             };
-            if has_next {
-                let next_bin = local_bin("next");
+            let run_dev = |bin: &str, args: &[&str]| {
                 if hmr_enabled {
-                    watch_dev(&next_bin, &["dev", "-p", &port.to_string()], &dir)
+                    watch_dev(bin, args, &dir)
                 } else {
-                    crate::run_cmd(&next_bin, &["dev", "-p", &port.to_string()], &dir)
+                    crate::run_cmd(bin, args, &dir)
                 }
+            };
+            if has_next {
+                run_dev(&local_bin("next"), &["dev", "-p", &port.to_string()])
+            } else if has_astro {
+                run_dev(&local_bin("astro"), &["dev", "--port", &port.to_string(), "--host", &host])
             } else if has_vite {
                 let port_str = port.to_string();
-                let host_str = host.clone();
-                let vite_bin = local_bin("vite");
-                let args_vite: Vec<&str> = {
-                    let mut v = vec!["--port", &port_str, "--host", &host_str];
-                    if hmr_enabled { v.push("--hmr"); }
-                    v
-                };
-                if hmr_enabled {
-                    watch_dev(&vite_bin, &args_vite, &dir)
-                } else {
-                    crate::run_cmd(&vite_bin, &args_vite, &dir)
-                }
+                let args_vite: Vec<&str> = vec!["--port", &port_str, "--host", &host];
+                run_dev(&local_bin("vite"), &args_vite)
             } else if dir.join("package.json").exists() {
-                // Fallback: try npm run dev if package.json has a dev script
                 let pkg = std::fs::read_to_string(dir.join("package.json")).unwrap_or_default();
                 if pkg.contains("\"dev\"") || pkg.contains("'dev'") {
-                    crate::log_info("Detected npm dev script, running npm run dev ...");
-                    crate::run_cmd("npm", &["run", "dev"], &dir)
+                    crate::log_info(format!("Running {} run dev ...", pm));
+                    crate::run_cmd(pm, &["run", "dev"], &dir)
                 } else if hmr_enabled {
                     run_klyron_hmr_server(&dir, port, host)
                 } else {
@@ -139,7 +137,13 @@ pub fn run_dev(args: DevArgs) -> anyhow::Result<()> {
         }
         "rust" => {
             if hmr_enabled {
-                watch_dev("cargo", &["run"], &dir)
+                if StdCommand::new("cargo").arg("watch").arg("--version").output().is_ok() {
+                    watch_dev("cargo", &["watch", "-x", "run"], &dir)
+                } else {
+                    crate::log_info("cargo-watch not found, install with: cargo install cargo-watch");
+                    crate::log_info("Falling back to cargo run (restart manually on changes)...");
+                    crate::run_cmd("cargo", &["run"], &dir)
+                }
             } else {
                 crate::run_cmd("cargo", &["run"], &dir)
             }
@@ -424,10 +428,12 @@ fn watch_dev(program: &str, args: &[&str], dir: &Path) -> anyhow::Result<()> {
     });
 
     let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let r = running.clone();
-    ctrlc::set_handler(move || {
-        r.store(false, std::sync::atomic::Ordering::SeqCst);
-    }).ok();
+    if !CTRLC_INITIALIZED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        let r = running.clone();
+        ctrlc::set_handler(move || {
+            r.store(false, std::sync::atomic::Ordering::SeqCst);
+        }).ok();
+    }
 
     while running.load(std::sync::atomic::Ordering::SeqCst) {
         let mut child = match StdCommand::new(program)

@@ -18,9 +18,9 @@ pub struct BuildArgs {
 }
 
 fn auto_detect_target(dir: &Path) -> Option<&'static str> {
-    if dir.join("Cargo.toml").exists() { return Some("binary"); }
-    if dir.join("go.mod").exists() { return Some("binary"); }
-    if dir.join("build.zig").exists() { return Some("binary"); }
+    if dir.join("Cargo.toml").exists() { return Some("rust"); }
+    if dir.join("go.mod").exists() { return Some("go"); }
+    if dir.join("build.zig").exists() { return Some("zig"); }
     None
 }
 
@@ -39,6 +39,36 @@ fn run_npm_build(dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn build_rust(dir: &Path) -> anyhow::Result<()> {
+    crate::log_info("Building Rust project with cargo build --release ...");
+    let status = std::process::Command::new("cargo")
+        .args(["build", "--release"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .map_err(|e| anyhow::anyhow!("Failed to run cargo build: {e}"))?;
+    if !status.success() {
+        anyhow::bail!("cargo build failed");
+    }
+    Ok(())
+}
+
+fn build_go(dir: &Path) -> anyhow::Result<()> {
+    crate::log_info("Building Go project with go build ...");
+    let status = std::process::Command::new("go")
+        .args(["build", "-o", "dist/"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .map_err(|e| anyhow::anyhow!("Failed to run go build: {e}"))?;
+    if !status.success() {
+        anyhow::bail!("go build failed");
+    }
+    Ok(())
+}
+
 pub fn run_build(args: BuildArgs) -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
 
@@ -47,6 +77,14 @@ pub fn run_build(args: BuildArgs) -> anyhow::Result<()> {
         Some(t) => t.clone(),
         None => {
             match auto_detect_target(&dir) {
+                Some("rust") => {
+                    crate::anim::cmd_header("build", "Building Rust project");
+                    return build_rust(&dir);
+                }
+                Some("go") => {
+                    crate::anim::cmd_header("build", "Building Go project");
+                    return build_go(&dir);
+                }
                 Some(t) => {
                     crate::log_info(format!("Auto-detected target: {}", t));
                     t.to_string()
@@ -57,7 +95,7 @@ pub fn run_build(args: BuildArgs) -> anyhow::Result<()> {
                     if pkg_path.exists() {
                         if let Ok(content) = std::fs::read_to_string(&pkg_path) {
                             if content.contains("\"build\"") || content.contains("'build'") {
-                                crate::anim::cmd_header("build", "Delegating to package manager");
+                                crate::anim::cmd_header("build", "Running build script via package manager");
                                 let mut bar = crate::anim::GradientBar::new(60, "Running build script...");
                                 let r = run_npm_build(&dir);
                                 bar.finish_with("Build complete");
@@ -87,7 +125,7 @@ pub fn run_build(args: BuildArgs) -> anyhow::Result<()> {
     };
 
     if result.is_ok() {
-        bar.finish_with(&format!("Build complete → {}", out_dir.display()));
+        bar.finish_with(&format!("Build complete \u{2192} {}", out_dir.display()));
         crate::anim::success_banner("Build successful");
     }
     result

@@ -718,12 +718,25 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>, json_outpu
             commands::runtime::eval_with_args(args)
         }
         Commands::Run { args } => {
-            if let Some(eng) = engine {
-                let result = exec_file_with_engine(&eng, &args.path)?;
-                if !result.is_empty() { println!("{result}"); }
-                Ok(())
+            let dir = std::env::current_dir().unwrap_or_default();
+            let file_path = if args.path.is_absolute() {
+                args.path.clone()
             } else {
-                commands::runtime::run_file(args, all_extensions())
+                dir.join(&args.path)
+            };
+            if file_path.is_file() {
+                if let Some(eng) = engine {
+                    let result = exec_file_with_engine(&eng, &args.path)?;
+                    if !result.is_empty() { println!("{result}"); }
+                    Ok(())
+                } else {
+                    commands::runtime::run_file(args, all_extensions())
+                }
+            } else {
+                commands::scripts::run_script(commands::scripts::RunScriptArgs {
+                    script: args.path.to_string_lossy().to_string(),
+                    args: vec![],
+                })
             }
         }
         Commands::Repl => {

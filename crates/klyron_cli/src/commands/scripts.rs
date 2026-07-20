@@ -43,62 +43,14 @@ pub fn run_script(args: RunScriptArgs) -> anyhow::Result<()> {
 pub fn run_start() -> anyhow::Result<()> {
     let dir = std::env::current_dir()?;
     match detect_project_type_for_start(&dir) {
-        "rust" => {
-            let status = std::process::Command::new("cargo")
-                .args(["run", "--release"])
-                .current_dir(&dir)
-                .stdout(std::process::Stdio::inherit())
-                .stderr(std::process::Stdio::inherit())
-                .status()
-                .map_err(|e| anyhow::anyhow!("Failed to run cargo: {e}"))?;
-            if !status.success() {
-                anyhow::bail!("cargo run exited with code {}", status.code().unwrap_or(-1));
-            }
-            Ok(())
-        }
-        "laravel" => {
-            let status = std::process::Command::new("php")
-                .args(["artisan", "serve"])
-                .current_dir(&dir)
-                .stdout(std::process::Stdio::inherit())
-                .stderr(std::process::Stdio::inherit())
-                .status()
-                .map_err(|e| anyhow::anyhow!("Failed to run artisan: {e}"))?;
-            if !status.success() {
-                anyhow::bail!("php artisan serve exited with code {}", status.code().unwrap_or(-1));
-            }
-            Ok(())
-        }
-        "go" => {
-            let status = std::process::Command::new("go")
-                .args(["run", "."])
-                .current_dir(&dir)
-                .stdout(std::process::Stdio::inherit())
-                .stderr(std::process::Stdio::inherit())
-                .status()
-                .map_err(|e| anyhow::anyhow!("Failed to run go: {e}"))?;
-            if !status.success() {
-                anyhow::bail!("go run exited with code {}", status.code().unwrap_or(-1));
-            }
-            Ok(())
-        }
+        "rust" => crate::run_cmd("cargo", &["run", "--release"], &dir),
+        "laravel" => crate::run_cmd("php", &["artisan", "serve"], &dir),
+        "go" => crate::run_cmd("go", &["run", "."], &dir),
         "python" => {
             let py = if cfg!(windows) { "python" } else { "python3" };
-            let status = std::process::Command::new(py)
-                .args(["manage.py", "runserver"])
-                .current_dir(&dir)
-                .stdout(std::process::Stdio::inherit())
-                .stderr(std::process::Stdio::inherit())
-                .status()
-                .map_err(|e| anyhow::anyhow!("Failed to run python: {e}"))?;
-            if !status.success() {
-                anyhow::bail!("python manage.py runserver exited with code {}", status.code().unwrap_or(-1));
-            }
-            Ok(())
+            crate::run_cmd(py, &["manage.py", "runserver"], &dir)
         }
-        _ => {
-            run_via_pm(&dir, &["start".to_string()])
-        }
+        _ => run_via_pm(&dir, &["start".to_string()]),
     }
 }
 
