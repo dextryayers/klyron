@@ -490,7 +490,7 @@ pub enum Commands {
 #[derive(Subcommand)]
 pub enum TemplateAction {
     #[command(about = "List all available templates")]
-    List,
+    List { #[arg(short, long)] category: Option<String> },
     #[command(about = "Show detailed info about a template")]
     Show { name: String },
     #[command(about = "Create a new project from a template")]
@@ -933,8 +933,8 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>, json_outpu
             })
         }
         Commands::Template { action } => match action {
-            TemplateAction::List => {
-                commands::template::list_templates();
+            TemplateAction::List { category } => {
+                commands::template::list_templates_with_filter(category.as_deref());
                 Ok(())
             }
             TemplateAction::Show { name } => {

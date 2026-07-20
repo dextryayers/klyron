@@ -212,6 +212,15 @@ pub fn show_splash() {
     cmd("create laravel-api", "Scaffold a headless Laravel JSON API");
     println!();
 
+    // ── Template ──────────────────────────────────────────────────────────
+    section("Template");
+    cmd("template list", "List all available templates from adapters directory");
+    cmd("template list --category backend", "Filter templates by category (backend|frontend|laravel)");
+    cmd("template show <name>", "Show detailed info about a template");
+    cmd("template create <name> <project>", "Create a new project from a template");
+    cmd("template create <name> <project> --version <ver>", "Create with a specific version");
+    println!();
+
     // ── Database ─────────────────────────────────────────────────────────
     section("Database (ORM-agnostic)");
     cmd("db init", "Initialize the database schema and configuration");
@@ -372,6 +381,8 @@ pub fn show_splash() {
     cmd("test", "Run tests");
     cmd("lint", "Lint the codebase");
     cmd("format", "Format the codebase");
+    cmd("template list", "List available project templates");
+    cmd("template create <name> <project>", "Create a project from a template");
     cmd("deploy vercel", "Deploy to Vercel");
     println!();
 
@@ -386,7 +397,7 @@ pub fn show_splash() {
     );
     println!("  {} {}",
         Color::DIM.paint("──"),
-        Color::DIM.paint("Run 'klyron create --list' to see all 40+ scaffold templates available.")
+        Color::DIM.paint("Run 'klyron template list' to see all available templates from adapters/.")
     );
     println!("  {} {}",
         Color::DIM.paint("──"),

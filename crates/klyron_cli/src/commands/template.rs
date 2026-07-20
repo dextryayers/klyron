@@ -145,52 +145,93 @@ fn read_description(dir: &Path) -> String {
 // ── List Command ──────────────────────────────────────────────────────────
 
 pub fn list_templates() {
-  let templates = scan_adapters();
-  if templates.is_empty() {
+  list_templates_with_filter(None);
+}
+
+pub fn list_templates_with_filter(category_filter: Option<&str>) {
+  let all_templates = scan_adapters();
+  if all_templates.is_empty() {
     println!("  {} No templates found in adapters/ directory", Color::YELLOW.paint("!"));
-    println!("  Run from the Klyron project root or set KLYRON_ADAPTERS_DIR");
+    println!("  {}", Color::DIM.paint("Run from the Klyron project root or set KLYRON_ADAPTERS_DIR"));
     return;
   }
-  println!();
-  println!("  {} Available Templates", Color::CYAN.paint("📦"));
-  println!();
 
-  let by_cat = {
-    let mut map: BTreeMap<String, Vec<&TemplateInfo>> = BTreeMap::new();
-    for t in &templates {
-      map.entry(t.category.clone()).or_default().push(t);
-    }
-    map
+  let templates: Vec<&TemplateInfo> = match category_filter {
+    Some(cat) => all_templates.iter().filter(|t| t.category == cat).collect(),
+    None => all_templates.iter().collect(),
   };
 
-  let cat_labels = [("backend", "Backend"), ("frontend", "Frontend"), ("laravel", "Laravel / Fullstack")];
+  if templates.is_empty() {
+    println!("  {} No templates found for category '{}'", Color::YELLOW.paint("!"), category_filter.unwrap());
+    println!("  {}", Color::DIM.paint("Available categories: backend, frontend, laravel"));
+    return;
+  }
+
+  let cat_labels = [
+    ("backend", "Backend"),
+    ("frontend", "Frontend"),
+    ("laravel", "Laravel / Fullstack"),
+  ];
+
+  let total = all_templates.len();
+  let shown = templates.len();
+  let count_suffix = if shown == total { format!("({} found)", total) } else { format!("({} shown of {} total)", shown, total) };
+  println!();
+  let header = format!("{} Available Templates {}", Color::BRIGHT_YELLOW.bold("Template"), Color::DIM.paint(&count_suffix));
+  println!("  {}", header);
+  println!();
 
   for (cat_key, cat_label) in &cat_labels {
-    let Some(list) = by_cat.get(*cat_key) else { continue };
-    let header = format!("  {} {}", Color::MAGENTA.paint("▌"), Color::BOLD.paint(*cat_label));
-    println!("{header}");
-    for t in list {
+    let cat_templates: Vec<&&TemplateInfo> = templates.iter().filter(|t| t.category == *cat_key).collect();
+    if cat_templates.is_empty() {
+      continue;
+    }
+    println!("  {}", Color::BRIGHT_YELLOW.bold(cat_label));
+    for t in &cat_templates {
       let versions_str = if t.versions.len() > 3 {
         let shown: Vec<&str> = t.versions.iter().rev().take(3).map(|s| s.as_str()).collect();
-        format!("{} ... ({} total)", shown.join(", "), t.versions.len())
+        format!("{} … ({} ver)", shown.join(", "), t.versions.len())
       } else {
         t.versions.join(", ")
       };
-      let line = format!(
-        "    {} {:<20} {}",
-        Color::GREEN.paint("◆"),
-        Color::BOLD.paint(&t.name),
-        Color::DIM.paint(&versions_str),
+      let label = format!("{}", t.name);
+      println!("    {}  {:<24}{}",
+        Color::GREEN.paint("▶"),
+        Color::BRIGHT_CYAN.paint(format!("{:<24}", label)),
+        Color::WHITE.paint(versions_str),
       );
-      println!("{line}");
       if !t.description.is_empty() {
-        println!("    {:>2}{}", "", Color::DIM.paint(&t.description));
+        println!("    {:>2}  {:<24}{}",
+          "",
+          "",
+          Color::DIM.paint(&t.description),
+        );
       }
     }
     println!();
   }
 
-  println!("  {}", Color::DIM.paint("Usage: klyron template create <name> <project-name> [--version <ver>]"));
+  println!("  {}", Color::BRIGHT_YELLOW.bold("Usage"));
+  println!("    {}  {}{}",
+    Color::GREEN.paint("▶"),
+    Color::BRIGHT_CYAN.paint(format!("{:<24}", "template list")),
+    Color::WHITE.paint("List all available templates"),
+  );
+  println!("    {}  {}{}",
+    Color::GREEN.paint("▶"),
+    Color::BRIGHT_CYAN.paint(format!("{:<24}", "template show <name>")),
+    Color::WHITE.paint("Show template details & versions"),
+  );
+  println!("    {}  {}{}",
+    Color::GREEN.paint("▶"),
+    Color::BRIGHT_CYAN.paint(format!("{:<24}", "template create <name> <project>")),
+    Color::WHITE.paint("Create project from template"),
+  );
+  println!("    {}  {}{}",
+    Color::GREEN.paint("▶"),
+    Color::BRIGHT_CYAN.paint(format!("{:<24}", "template create <name> <project> --version <ver>")),
+    Color::WHITE.paint("Create with specific version"),
+  );
 }
 
 // ── Show Command ──────────────────────────────────────────────────────────
@@ -201,30 +242,78 @@ pub fn show_template(name: &str) {
     Some(t) => t,
     None => {
       println!("  {} Template '{}' not found", Color::YELLOW.paint("!"), name);
-      println!("  Run 'klyron template list' to see available templates");
+      println!("  {}", Color::DIM.paint("Run 'klyron template list' to see available templates"));
       return;
     }
   };
+
+  let cat_label = match t.category.as_str() {
+    "backend" => "Backend",
+    "frontend" => "Frontend",
+    "laravel" => "Laravel / Fullstack",
+    _ => &t.category,
+  };
+
   println!();
-  println!("  {} {}", Color::CYAN.paint("📦"), Color::BOLD.paint(&t.name));
-  println!();
-  println!("    Category:       {}", Color::DIM.paint(&t.category));
-  println!("    Kind:           {}", Color::DIM.paint(&t.kind));
+  println!("  {} {}  {}",
+    Color::GREEN.paint("◆"),
+    Color::BRIGHT_CYAN.bold(&t.name),
+    Color::DIM.paint(cat_label),
+  );
   if !t.description.is_empty() {
-    println!("    Description:    {}", t.description);
+    println!("  {}", Color::WHITE.paint(&t.description));
   }
   println!();
-  println!("    {} Versions:", Color::BOLD.paint("Available"));
+
+  println!("  {}", Color::BRIGHT_YELLOW.bold("Details"));
+  println!("    {}  {:<18}{}",
+    Color::GREEN.paint("▶"),
+    Color::BRIGHT_CYAN.paint("Category"),
+    Color::WHITE.paint(&t.category),
+  );
+  println!("    {}  {:<18}{}",
+    Color::GREEN.paint("▶"),
+    Color::BRIGHT_CYAN.paint("Kind"),
+    Color::WHITE.paint(&t.kind),
+  );
+  println!("    {}  {:<18}{}",
+    Color::GREEN.paint("▶"),
+    Color::BRIGHT_CYAN.paint("Default version"),
+    Color::WHITE.paint(&t.default_version),
+  );
+  println!("    {}  {:<18}{}",
+    Color::GREEN.paint("▶"),
+    Color::BRIGHT_CYAN.paint("Available versions"),
+    Color::WHITE.paint(format!("{}", t.versions.len())),
+  );
+  println!();
+
+  println!("  {}", Color::BRIGHT_YELLOW.bold("Versions"));
   for v in &t.versions {
     let marker = if *v == t.default_version {
-      format!(" {} (default)", Color::GREEN.paint("●"))
+      format!("{}  (default)", Color::GREEN.paint("●"))
     } else {
-      String::new()
+      format!("{}", Color::DIM.paint("○"))
     };
-    println!("      {} {}{}", Color::DIM.paint("•"), v, marker);
+    println!("    {}  {:<18}{}",
+      marker,
+      Color::BRIGHT_CYAN.paint(v),
+      if *v == t.default_version { Color::DIM.paint("latest recommended") } else { Color::DIM.paint("") },
+    );
   }
   println!();
-  println!("  {}", Color::DIM.paint(format!("Create: klyron template create {} <project-name> [--version {}]", name, t.default_version)));
+
+  println!("  {}", Color::BRIGHT_YELLOW.bold("Create"));
+  println!("    {}  {:<24}{}",
+    Color::GREEN.paint("▶"),
+    Color::BRIGHT_CYAN.paint(format!("template create {} <project>", name)),
+    Color::WHITE.paint(format!("Uses default version ({})", t.default_version)),
+  );
+  println!("    {}  {:<24}{}",
+    Color::GREEN.paint("▶"),
+    Color::BRIGHT_CYAN.paint(format!("template create {} <project> --version <ver>", name)),
+    Color::WHITE.paint("Use a specific version"),
+  );
 }
 
 // ── Create Command ────────────────────────────────────────────────────────
