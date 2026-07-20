@@ -735,7 +735,7 @@ pub fn dispatch_command(cmd: Commands, engine: Option<EngineRuntime>, json_outpu
             } else {
                 commands::scripts::run_script(commands::scripts::RunScriptArgs {
                     script: args.path.to_string_lossy().to_string(),
-                    args: vec![],
+                    args: args.extra,
                 })
             }
         }

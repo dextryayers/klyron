@@ -20,42 +20,16 @@ pub fn run_check(args: CheckArgs) -> anyhow::Result<()> {
 fn check_types(dir: &std::path::Path) -> anyhow::Result<()> {
     let project = crate::detect_project_type(dir);
 
-    // Check for Vue project
-    if dir.join("vue.config.ts").exists() || dir.join("vue.config.js").exists()
-        || dir.join("vite.config.ts").exists()
-    {
-        if dir.join("tsconfig.json").exists() {
-            if dir.join("node_modules/.bin/vue-tsc").exists() {
-                return crate::run_cmd("npx", &["vue-tsc", "--noEmit"], dir);
-            }
-            return crate::run_cmd("npx", &["tsc", "--noEmit"], dir);
-        }
-        // Vue without tsconfig is OK (JS project)
-        println!("Vue project detected (no tsconfig). Skipping type check.");
-        return Ok(());
-    }
-
-    // Check for Svelte project
-    if dir.join("svelte.config.js").exists() || dir.join("svelte.config.ts").exists() {
-        if dir.join("node_modules/.bin/svelte-check").exists() {
-            return crate::run_cmd("npx", &["svelte-check"], dir);
-        }
-        if dir.join("tsconfig.json").exists() {
-            return crate::run_cmd("npx", &["tsc", "--noEmit"], dir);
-        }
-        println!("Svelte project detected. Install svelte-check for better type checking.");
-        return Ok(());
-    }
-
     match project {
         "node" => {
             let tsconfig = dir.join("tsconfig.json");
-            if tsconfig.exists() {
-                crate::run_cmd("npx", &["tsc", "--noEmit"], dir)
-            } else {
+            if !tsconfig.exists() {
                 println!("No tsconfig.json found. Skipping type check.");
-                Ok(())
+                return Ok(());
             }
+
+            // Use npx tsc --noEmit for type-checking
+            crate::run_cmd("npx", &["tsc", "--noEmit"], dir)
         }
         "rust" => crate::run_cmd("cargo", &["check"], dir),
         _ => {

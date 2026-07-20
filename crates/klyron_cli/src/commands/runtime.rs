@@ -20,6 +20,8 @@ pub struct EvalArgs {
 #[derive(Args)]
 pub struct RunArgs {
     pub path: PathBuf,
+    #[arg(last = true)]
+    pub extra: Vec<String>,
     #[arg(long)]
     pub policy: Option<PolicyTemplate>,
     #[arg(long, default_value = "none")]
