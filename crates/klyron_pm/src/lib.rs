@@ -677,7 +677,11 @@ impl PackageManager {
     }
 }
 
-pub fn install_with_lockfile(dir: &Path, frozen: bool) -> Result<(), PmError> {
+pub fn install_with_lockfile(
+    dir: &Path,
+    frozen: bool,
+    progress: Option<&(dyn Fn(usize, usize, &str) + Send)>,
+) -> Result<(), PmError> {
     let nm = dir.join("node_modules");
     std::fs::create_dir_all(&nm)
         .map_err(|e| PmError::IoError(format!("Cannot create node_modules: {e}")))?;
@@ -697,13 +701,23 @@ pub fn install_with_lockfile(dir: &Path, frozen: bool) -> Result<(), PmError> {
                 .map_err(|e| PmError::IoError(e.to_string()));
         }
 
-        for (name, pkg) in &lock.packages {
-            let pkg_dir = nm.join(name);
+        let total = lock.packages.len();
+        for (i, (key, pkg)) in lock.packages.iter().enumerate() {
+            let pkg_dir = nm.join(&pkg.name);
             if !pkg_dir.join("package.json").exists() {
-                let url = format!("https://registry.npmjs.org/{name}/-/{name}-{}.tgz", pkg.version);
+                if let Some(ref cb) = progress {
+                    cb(i, total, &pkg.name);
+                }
+                let tarball_name = pkg.name.split('/').last().unwrap_or(&pkg.name);
+                let resolved = &pkg.resolved;
+                let url = if !resolved.is_empty() {
+                    resolved.clone()
+                } else {
+                    format!("https://registry.npmjs.org/{}/-/{tarball_name}-{}.tgz", pkg.name, pkg.version)
+                };
                 match download_and_extract_tarball(&url, &pkg_dir) {
-                    Ok(()) => tracing::info!("Downloaded {name}@{}", pkg.version),
-                    Err(e) => tracing::warn!("Failed to download {name}: {e}"),
+                    Ok(()) => tracing::info!("Downloaded {}@{}", pkg.name, pkg.version),
+                    Err(e) => tracing::warn!("Failed to download {}: {e}", pkg.name),
                 }
             }
         }
@@ -716,17 +730,22 @@ pub fn install_with_lockfile(dir: &Path, frozen: bool) -> Result<(), PmError> {
     let root_deps = read_root_dependencies(dir)?;
     match resolver::resolve_fresh_install("@klyron/root", "1.0.0", &root_deps) {
         Ok(resolved) => {
+            let total = resolved.len();
             let mut lock = lockfile::KlyronLockfile::new();
-            for (name, (ver, url)) in &resolved {
+            for (i, (name, (ver, url))) in resolved.iter().enumerate() {
                 let pkg_dir = nm.join(name);
                 if !pkg_dir.join("package.json").exists() {
+                    if let Some(ref cb) = progress {
+                        cb(i, total, name);
+                    }
                     match download_and_extract_tarball(url, &pkg_dir) {
                         Ok(()) => tracing::info!("Downloaded {name}@{ver}"),
                         Err(e) => tracing::warn!("Failed to download {name}: {e}"),
                     }
                 }
+                let key = format!("{name}@{ver}");
                 lock.packages.insert(
-                    name.clone(),
+                    key,
                     lockfile::LockfilePackage {
                         name: name.clone(),
                         version: ver.to_string(),
@@ -760,6 +779,28 @@ pub fn install_with_lockfile(dir: &Path, frozen: bool) -> Result<(), PmError> {
 }
 
 pub fn download_and_extract_tarball(url: &str, target_dir: &Path) -> Result<(), PmError> {
+    let max_retries = 3;
+    let mut last_err = None;
+
+    for attempt in 0..=max_retries {
+        if attempt > 0 {
+            let delay = std::time::Duration::from_secs(1u64 << attempt);
+            tracing::warn!("Retrying {url} in {delay:?} (attempt {}/{max_retries})", attempt);
+            std::thread::sleep(delay);
+        }
+
+        match try_download_and_extract(url, target_dir) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_err = Some(e);
+            }
+        }
+    }
+
+    Err(last_err.unwrap())
+}
+
+fn try_download_and_extract(url: &str, target_dir: &Path) -> Result<(), PmError> {
     let response = reqwest::blocking::get(url)
         .map_err(|e| PmError::IoError(format!("HTTP request failed: {e}")))?;
     if !response.status().is_success() {
@@ -1356,7 +1397,7 @@ mod tests {
         )
         .unwrap();
 
-        install_with_lockfile(&tmp, false).expect("fresh install should succeed");
+        install_with_lockfile(&tmp, false, None).expect("fresh install should succeed");
 
         assert!(
             tmp.join("klyron.lock").exists(),

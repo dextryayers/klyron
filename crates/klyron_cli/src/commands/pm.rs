@@ -1,6 +1,11 @@
 use clap::Args;
 use std::path::{Path, PathBuf};
-use crate::anim::{GradientBar, PulseSpinner, cmd_header, success_banner};
+use crate::anim::{PulseSpinner, cmd_header, success_banner};
+
+enum InstallEvent {
+    Progress(usize, usize, String),
+    Done(Result<(), String>),
+}
 
 fn spinner_dot() -> String {
     crate::Color::CYAN.paint("\u{25CB}")
@@ -268,7 +273,6 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
         let version_display = version.as_deref().unwrap_or("");
         let fw_label = if version_display.is_empty() { framework.clone() } else { format!("{} {}", framework, version_display) };
         let fw_colored = crate::Color::CYAN.paint(&fw_label);
-        let gear = crate::Color::MAGENTA.paint("\u{2699}");
         crate::log_info(format!("  {} {}  {}", spinner_dot(), crate::Color::BOLD.paint("Framework:"), fw_colored));
 
         let config_path = dir.join("klyron.json");
@@ -332,27 +336,42 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
     match project {
         "node" => {
             spinner.done("Project analyzed");
-    let pm = crate::detect_package_runner(&dir);
-            crate::log_info(format!("  {} {} {}", crate::Color::BLUE.paint("\u{25B6}"), crate::Color::BOLD.paint("Package manager:"), crate::Color::CYAN.paint(pm)));
-            let mut bar = GradientBar::new(100, &format!("Running {} install...", pm));
+            let mut install_spinner = PulseSpinner::new("Installing dependencies...");
 
-            let mut args = vec!["install"];
-            if frozen {
-                match pm {
-                    "npm" => args.push("--frozen-lockfile"),
-                    "yarn" => args.push("--frozen-lockfile"),
-                    "pnpm" => args.push("--frozen-lockfile"),
-                    _ => args.push("--no-save"),
+            let (tx, rx) = std::sync::mpsc::channel::<InstallEvent>();
+            let install_dir = dir.clone();
+            let progress_tx = tx.clone();
+            let done_tx = tx.clone();
+            std::thread::spawn(move || {
+                let cb = move |current: usize, total: usize, name: &str| {
+                    let _ = progress_tx.send(InstallEvent::Progress(current + 1, total, name.to_string()));
                 };
-            }
-            if let Err(e) = crate::run_cmd(pm, &args, &dir) {
-                bar.finish_with("Install failed");
-                anyhow::bail!("{} install failed: {e}", pm);
-            }
-            bar.finish_with("Dependencies installed");
-            success_banner("Install complete");
+                let result = klyron_pm::install_with_lockfile(&install_dir, frozen, Some(&cb));
+                let _ = done_tx.send(InstallEvent::Done(result.map_err(|e| e.to_string())));
+            });
 
-            let _ = generate_klyron_lock_after_install(&dir);
+            let install_result = loop {
+                match rx.recv() {
+                    Ok(InstallEvent::Progress(current, total, ref name)) => {
+                        install_spinner.set_message(&format!("Installing dependencies... ({current}/{total}) {name}"));
+                    }
+                    Ok(InstallEvent::Done(result)) => break result,
+                    Err(_) => {
+                        install_spinner.fail("Install process terminated unexpectedly");
+                        anyhow::bail!("Install thread terminated unexpectedly");
+                    }
+                }
+            };
+
+            match install_result {
+                Ok(()) => install_spinner.done("Dependencies installed"),
+                Err(ref e) => {
+                    install_spinner.fail(&format!("Install failed: {e}"));
+                    anyhow::bail!("Install failed: {e}");
+                }
+            }
+
+            success_banner("Install complete");
 
             // Auto-link workspace members
             let ws = klyron_pm::WorkspaceManager::new(&dir);

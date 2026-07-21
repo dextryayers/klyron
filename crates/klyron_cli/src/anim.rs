@@ -272,9 +272,7 @@ pub fn cmd_header(cmd: &str, desc: &str) {
     let (r, g, b) = gradient_color(0.8);
     let cmd_colored = rgb(r, g, b, cmd);
     let desc_colored = rgb(180, 180, 200, desc);
-    let dashes = "─".repeat(4);
-    let sep = rgb(60, 60, 80, &dashes);
-    let _ = writeln!(std::io::stderr(), "\n  {} {} {} {}", cmd_colored, sep, desc_colored, sep);
+    let _ = writeln!(std::io::stderr(), "\n  {}  {}", cmd_colored, desc_colored);
 }
 
 #[cfg(test)]

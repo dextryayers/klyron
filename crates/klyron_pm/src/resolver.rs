@@ -205,9 +205,10 @@ pub fn resolve_fresh_install(
                 }
             })
             .or_else(|| {
+                let short = name.split('/').last().unwrap_or(name);
                 Some(format!(
                     "https://registry.npmjs.org/{}/-/{}-{}.tgz",
-                    name, name, ver
+                    name, short, ver
                 ))
             });
         if let Some(u) = url {
