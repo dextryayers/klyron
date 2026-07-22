@@ -25,6 +25,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::os::unix::process::ExitStatusExt;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 pub mod lockfile;
@@ -677,10 +680,65 @@ impl PackageManager {
     }
 }
 
+/// Shared progress state visible from the CLI spinner thread.
+/// `InstallProgress { done: 12, total: 194 }` → spinner shows "12/194".
+pub struct InstallProgress {
+    pub done: AtomicUsize,
+    pub total: AtomicUsize,
+}
+
+impl InstallProgress {
+    pub fn new(total: usize) -> Self {
+        Self {
+            done: AtomicUsize::new(0),
+            total: AtomicUsize::new(total),
+        }
+    }
+}
+
+/// Download a batch of packages in parallel (8 concurrent workers).
+fn download_packages_parallel(
+    tasks: &[(String, String, PathBuf)],
+    progress: Option<&InstallProgress>,
+) -> Vec<(String, PmError)> {
+    let total = tasks.len();
+    let idx_counter = Arc::new(AtomicUsize::new(0));
+    let errors = Arc::new(Mutex::new(Vec::new()));
+
+    std::thread::scope(|s| {
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let idx_counter = idx_counter.clone();
+            let errors = errors.clone();
+            handles.push(s.spawn(move || loop {
+                let idx = idx_counter.fetch_add(1, Ordering::SeqCst);
+                if idx >= total {
+                    break;
+                }
+                let (name, url, pkg_dir) = &tasks[idx];
+                if !pkg_dir.join("package.json").exists() {
+                    if let Err(e) = download_and_extract_tarball(url, pkg_dir) {
+                        errors.lock().unwrap().push((name.clone(), e));
+                    }
+                }
+                if let Some(p) = progress {
+                    p.done.fetch_add(1, Ordering::SeqCst);
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+    });
+
+    errors.lock().unwrap().drain(..).collect()
+}
+
 pub fn install_with_lockfile(
     dir: &Path,
     frozen: bool,
     progress: Option<&(dyn Fn(usize, usize, &str) + Send)>,
+    install_progress: Option<&InstallProgress>,
 ) -> Result<(), PmError> {
     let nm = dir.join("node_modules");
     std::fs::create_dir_all(&nm)
@@ -701,24 +759,34 @@ pub fn install_with_lockfile(
                 .map_err(|e| PmError::IoError(e.to_string()));
         }
 
-        let total = lock.packages.len();
-        for (i, (key, pkg)) in lock.packages.iter().enumerate() {
-            let pkg_dir = nm.join(&pkg.name);
-            if !pkg_dir.join("package.json").exists() {
-                if let Some(ref cb) = progress {
-                    cb(i, total, &pkg.name);
-                }
+        let tasks: Vec<_> = lock
+            .packages
+            .iter()
+            .filter(|(_, pkg)| !nm.join(&pkg.name).join("package.json").exists())
+            .map(|(_, pkg)| {
+                let pkg_dir = nm.join(&pkg.name);
                 let tarball_name = pkg.name.split('/').last().unwrap_or(&pkg.name);
-                let resolved = &pkg.resolved;
-                let url = if !resolved.is_empty() {
-                    resolved.clone()
+                let url = if !pkg.resolved.is_empty() {
+                    pkg.resolved.clone()
                 } else {
-                    format!("https://registry.npmjs.org/{}/-/{tarball_name}-{}.tgz", pkg.name, pkg.version)
+                    format!(
+                        "https://registry.npmjs.org/{}/-/{tarball_name}-{}.tgz",
+                        pkg.name, pkg.version
+                    )
                 };
-                match download_and_extract_tarball(&url, &pkg_dir) {
-                    Ok(()) => tracing::info!("Downloaded {}@{}", pkg.name, pkg.version),
-                    Err(e) => tracing::warn!("Failed to download {}: {e}", pkg.name),
-                }
+                (pkg.name.clone(), url, pkg_dir)
+            })
+            .collect();
+
+        let total = tasks.len();
+        if total > 0 {
+            if let Some(p) = install_progress {
+                p.total.store(total, Ordering::SeqCst);
+                p.done.store(0, Ordering::SeqCst);
+            }
+            let errors = download_packages_parallel(&tasks, install_progress);
+            for (name, e) in &errors {
+                tracing::warn!("Failed to download {name}: {e}");
             }
         }
         let _ = scripts::run_postinstall_scripts(&nm);
@@ -726,11 +794,7 @@ pub fn install_with_lockfile(
     }
 
     // No lockfile: if node_modules exists with packages, scan it directly
-    // instead of re-resolving from the registry (avoids HTTP requests).
     if nm.exists() {
-        if let Some(ref cb) = progress {
-            cb(0, 1, "scanning existing node_modules");
-        }
         match scan_node_modules_for_lockfile(dir) {
             Ok(lock) if !lock.packages.is_empty() => {
                 let bytes = lock.to_bytes()?;
@@ -743,23 +807,45 @@ pub fn install_with_lockfile(
         }
     }
 
-    // No lockfile and no node_modules: fall back to npm install, then
-    // scan node_modules to generate klyron.lock.
-    tracing::info!("No klyron.lock or node_modules found, falling back to npm install");
+    // ── Fresh install: run npm install (hidden), then scan for lockfile ───
+    // The native resolver will replace this in a future release once metadata
+    // caching and bulk-fetch are implemented.
+    use std::process::Stdio;
+    // Set a dummy total so the CLI progress bar animates (indeterminate sweep).
+    if let Some(p) = install_progress {
+        p.total.store(100, Ordering::SeqCst);
+        p.done.store(0, Ordering::SeqCst);
+    }
+    if let Some(ref cb) = progress {
+        cb(0, 1, "running npm install");
+    }
     let status = std::process::Command::new("npm")
-        .args(["install"])
+        .args(["install", "--loglevel=error"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .current_dir(dir)
         .status()
         .map_err(|e| PmError::IoError(format!("Failed to run npm install: {e}")))?;
     if !status.success() {
-        return Err(PmError::IoError("npm install failed".into()));
+        if let Some(sig) = status.signal() {
+            return Err(PmError::IoError(format!("npm install was interrupted (signal {sig})")));
+        }
+        return Err(PmError::IoError(format!("npm install failed (exit code {:?})", status.code())));
     }
-    // Scan and write klyron.lock from the npm-installed node_modules
+    // Mark progress as done.
+    if let Some(p) = install_progress {
+        p.done.store(100, Ordering::SeqCst);
+    }
+
+    // Write klyron.lock from the installed node_modules.
     let lock = scan_node_modules_for_lockfile(dir)?;
     if !lock.packages.is_empty() {
         let bytes = lock.to_bytes()?;
         std::fs::write(&lockfile_path, &bytes)?;
-        tracing::info!("Generated klyron.lock ({} packages) after npm install", lock.packages.len());
+        tracing::info!(
+            "Generated klyron.lock ({} packages) after npm install",
+            lock.packages.len()
+        );
     }
     let _ = scripts::run_postinstall_scripts(&nm);
     Ok(())
@@ -869,13 +955,24 @@ fn scan_dir_for_packages(dir: &Path, lock: &mut lockfile::KlyronLockfile) -> Res
     if !dir.is_dir() {
         return Ok(());
     }
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| PmError::IoError(e.to_string()))?;
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(()),
+    };
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() { continue; }
+        if !path.is_dir() {
+            continue;
+        }
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') || name == "node_modules" || name == ".bin" {
+        if name == "node_modules" || name == ".bin" {
+            continue;
+        }
+        if name.starts_with('@') {
+            scan_dir_for_packages(&path, lock)?;
+            continue;
+        }
+        if name.starts_with('.') {
             continue;
         }
         let pkg_json_path = path.join("package.json");
@@ -1389,7 +1486,7 @@ mod tests {
         )
         .unwrap();
 
-        install_with_lockfile(&tmp, false, None).expect("fresh install should succeed");
+        install_with_lockfile(&tmp, false, None, None).expect("fresh install should succeed");
 
         assert!(
             tmp.join("klyron.lock").exists(),

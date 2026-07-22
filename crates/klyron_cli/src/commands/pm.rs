@@ -333,22 +333,65 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
         "node" => {
             spinner.done("Project analyzed");
 
+            let progress = std::sync::Arc::new(klyron_pm::InstallProgress::new(0));
             let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let done_clone = done.clone();
+            let progress_clone = progress.clone();
             let spinner_handle = std::thread::spawn(move || {
-                let chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
                 let start = std::time::Instant::now();
                 let mut i = 0usize;
+                let bar_width = 25usize;
                 while !done_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                    let c = chars[i % chars.len()];
                     let secs = start.elapsed().as_secs_f64();
-                    eprint!("\r  {}  Installing dependencies...  {secs:.1}s", c);
+                    let d = progress_clone.done.load(std::sync::atomic::Ordering::Relaxed);
+                    let t = progress_clone.total.load(std::sync::atomic::Ordering::Relaxed);
+
+                    let mut bar = String::with_capacity(bar_width);
+                    if t > 0 {
+                        let pct = (d as f64 / t as f64).min(1.0);
+                        let filled = (pct * bar_width as f64) as usize;
+                        for j in 0..bar_width {
+                            if j < filled {
+                                let t2 = j as f64 / bar_width.max(1) as f64;
+                                let pulse = ((i as f64 * 0.05 + t2 * 5.0).sin() * 0.2 + 0.8) * if filled == 0 { 0.6 } else { 1.0 };
+                                let r = (80.0 + t2 * 150.0 * pulse) as u8;
+                                let g = (180.0 - t2 * 100.0 * pulse) as u8;
+                                let b = (220.0 - t2 * 80.0 * pulse) as u8;
+                                bar.push_str(&crate::anim::rgb(r, g, b, "█"));
+                            } else if j < filled + 3 {
+                                let dist = j - filled;
+                                let b = (40 + (20 - dist as u8 * 5).max(0).min(20)) as u8;
+                                bar.push_str(&crate::anim::rgb(b, b, b + 10, "░"));
+                            } else {
+                                bar.push_str(&crate::anim::rgb(30, 30, 40, "░"));
+                            }
+                        }
+                        // Indeterminate sweep when d==0 (npm install phase): slide a
+                        // bright segment left-to-right to show activity.
+                        if d == 0 && t > 0 {
+                            let sweep = (i / 2) % bar_width;
+                            for j in 0..bar_width {
+                                let dist = if j >= sweep { j - sweep } else { bar_width - sweep + j };
+                                if dist < 5 {
+                                    let bright = ((5 - dist) as f64 / 5.0 * 200.0) as u8;
+                                    bar.replace_range(j..=j, &crate::anim::rgb(bright, bright, 255, "▓"));
+                                }
+                            }
+                        }
+                        eprint!("\r  {}  [{bar}] {:>3}%  {:.1}s",
+                            crate::anim::rgb(0, 200, 255, "⬇"),
+                            (pct * 100.0) as u8,
+                            secs);
+                    } else {
+                        let c = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][i % 10];
+                        eprint!("\r  {}  Installing dependencies...  {secs:.1}s", c);
+                    }
                     i += 1;
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }
             });
 
-            let install_result = klyron_pm::install_with_lockfile(&dir, frozen, None);
+            let install_result = klyron_pm::install_with_lockfile(&dir, frozen, None, Some(progress.as_ref()));
 
             done.store(true, std::sync::atomic::Ordering::Relaxed);
             let _ = spinner_handle.join();

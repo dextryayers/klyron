@@ -23,7 +23,7 @@ pub struct PackageMetadata {
 /// Fetch full package metadata from the npm registry (all versions + their deps).
 pub fn fetch_package_metadata(name: &str) -> Result<PackageMetadata, PmError> {
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .timeout(std::time::Duration::from_secs(15))
         .build();
     let client = match client {
         Ok(c) => c,
@@ -75,15 +75,6 @@ pub fn fetch_package_metadata(name: &str) -> Result<PackageMetadata, PmError> {
 }
 
 fn parse_metadata(_name: &str, body: serde_json::Value) -> Result<PackageMetadata, PmError> {
-    let mut dist_tags = BTreeMap::new();
-    if let Some(tags) = body.get("dist-tags").and_then(|v| v.as_object()) {
-        for (k, v) in tags {
-            if let Some(s) = v.as_str() {
-                dist_tags.insert(k.clone(), s.to_string());
-            }
-        }
-    }
-
     let mut dist_tags = BTreeMap::new();
     if let Some(tags) = body.get("dist-tags").and_then(|v| v.as_object()) {
         for (k, v) in tags {
@@ -182,21 +173,118 @@ pub fn resolve_fresh(
     }
 }
 
-/// Same as [`resolve_fresh`] but also returns the resolved tarball URL for each
-/// package so the caller can download and extract it without involving npm.
+/// Resolve a dependency tree AND return tarball URLs in a SINGLE pass (no
+/// double-fetch of registry metadata).  This is the function used by
+/// `install_with_lockfile` when no lockfile exists — it replaces the old
+/// `resolve_fresh` + `resolve_fresh_install` pair that fetched every
+/// package twice.
 pub fn resolve_fresh_install(
     root_name: &str,
     root_version: &str,
     root_deps: &HashMap<String, String>,
 ) -> Result<HashMap<String, (semver::Version, String)>, PmError> {
-    let versions = resolve_fresh(root_name, root_version, root_deps)?;
+    let mut provider = KlyronDependencyProvider::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut metadata_cache: HashMap<String, PackageMetadata> = HashMap::new();
+
+    let root_ver = semver::Version::parse(root_version)
+        .map_err(|e| PmError::ResolutionError(format!("invalid root version: {e}")))?;
+    provider.add_package_version(root_name.to_string(), root_ver.clone());
+
+    let mut root_constraints = DependencyConstraints::default();
+    for (name, range) in root_deps {
+        root_constraints.insert(name.clone(), normalize_range(range));
+    }
+    provider.add_dependencies(root_name.to_string(), root_ver.clone(), root_constraints);
+
+    // BFS over transitive dependencies — fetch metadata in parallel batches
+    // of 8 to avoid sequential HTTP overhead (which caused 50+ s stalls).
+    let mut queue: VecDeque<String> = root_deps.keys().cloned().collect();
+    while !queue.is_empty() {
+        // Collect all currently-queued names that haven't been visited.
+        let batch: Vec<String> = queue
+            .drain(..)
+            .filter(|name| visited.insert(name.clone()))
+            .collect();
+        if batch.is_empty() {
+            continue;
+        }
+
+        // Fetch metadata in chunks of 8 concurrent requests.
+        for chunk in batch.chunks(8) {
+            let mut handles = Vec::with_capacity(chunk.len());
+            for pkg in chunk {
+                let pkg = pkg.clone();
+                handles.push(std::thread::spawn(move || {
+                    (pkg.clone(), fetch_package_metadata(&pkg))
+                }));
+            }
+            for handle in handles {
+                let (pkg, result) = handle.join().unwrap();
+                let meta = match result {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::warn!("Cannot fetch metadata for {pkg}: {e}");
+                        PackageMetadata {
+                            dist_tags: BTreeMap::new(),
+                            versions: BTreeMap::new(),
+                        }
+                    }
+                };
+                metadata_cache.insert(pkg.clone(), meta);
+            }
+        }
+
+        // Process all metadata that was just fetched, discover new deps.
+        // We iterate the batch again (now all metadata is cached).
+        let newly_fetched: Vec<String> = batch.iter().cloned().collect();
+        for pkg in &newly_fetched {
+            if let Some(meta) = metadata_cache.get(pkg) {
+                for (ver, vm) in &meta.versions {
+                    if let Ok(v) = semver::Version::parse(ver) {
+                        provider.add_package_version(pkg.clone(), v.clone());
+                        let mut dc = DependencyConstraints::default();
+                        for (dn, dr) in &vm.deps {
+                            dc.insert(dn.clone(), normalize_range(dr));
+                            if !visited.contains(dn) && !queue.contains(dn) {
+                                queue.push_back(dn.clone());
+                            }
+                        }
+                        provider.add_dependencies(pkg.clone(), v, dc);
+                    }
+                }
+            }
+        }
+    }
+
+    // Resolve with pubgrub
+    let solution = match pubgrub::resolve(&provider, root_name.to_string(), root_ver) {
+        Ok(s) => s,
+        Err(PubGrubError::NoSolution(derivation_tree)) => {
+            let report = DefaultStringReporter::report(&derivation_tree);
+            return Err(PmError::ResolutionError(format!(
+                "Dependency resolution failed:\n{}",
+                report
+            )));
+        }
+        Err(err) => {
+            return Err(PmError::ResolutionError(format!(
+                "Dependency resolution failed: {:?}",
+                err
+            )));
+        }
+    };
+
+    // Extract tarball URLs from cached metadata (no second registry fetch).
     let mut out = HashMap::new();
-    for (name, ver) in &versions {
-        let meta = fetch_package_metadata(name)?;
+    for (name, ver) in &solution {
+        if name == root_name {
+            continue;
+        }
         let key = ver.to_string();
-        let url = meta
-            .versions
-            .get(&key)
+        let url = metadata_cache
+            .get(name)
+            .and_then(|m| m.versions.get(&key))
             .and_then(|vm| {
                 if vm.resolved.is_empty() {
                     None
@@ -222,12 +310,9 @@ fn normalize_range(range: &str) -> Ranges<semver::Version> {
     if range.is_empty() || range == "*" {
         return Ranges::full();
     }
-    let trimmed = range
-        .trim_start_matches('^')
-        .trim_start_matches('~')
-        .trim_start_matches('=')
-        .trim();
-    match semver::VersionReq::parse(trimmed) {
+    // Pass the raw range string — semver::VersionReq natively handles
+    // ^1.2.3, ~1.2.3, =1.2.3, >=1.2.3, >1.2.3 <2.0.0, etc.
+    match semver::VersionReq::parse(range.trim()) {
         Ok(req) => Ranges::from_req(req),
         Err(_) => Ranges::full(),
     }
