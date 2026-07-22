@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -716,35 +716,73 @@ pub fn get_lifecycle_order(name: &str) -> [String; 3] {
     [format!("pre{name}"), name.to_string(), format!("post{name}")]
 }
 
-pub fn run_postinstall_scripts(node_modules: &Path) -> anyhow::Result<()> {
-    if !node_modules.exists() {
+/// Collect postinstall scripts from a node_modules tree (including @scope dirs).
+fn collect_postinstall_scripts(node_modules: &Path) -> Vec<(String, PathBuf, String)> {
+    let mut scripts = Vec::new();
+    if !node_modules.is_dir() {
+        return scripts;
+    }
+    let entries = match std::fs::read_dir(node_modules) {
+        Ok(e) => e,
+        Err(_) => return scripts,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() { continue; }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == "node_modules" || name == ".bin" || name.starts_with('.') {
+            continue;
+        }
+        if name.starts_with('@') {
+            scripts.extend(collect_postinstall_scripts(&path));
+            continue;
+        }
+        let pkg_json = path.join("package.json");
+        if !pkg_json.exists() { continue; }
+        if let Ok(content) = std::fs::read_to_string(&pkg_json) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(scripts_obj) = json.get("scripts").and_then(|s| s.as_object()) {
+                    if let Some(postinstall) = scripts_obj.get("postinstall").and_then(|s| s.as_str()) {
+                        let package_name = json.get("name").and_then(|n| n.as_str()).unwrap_or(&name);
+                        scripts.push((package_name.to_string(), path, postinstall.to_string()));
+                    }
+                }
+            }
+        }
+    }
+    scripts
+}
+
+/// Run all postinstall scripts found in node_modules.
+/// Optionally reports progress via `InstallProgress`.
+pub fn run_postinstall_scripts(
+    node_modules: &Path,
+    progress: Option<&crate::InstallProgress>,
+) -> anyhow::Result<()> {
+    let scripts = collect_postinstall_scripts(node_modules);
+    if scripts.is_empty() {
         return Ok(());
     }
 
-    for entry in std::fs::read_dir(node_modules)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_dir() { continue; }
+    if let Some(p) = progress {
+        p.set_phase(scripts.len(), "running postinstall scripts");
+    }
 
-        let package_json = path.join("package.json");
-        if !package_json.exists() { continue; }
-
-        let content = std::fs::read_to_string(&package_json)?;
-        let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else { continue };
-
-        if let Some(scripts) = json.get("scripts").and_then(|s| s.as_object()) {
-            if let Some(postinstall) = scripts.get("postinstall").and_then(|s| s.as_str()) {
-                let package_name = json.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                eprintln!("  Running postinstall for {package_name}: {postinstall}");
-                let status = std::process::Command::new("sh")
-                    .args(["-c", postinstall])
-                    .current_dir(&path)
-                    .status()
-                    .map_err(|e| anyhow::anyhow!("Failed to run postinstall for {package_name}: {e}"))?;
-                if !status.success() {
-                    eprintln!("  Warning: postinstall for {package_name} failed (exit: {})", status);
-                }
-            }
+    for (name, path, script) in &scripts {
+        if let Some(p) = progress {
+            let m = format!("postinstall: {name}");
+            p.set_msg(&m);
+        }
+        let status = std::process::Command::new("sh")
+            .args(["-c", script.as_str()])
+            .current_dir(path)
+            .status()
+            .map_err(|e| anyhow::anyhow!("Failed to run postinstall for {name}: {e}"))?;
+        if !status.success() {
+            eprintln!("  Warning: postinstall for {name} failed (exit: {})", status);
+        }
+        if let Some(p) = progress {
+            p.done.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
     }
     Ok(())

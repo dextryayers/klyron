@@ -333,26 +333,24 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
         "node" => {
             spinner.done("Project analyzed");
 
+            let install_start = std::time::Instant::now();
             let progress = std::sync::Arc::new(klyron_pm::InstallProgress::new(0));
             let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let done_clone = done.clone();
             let progress_clone = progress.clone();
             let spinner_handle = std::thread::spawn(move || {
-                let start = std::time::Instant::now();
                 let mut i = 0usize;
                 let bar_width = 20usize;
                 while !done_clone.load(std::sync::atomic::Ordering::Relaxed) {
-                    let secs = start.elapsed().as_secs_f64();
+                    let secs = install_start.elapsed().as_secs_f64();
                     let d = progress_clone.done.load(std::sync::atomic::Ordering::Relaxed);
                     let t = progress_clone.total.load(std::sync::atomic::Ordering::Relaxed);
-
-                    // \r moves to start of line, \x1b[K clears to end
                     if t > 0 {
                         let pct = (d as f64 / t as f64).min(1.0);
                         let filled = (pct * bar_width as f64) as usize;
                         let sweep = (i / 2) % bar_width;
                         let plain = d == 0;
-                        eprint!("\r  {}  [", crate::anim::rgb(0, 200, 255, "⬇"));
+                        eprint!("\r  {}  ", crate::anim::rgb(0, 200, 255, "⬇"));
                         for j in 0..bar_width {
                             let ch = if j < filled { "█" } else { "░" };
                             let dist = if j >= sweep { j - sweep } else { bar_width - sweep + j };
@@ -369,13 +367,15 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
                                 eprint!("{}", crate::anim::rgb(50, 50, 65, ch));
                             }
                         }
-                        eprint!("\x1b[K] {:>3}%  {:.1}s", (pct * 100.0) as u8, secs);
+                        let msg = progress_clone.msg.lock().unwrap();
+                        eprint!("\x1b[K] {:>3}%  {}  {:.1}s",
+                            (pct * 100.0) as u8, *msg, secs);
                     } else {
                         let c = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][i % 10];
-                        eprint!("\r\x1b[K  {}  Installing dependencies...  {secs:.1}s", c);
+                        eprint!("\r\x1b[K  {}  Installing dependencies...  {:.1}s", c, secs);
                     }
                     i += 1;
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    std::thread::sleep(std::time::Duration::from_millis(50));
                 }
                 eprint!("\r\x1b[K");
             });
@@ -384,22 +384,38 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
 
             done.store(true, std::sync::atomic::Ordering::Relaxed);
             let _ = spinner_handle.join();
-            clear_line();
+
+            let elapsed = install_start.elapsed();
+            let pkg_count = std::fs::read(&dir.join("klyron.lock"))
+                .ok()
+                .and_then(|data| klyron_pm::lockfile::KlyronLockfile::from_bytes(&data).ok())
+                .map(|l| l.packages.len())
+                .unwrap_or(0);
 
             match &install_result {
                 Ok(()) => {
                     let check = crate::anim::rgb(0, 230, 180, "✓");
-                    let elapsed = format!("({:.1}s)", 0.0f64);
-                    let _ = writeln!(std::io::stderr(), "  {}  {} {}", check, "Dependencies installed", elapsed);
+                    let line = "─".repeat(48);
+                    let border = crate::anim::rgb(80, 200, 180, &format!("  ┌{}┐", line));
+                    let title = crate::anim::rgb(80, 200, 180, &format!("  │ {}  {} │", check, "Install complete"));
+                    let empty = crate::anim::rgb(80, 200, 180, "  │                                                          │");
+                    let pkg_info = crate::anim::rgb(180, 220, 200, &format!("    Packages:  {}", if pkg_count > 0 { format!("{pkg_count}") } else { "—".into() }));
+                    let time_info = crate::anim::rgb(180, 220, 200, &format!("    Time:      {:.1}s", elapsed.as_secs_f64()));
+                    let lock_info = if dir.join("klyron.lock").exists() {
+                        crate::anim::rgb(180, 220, 200, "    Lockfile:  klyron.lock")
+                    } else {
+                        crate::anim::rgb(180, 220, 200, "    Lockfile:  —")
+                    };
+                    let border2 = crate::anim::rgb(80, 200, 180, &format!("  └{}┘", line));
+                    eprintln!("\n{}\n{}\n{}\n  {}\n  {}\n  {}\n{}",
+                        border, title, empty, pkg_info, time_info, lock_info, border2);
                 }
                 Err(e) => {
                     let cross = crate::anim::rgb(255, 56, 56, "✗");
-                    let _ = writeln!(std::io::stderr(), "  {}  Install failed: {e}", cross);
+                    eprintln!("  {}  Install failed: {e}", cross);
                     anyhow::bail!("Install failed: {e}");
                 }
             }
-
-            success_banner("Install complete");
 
             // Auto-link workspace members
             let ws = klyron_pm::WorkspaceManager::new(&dir);
