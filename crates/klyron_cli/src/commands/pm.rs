@@ -1,11 +1,7 @@
 use clap::Args;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use crate::anim::{PulseSpinner, cmd_header, success_banner};
-
-enum InstallEvent {
-    Progress(usize, usize, String),
-    Done(Result<(), String>),
-}
+use crate::anim::{PulseSpinner, clear_line, cmd_header, success_banner};
 
 fn spinner_dot() -> String {
     crate::Color::CYAN.paint("\u{25CB}")
@@ -336,37 +332,37 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
     match project {
         "node" => {
             spinner.done("Project analyzed");
-            let mut install_spinner = PulseSpinner::new("Installing dependencies...");
 
-            let (tx, rx) = std::sync::mpsc::channel::<InstallEvent>();
-            let install_dir = dir.clone();
-            let progress_tx = tx.clone();
-            let done_tx = tx.clone();
-            std::thread::spawn(move || {
-                let cb = move |current: usize, total: usize, name: &str| {
-                    let _ = progress_tx.send(InstallEvent::Progress(current + 1, total, name.to_string()));
-                };
-                let result = klyron_pm::install_with_lockfile(&install_dir, frozen, Some(&cb));
-                let _ = done_tx.send(InstallEvent::Done(result.map_err(|e| e.to_string())));
+            let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let done_clone = done.clone();
+            let spinner_handle = std::thread::spawn(move || {
+                let chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                let start = std::time::Instant::now();
+                let mut i = 0usize;
+                while !done_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    let c = chars[i % chars.len()];
+                    let secs = start.elapsed().as_secs_f64();
+                    eprint!("\r  {}  Installing dependencies...  {secs:.1}s", c);
+                    i += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
             });
 
-            let install_result = loop {
-                match rx.recv() {
-                    Ok(InstallEvent::Progress(current, total, ref name)) => {
-                        install_spinner.set_message(&format!("Installing dependencies... ({current}/{total}) {name}"));
-                    }
-                    Ok(InstallEvent::Done(result)) => break result,
-                    Err(_) => {
-                        install_spinner.fail("Install process terminated unexpectedly");
-                        anyhow::bail!("Install thread terminated unexpectedly");
-                    }
-                }
-            };
+            let install_result = klyron_pm::install_with_lockfile(&dir, frozen, None);
 
-            match install_result {
-                Ok(()) => install_spinner.done("Dependencies installed"),
-                Err(ref e) => {
-                    install_spinner.fail(&format!("Install failed: {e}"));
+            done.store(true, std::sync::atomic::Ordering::Relaxed);
+            let _ = spinner_handle.join();
+            clear_line();
+
+            match &install_result {
+                Ok(()) => {
+                    let check = crate::anim::rgb(0, 230, 180, "✓");
+                    let elapsed = format!("({:.1}s)", 0.0f64);
+                    let _ = writeln!(std::io::stderr(), "  {}  {} {}", check, "Dependencies installed", elapsed);
+                }
+                Err(e) => {
+                    let cross = crate::anim::rgb(255, 56, 56, "✗");
+                    let _ = writeln!(std::io::stderr(), "  {}  Install failed: {e}", cross);
                     anyhow::bail!("Install failed: {e}");
                 }
             }

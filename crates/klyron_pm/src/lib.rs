@@ -725,72 +725,44 @@ pub fn install_with_lockfile(
         return Ok(());
     }
 
-    // No lockfile: if node_modules exists, scan it directly instead of
-    // re-resolving from the registry (avoids hundreds of HTTP requests).
-    if nm.join("package.json").exists() || nm.read_dir().map(|mut d| d.any(|e| e.is_ok())).unwrap_or(false) {
+    // No lockfile: if node_modules exists with packages, scan it directly
+    // instead of re-resolving from the registry (avoids HTTP requests).
+    if nm.exists() {
         if let Some(ref cb) = progress {
             cb(0, 1, "scanning existing node_modules");
         }
-        let lock = scan_node_modules_for_lockfile(dir)?;
-        let bytes = lock.to_bytes()?;
-        std::fs::write(&lockfile_path, &bytes)?;
-        tracing::info!("Generated klyron.lock from existing node_modules ({} packages)", lock.packages.len());
-        let _ = scripts::run_postinstall_scripts(&nm);
-        return Ok(());
+        match scan_node_modules_for_lockfile(dir) {
+            Ok(lock) if !lock.packages.is_empty() => {
+                let bytes = lock.to_bytes()?;
+                std::fs::write(&lockfile_path, &bytes)?;
+                tracing::info!("Generated klyron.lock from existing node_modules ({} packages)", lock.packages.len());
+                let _ = scripts::run_postinstall_scripts(&nm);
+                return Ok(());
+            }
+            _ => {}
+        }
     }
 
-    // No lockfile and no node_modules: resolve fresh from package.json using
-    // the registry directly (no npm delegation), download every package, then
-    // write a klyron.lock.
-    let root_deps = read_root_dependencies(dir)?;
-    match resolver::resolve_fresh_install("@klyron/root", "1.0.0", &root_deps) {
-        Ok(resolved) => {
-            let total = resolved.len();
-            let mut lock = lockfile::KlyronLockfile::new();
-            for (i, (name, (ver, url))) in resolved.iter().enumerate() {
-                let pkg_dir = nm.join(name);
-                if !pkg_dir.join("package.json").exists() {
-                    if let Some(ref cb) = progress {
-                        cb(i, total, name);
-                    }
-                    match download_and_extract_tarball(url, &pkg_dir) {
-                        Ok(()) => tracing::info!("Downloaded {name}@{ver}"),
-                        Err(e) => tracing::warn!("Failed to download {name}: {e}"),
-                    }
-                }
-                let key = format!("{name}@{ver}");
-                lock.packages.insert(
-                    key,
-                    lockfile::LockfilePackage {
-                        name: name.clone(),
-                        version: ver.to_string(),
-                        resolved: url.clone(),
-                        integrity: String::new(),
-                        integrity_hashes: Vec::new(),
-                        signature: None,
-                        signer: None,
-                        dependencies: HashMap::new(),
-                        optional_dependencies: HashMap::new(),
-                        peer_dependencies: HashMap::new(),
-                        bin: None,
-                        has_node_modules: false,
-                        install_time_ms: 0,
-                    },
-                );
-            }
-            let bytes = lock
-                .to_bytes()
-                .map_err(|e| PmError::IoError(e.to_string()))?;
-            std::fs::write(&lockfile_path, &bytes)
-                .map_err(|e| PmError::IoError(e.to_string()))?;
-            tracing::info!("Resolved {} packages and wrote klyron.lock", lock.packages.len());
-            let _ = scripts::run_postinstall_scripts(&nm);
-            Ok(())
-        }
-        Err(e) => Err(PmError::IoError(format!(
-            "Fresh resolution failed (no npm fallback): {e}"
-        ))),
+    // No lockfile and no node_modules: fall back to npm install, then
+    // scan node_modules to generate klyron.lock.
+    tracing::info!("No klyron.lock or node_modules found, falling back to npm install");
+    let status = std::process::Command::new("npm")
+        .args(["install"])
+        .current_dir(dir)
+        .status()
+        .map_err(|e| PmError::IoError(format!("Failed to run npm install: {e}")))?;
+    if !status.success() {
+        return Err(PmError::IoError("npm install failed".into()));
     }
+    // Scan and write klyron.lock from the npm-installed node_modules
+    let lock = scan_node_modules_for_lockfile(dir)?;
+    if !lock.packages.is_empty() {
+        let bytes = lock.to_bytes()?;
+        std::fs::write(&lockfile_path, &bytes)?;
+        tracing::info!("Generated klyron.lock ({} packages) after npm install", lock.packages.len());
+    }
+    let _ = scripts::run_postinstall_scripts(&nm);
+    Ok(())
 }
 
 pub fn download_and_extract_tarball(url: &str, target_dir: &Path) -> Result<(), PmError> {

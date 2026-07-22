@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::time::{Duration, Instant};
 
-fn rgb(r: u8, g: u8, b: u8, text: &str) -> String {
+pub fn rgb(r: u8, g: u8, b: u8, text: &str) -> String {
     format!("\x1b[38;2;{};{};{}m{}\x1b[0m", r, g, b, text)
 }
 
@@ -11,7 +11,7 @@ fn ansi_rgb(r: u8, g: u8, b: u8) -> String {
 
 fn hide_cursor() { print!("\x1b[?25l"); }
 fn show_cursor() { print!("\x1b[?25h"); }
-fn clear_line() { print!("\r\x1b[K"); }
+pub fn clear_line() { print!("\r\x1b[K"); }
 
 const COLORS: [(u8, u8, u8); 6] = [
     (255, 56, 168),
