@@ -810,7 +810,6 @@ pub fn install_with_lockfile(
     // ── Fresh install: run npm install (hidden), then scan for lockfile ───
     // The native resolver will replace this in a future release once metadata
     // caching and bulk-fetch are implemented.
-    use std::process::Stdio;
     // Set a dummy total so the CLI progress bar animates (indeterminate sweep).
     if let Some(p) = install_progress {
         p.total.store(100, Ordering::SeqCst);
@@ -821,11 +820,12 @@ pub fn install_with_lockfile(
     }
     let status = std::process::Command::new("npm")
         .args(["install", "--loglevel=error"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .current_dir(dir)
         .status()
         .map_err(|e| PmError::IoError(format!("Failed to run npm install: {e}")))?;
+    eprint!("\r\x1b[K");
     if !status.success() {
         if let Some(sig) = status.signal() {
             return Err(PmError::IoError(format!("npm install was interrupted (signal {sig})")));

@@ -340,55 +340,44 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
             let spinner_handle = std::thread::spawn(move || {
                 let start = std::time::Instant::now();
                 let mut i = 0usize;
-                let bar_width = 25usize;
+                let bar_width = 20usize;
                 while !done_clone.load(std::sync::atomic::Ordering::Relaxed) {
                     let secs = start.elapsed().as_secs_f64();
                     let d = progress_clone.done.load(std::sync::atomic::Ordering::Relaxed);
                     let t = progress_clone.total.load(std::sync::atomic::Ordering::Relaxed);
 
-                    let mut bar = String::with_capacity(bar_width);
+                    // \r moves to start of line, \x1b[K clears to end
                     if t > 0 {
                         let pct = (d as f64 / t as f64).min(1.0);
                         let filled = (pct * bar_width as f64) as usize;
+                        let sweep = (i / 2) % bar_width;
+                        let plain = d == 0;
+                        eprint!("\r  {}  [", crate::anim::rgb(0, 200, 255, "⬇"));
                         for j in 0..bar_width {
-                            if j < filled {
+                            let ch = if j < filled { "█" } else { "░" };
+                            let dist = if j >= sweep { j - sweep } else { bar_width - sweep + j };
+                            if plain && dist < 5 {
+                                let bright = ((5 - dist) as f64 / 5.0 * 200.0) as u8;
+                                eprint!("{}", crate::anim::rgb(bright, bright, 255, ch));
+                            } else if j < filled {
                                 let t2 = j as f64 / bar_width.max(1) as f64;
-                                let pulse = ((i as f64 * 0.05 + t2 * 5.0).sin() * 0.2 + 0.8) * if filled == 0 { 0.6 } else { 1.0 };
-                                let r = (80.0 + t2 * 150.0 * pulse) as u8;
-                                let g = (180.0 - t2 * 100.0 * pulse) as u8;
-                                let b = (220.0 - t2 * 80.0 * pulse) as u8;
-                                bar.push_str(&crate::anim::rgb(r, g, b, "█"));
-                            } else if j < filled + 3 {
-                                let dist = j - filled;
-                                let b = (40 + (20 - dist as u8 * 5).max(0).min(20)) as u8;
-                                bar.push_str(&crate::anim::rgb(b, b, b + 10, "░"));
+                                let r = (80.0 + t2 * 120.0) as u8;
+                                let g = (180.0 - t2 * 80.0) as u8;
+                                let b = (220.0 - t2 * 60.0) as u8;
+                                eprint!("{}", crate::anim::rgb(r, g, b, ch));
                             } else {
-                                bar.push_str(&crate::anim::rgb(30, 30, 40, "░"));
+                                eprint!("{}", crate::anim::rgb(50, 50, 65, ch));
                             }
                         }
-                        // Indeterminate sweep when d==0 (npm install phase): slide a
-                        // bright segment left-to-right to show activity.
-                        if d == 0 && t > 0 {
-                            let sweep = (i / 2) % bar_width;
-                            for j in 0..bar_width {
-                                let dist = if j >= sweep { j - sweep } else { bar_width - sweep + j };
-                                if dist < 5 {
-                                    let bright = ((5 - dist) as f64 / 5.0 * 200.0) as u8;
-                                    bar.replace_range(j..=j, &crate::anim::rgb(bright, bright, 255, "▓"));
-                                }
-                            }
-                        }
-                        eprint!("\r  {}  [{bar}] {:>3}%  {:.1}s",
-                            crate::anim::rgb(0, 200, 255, "⬇"),
-                            (pct * 100.0) as u8,
-                            secs);
+                        eprint!("\x1b[K] {:>3}%  {:.1}s", (pct * 100.0) as u8, secs);
                     } else {
                         let c = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][i % 10];
-                        eprint!("\r  {}  Installing dependencies...  {secs:.1}s", c);
+                        eprint!("\r\x1b[K  {}  Installing dependencies...  {secs:.1}s", c);
                     }
                     i += 1;
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }
+                eprint!("\r\x1b[K");
             });
 
             let install_result = klyron_pm::install_with_lockfile(&dir, frozen, None, Some(progress.as_ref()));
