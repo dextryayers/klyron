@@ -345,34 +345,41 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
                     let secs = install_start.elapsed().as_secs_f64();
                     let d = progress_clone.done.load(std::sync::atomic::Ordering::Relaxed);
                     let t = progress_clone.total.load(std::sync::atomic::Ordering::Relaxed);
-                    if t > 0 {
-                        let pct = (d as f64 / t as f64).min(1.0);
-                        let filled = (pct * bar_width as f64) as usize;
-                        let sweep = (i / 2) % bar_width;
-                        let plain = d == 0;
-                        eprint!("\r  {}  ", crate::anim::rgb(0, 200, 255, "⬇"));
-                        for j in 0..bar_width {
-                            let ch = if j < filled { "█" } else { "░" };
-                            let dist = if j >= sweep { j - sweep } else { bar_width - sweep + j };
-                            if plain && dist < 5 {
-                                let bright = ((5 - dist) as f64 / 5.0 * 200.0) as u8;
-                                eprint!("{}", crate::anim::rgb(bright, bright, 255, ch));
-                            } else if j < filled {
-                                let t2 = j as f64 / bar_width.max(1) as f64;
-                                let r = (80.0 + t2 * 120.0) as u8;
-                                let g = (180.0 - t2 * 80.0) as u8;
-                                let b = (220.0 - t2 * 60.0) as u8;
-                                eprint!("{}", crate::anim::rgb(r, g, b, ch));
-                            } else {
-                                eprint!("{}", crate::anim::rgb(50, 50, 65, ch));
-                            }
+                    let pct = if t > 0 { (d as f64 / t as f64).min(1.0) } else { 0.0 };
+                    let filled = (pct * bar_width as f64) as usize;
+                    let sweep = (i / 2) % bar_width;
+                    let plain = d == 0 || t == 0;
+                    eprint!("\r  {}  ", crate::anim::rgb(0, 200, 255, "⬇"));
+                    for j in 0..bar_width {
+                        let ch = if j < filled { "█" } else { "░" };
+                        let dist = if j >= sweep { j - sweep } else { bar_width - sweep + j };
+                        if plain && dist < 5 {
+                            let bright = ((5 - dist) as f64 / 5.0 * 200.0) as u8;
+                            eprint!("{}", crate::anim::rgb(bright, bright, 255, ch));
+                        } else if j < filled {
+                            let t2 = j as f64 / bar_width.max(1) as f64;
+                            let r = (80.0 + t2 * 120.0) as u8;
+                            let g = (180.0 - t2 * 80.0) as u8;
+                            let b = (220.0 - t2 * 60.0) as u8;
+                            eprint!("{}", crate::anim::rgb(r, g, b, ch));
+                        } else {
+                            eprint!("{}", crate::anim::rgb(50, 50, 65, ch));
                         }
-                        let msg = progress_clone.msg.lock().unwrap();
-                        eprint!("\x1b[K] {:>3}%  {}  {:.1}s",
-                            (pct * 100.0) as u8, *msg, secs);
+                    }
+                    let msg = progress_clone.msg.lock().unwrap();
+                    if t == 0 {
+                        if msg.is_empty() {
+                            eprint!("\x1b[K]  {:.1}s", secs);
+                        } else {
+                            eprint!("\x1b[K]  {}  {:.1}s", *msg, secs);
+                        }
                     } else {
-                        let c = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][i % 10];
-                        eprint!("\r\x1b[K  {}  Installing dependencies...  {:.1}s", c, secs);
+                        if msg.is_empty() {
+                            eprint!("\x1b[K] {:>3}%  {:.1}s", (pct * 100.0) as u8, secs);
+                        } else {
+                            eprint!("\x1b[K] {:>3}%  {}  {:.1}s",
+                                (pct * 100.0) as u8, *msg, secs);
+                        }
                     }
                     i += 1;
                     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -394,25 +401,34 @@ pub fn run_install(frozen: bool) -> anyhow::Result<()> {
 
             match &install_result {
                 Ok(()) => {
-                    let check = crate::anim::rgb(0, 230, 180, "✓");
-                    let line = "─".repeat(48);
-                    let border = crate::anim::rgb(80, 200, 180, &format!("  ┌{}┐", line));
-                    let title = crate::anim::rgb(80, 200, 180, &format!("  │ {}  {} │", check, "Install complete"));
-                    let empty = crate::anim::rgb(80, 200, 180, "  │                                                          │");
-                    let pkg_info = crate::anim::rgb(180, 220, 200, &format!("    Packages:  {}", if pkg_count > 0 { format!("{pkg_count}") } else { "—".into() }));
-                    let time_info = crate::anim::rgb(180, 220, 200, &format!("    Time:      {:.1}s", elapsed.as_secs_f64()));
-                    let lock_info = if dir.join("klyron.lock").exists() {
-                        crate::anim::rgb(180, 220, 200, "    Lockfile:  klyron.lock")
-                    } else {
-                        crate::anim::rgb(180, 220, 200, "    Lockfile:  —")
-                    };
-                    let border2 = crate::anim::rgb(80, 200, 180, &format!("  └{}┘", line));
-                    eprintln!("\n{}\n{}\n{}\n  {}\n  {}\n  {}\n{}",
-                        border, title, empty, pkg_info, time_info, lock_info, border2);
+                    let inner = [
+                        "  ✓  Install complete",
+                        "",
+                        &format!("  Packages:  {}", if pkg_count > 0 { format!("{pkg_count}") } else { "—".into() }),
+                        &format!("  Time:      {:.1}s", elapsed.as_secs_f64()),
+                        if dir.join("klyron.lock").exists() { "  Lockfile:  klyron.lock" } else { "  Lockfile:  —" },
+                    ];
+                    let w = inner.iter().map(|l| l.chars().count()).max().unwrap_or(20);
+                    let d = "─".repeat(w + 4);
+                    let pb = |s: &str, c: (u8,u8,u8)| crate::anim::rgb(c.0, c.1, c.2, s);
+                    let bc = (80u8, 200u8, 180u8);
+                    let tc = (180u8, 220u8, 200u8);
+                    let mut out = format!("\n{}", pb(&format!("  ┌{}┐", d), bc));
+                    out.push('\n');
+                    for (i, s) in inner.iter().enumerate() {
+                        let pad = w - s.chars().count();
+                        let line = format!("  │  {}{}  │", s, " ".repeat(pad));
+                        if s.is_empty() {
+                            out.push_str(&pb(&line, bc));
+                        } else {
+                            out.push_str(&pb(&line, tc));
+                        }
+                        out.push('\n');
+                    }
+                    out.push_str(&pb(&format!("  └{}┘", d), bc));
+                    eprintln!("{}", out);
                 }
                 Err(e) => {
-                    let cross = crate::anim::rgb(255, 56, 56, "✗");
-                    eprintln!("  {}  Install failed: {e}", cross);
                     anyhow::bail!("Install failed: {e}");
                 }
             }

@@ -692,7 +692,7 @@ impl InstallProgress {
         Self {
             done: AtomicUsize::new(0),
             total: AtomicUsize::new(total),
-            msg: Mutex::new(String::new()),
+            msg: Mutex::new("starting...".to_string()),
         }
     }
 
@@ -854,13 +854,15 @@ pub fn install_with_lockfile(
 
     // ── Fresh install: run npm install (hidden), then scan for lockfile ───
     if let Some(p) = install_progress {
-        p.set_phase(100, "installing packages via npm");
+        p.total.store(0, Ordering::SeqCst);
+        p.done.store(0, Ordering::SeqCst);
+        p.set_msg("installing packages via npm");
     }
     if let Some(ref cb) = progress {
         cb(0, 1, "running npm install");
     }
     let status = std::process::Command::new("npm")
-        .args(["install", "--loglevel=error"])
+        .args(["install", "--loglevel=error", "--no-audit", "--no-fund"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .current_dir(dir)
@@ -873,7 +875,6 @@ pub fn install_with_lockfile(
         return Err(PmError::IoError(format!("npm install failed (exit code {:?})", status.code())));
     }
     if let Some(p) = install_progress {
-        p.done.store(100, Ordering::SeqCst);
         p.set_msg("generating lockfile");
     }
 

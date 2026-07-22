@@ -775,11 +775,13 @@ pub fn run_postinstall_scripts(
         }
         let status = std::process::Command::new("sh")
             .args(["-c", script.as_str()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .current_dir(path)
             .status()
             .map_err(|e| anyhow::anyhow!("Failed to run postinstall for {name}: {e}"))?;
         if !status.success() {
-            eprintln!("  Warning: postinstall for {name} failed (exit: {})", status);
+            tracing::warn!("postinstall for {name} failed (exit: {})", status);
         }
         if let Some(p) = progress {
             p.done.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
