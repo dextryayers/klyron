@@ -725,8 +725,23 @@ pub fn install_with_lockfile(
         return Ok(());
     }
 
-    // No lockfile: resolve fresh from package.json using the registry directly
-    // (no npm delegation), download every package, then write a klyron.lock.
+    // No lockfile: if node_modules exists, scan it directly instead of
+    // re-resolving from the registry (avoids hundreds of HTTP requests).
+    if nm.join("package.json").exists() || nm.read_dir().map(|mut d| d.any(|e| e.is_ok())).unwrap_or(false) {
+        if let Some(ref cb) = progress {
+            cb(0, 1, "scanning existing node_modules");
+        }
+        let lock = scan_node_modules_for_lockfile(dir)?;
+        let bytes = lock.to_bytes()?;
+        std::fs::write(&lockfile_path, &bytes)?;
+        tracing::info!("Generated klyron.lock from existing node_modules ({} packages)", lock.packages.len());
+        let _ = scripts::run_postinstall_scripts(&nm);
+        return Ok(());
+    }
+
+    // No lockfile and no node_modules: resolve fresh from package.json using
+    // the registry directly (no npm delegation), download every package, then
+    // write a klyron.lock.
     let root_deps = read_root_dependencies(dir)?;
     match resolver::resolve_fresh_install("@klyron/root", "1.0.0", &root_deps) {
         Ok(resolved) => {
@@ -801,7 +816,12 @@ pub fn download_and_extract_tarball(url: &str, target_dir: &Path) -> Result<(), 
 }
 
 fn try_download_and_extract(url: &str, target_dir: &Path) -> Result<(), PmError> {
-    let response = reqwest::blocking::get(url)
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| PmError::IoError(format!("HTTP client: {e}")))?;
+    let response = client.get(url)
+        .send()
         .map_err(|e| PmError::IoError(format!("HTTP request failed: {e}")))?;
     if !response.status().is_success() {
         return Err(PmError::IoError(format!("HTTP {} for {url}", response.status())));
